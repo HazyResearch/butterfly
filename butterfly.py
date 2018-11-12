@@ -2,10 +2,8 @@ import math
 import operator
 import functools
 
-import numpy as np
 import torch
 from torch import nn
-from torch import optim
 
 from complex_utils import complex_mul, complex_matmul
 
