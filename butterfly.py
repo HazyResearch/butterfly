@@ -7,6 +7,8 @@ import torch
 from torch import nn
 from torch import optim
 
+from complex_utils import complex_mul, complex_matmul
+
 # from sparsemax import SparsemaxFunction
 # sm = SparsemaxFunction()
 
@@ -32,6 +34,7 @@ class Butterfly(nn.Module):
         self.size = size
         self.diagonal = diagonal
         self.complex = complex
+        self.mul_op = complex_mul if complex else operator.mul
         diag_shape = (size, 2) if complex else (size, )
         superdiag_shape = subdiag_shape = (size - diagonal, 2) if complex else (size - diagonal,)
         if diag is None:
@@ -69,10 +72,14 @@ class Butterfly(nn.Module):
         Return:
             output: (..., size) if real or (..., size, 2) if complex
         """
-        # TODO: Doesn't work for complex right now
-        output = self.diag * input_
-        output[..., self.diagonal:] += self.subdiag * input_[..., :-self.diagonal]
-        output[..., :-self.diagonal] += self.superdiag * input_[..., self.diagonal:]
+        if not self.complex:
+            output = self.diag * input_
+            output[..., self.diagonal:] += self.subdiag * input_[..., :-self.diagonal]
+            output[..., :-self.diagonal] += self.superdiag * input_[..., self.diagonal:]
+        else:
+            output = self.mul_op(self.diag, input_)
+            output[..., self.diagonal:, :] += self.mul_op(self.subdiag, input_[..., :-self.diagonal, :])
+            output[..., :-self.diagonal, :] += self.mul_op(self.superdiag, input_[..., self.diagonal:, :])
         # assert torch.allclose(output, input_ @ self.matrix().t())
         return output
 
@@ -82,19 +89,22 @@ class ButterflyProduct(nn.Module):
     are learnable.
     """
 
-    def __init__(self, size, n_terms=None):
+    def __init__(self, size, n_terms=None, complex=False):
         super().__init__()
         self.m = int(math.log2(size))
         assert size == 1 << self.m, "size must be a power of 2"
         if n_terms is None:
             n_terms = self.m
         self.n_terms = n_terms
-        self.butterflies = nn.ModuleList([Butterfly(size, diagonal=1 << i) for i in range(self.m)])
-        self.presoftmaxes = nn.Parameter(torch.randn((n_terms, self.m)))
+        self.complex = complex
+        self.matmul_op = complex_matmul if complex else operator.matmul
+        self.butterflies = nn.ModuleList([Butterfly(size, diagonal=1 << i, complex=complex)
+                                          for i in range(self.m)])
+        self.logit = nn.Parameter(torch.randn((n_terms, self.m)))
 
     def matrix(self):
-        prob = nn.functional.softmax(self.presoftmaxes, dim=-1)
-        # prob = sm(self.presoftmaxes)
+        prob = nn.functional.softmax(self.logit, dim=-1)
+        # prob = sm(self.logit)
         # matrix = None
         # for i in range(self.n_terms):
         #     term = (torch.stack([butterfly.matrix() for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
@@ -102,21 +112,63 @@ class ButterflyProduct(nn.Module):
         stack = torch.stack([butterfly.matrix() for butterfly in self.butterflies], dim=-1)
         matrices = [(stack * prob[i]).sum(dim=-1) for i in range(self.n_terms)]
         # matrix = torch.chain_matmul(matrices)  ## Only in Pytorch 1.0
-        matrix = functools.reduce(operator.matmul, matrices)
+        matrix = functools.reduce(self.matmul_op, matrices)
         return matrix
-
 
     def forward(self, input_):
         """
         Parameters:
-            input_: (..., size)
+            input_: (..., size) if real or (..., size, 2) if complex
         Return:
-            output: (..., size)
+            output: (..., size) if real or (..., size, 2) if complex
         """
-        prob = nn.functional.softmax(self.presoftmaxes, dim=-1)
-        # prob = sm(self.presoftmaxes)
+        prob = nn.functional.softmax(self.logit, dim=-1)
+        # prob = sm(self.logit)
         output = input_
         for i in range(self.n_terms)[::-1]:
             output = (torch.stack([butterfly(output) for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
         return output
 
+
+def test_butterfly():
+    size = 4
+    diag = torch.tensor([[1, 2], [2, 3], [3, 4], [4, 5]], dtype=torch.float)
+    subdiag = torch.tensor([[11, 12], [12, 13], [13, 14]], dtype=torch.float)
+    model = Butterfly(size, diagonal=1, complex=True, diag=diag, subdiag=subdiag, superdiag=subdiag)
+    matrix_real = torch.tensor([[ 1., 11.,  0.,  0.],
+                                [11.,  2., 12.,  0.],
+                                [ 0., 12.,  3., 13.],
+                                [ 0.,  0., 13.,  4.]])
+    matrix_imag = torch.tensor([[ 2., 12.,  0.,  0.],
+                                [12.,  3., 13.,  0.],
+                                [ 0., 13.,  4., 14.],
+                                [ 0.,  0., 14.,  5.]])
+    assert torch.allclose(model.matrix()[..., 0], matrix_real)
+    assert torch.allclose(model.matrix()[..., 1], matrix_imag)
+
+    batch_size = 3
+    x = torch.randn((batch_size, size, 2))
+    prod = torch.stack((x[..., 0] @ matrix_real.t() - x[..., 1] @ matrix_imag.t(),
+                        x[..., 0] @ matrix_imag.t() + x[..., 1] @ matrix_real.t()), dim=-1)
+    assert torch.allclose(model.forward(x), complex_matmul(x, model.matrix().transpose(0, 1)))
+
+
+def test_butterfly_product():
+    size = 4
+    model = ButterflyProduct(size, complex=True)
+    model.logit = nn.Parameter(torch.tensor([[1.0, float('-inf')], [float('-inf'), 1.0]]))
+    assert torch.allclose(model.matrix(),
+                          complex_matmul(model.butterflies[0].matrix(), model.butterflies[1].matrix()))
+
+    batch_size = 3
+    x = torch.randn((batch_size, size, 2))
+    assert torch.allclose(model.forward(x), complex_matmul(x, model.matrix().transpose(0, 1)))
+
+
+def main():
+    test_butterfly()
+    test_butterfly_product()
+
+
+if __name__ == '__main__':
+    main()

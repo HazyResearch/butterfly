@@ -1,4 +1,4 @@
-''' Utility functions for handling complex tensors: conjugate and complex_mult.
+''' Utility functions for handling complex tensors: conjugate and complex_mul.
 Pytorch (as of 1.0) does not support complex tensors, so we store them as
 float tensors where the last dimension is 2 (real and imaginary parts).
 '''
@@ -12,14 +12,14 @@ def conjugate(X):
     return X * torch.tensor((1, -1), dtype=X.dtype, device=X.device)
 
 
-def complex_mult(X, Y):
+def complex_mul(X, Y):
     assert X.shape[-1] == 2 and Y.shape[-1] == 2, 'Last dimension must be 2'
     return torch.stack(
         (X[..., 0] * Y[..., 0] - X[..., 1] * Y[..., 1],
          X[..., 0] * Y[..., 1] + X[..., 1] * Y[..., 0]),
         dim=-1)
 
-def complex_mm(X, Y):
+def complex_matmul(X, Y):
     """Multiply two complex matrices.
     Parameters:
        X: (..., n, m, 2)
@@ -27,7 +27,7 @@ def complex_mm(X, Y):
     Return:
        Z: (..., n, p, 2)
     """
-    return complex_mult(X.unsqueeze(-2), Y.unsqueeze(-4)).sum(dim=-3)
+    return complex_mul(X.unsqueeze(-2), Y.unsqueeze(-4)).sum(dim=-3)
 
 def test_complex_mm():
     n = 5
@@ -35,12 +35,12 @@ def test_complex_mm():
     p = 4
     X = torch.rand(n, m, 2)
     Y = torch.rand(m, p, 2)
-    Z = complex_mm(X, Y)
+    Z = complex_matmul(X, Y)
     assert Z.shape == (n, p, 2)
     batch_size = 3
     X = torch.rand(batch_size, n, m, 2)
     Y = torch.rand(batch_size, m, p, 2)
-    Z = complex_mm(X, Y)
+    Z = complex_matmul(X, Y)
     assert Z.shape == (batch_size, n, p, 2)
     X_np = X.numpy().view('complex64').squeeze(-1)
     Y_np = Y.numpy().view('complex64').squeeze(-1)
