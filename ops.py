@@ -27,17 +27,18 @@ def polymatmul(A, B):
     return result
 
 
-def ops_transpose_mult(a, b, c, p0, pm1, v):
+def ops_transpose_mult(a, b, c, p0, p1, v):
     """Fast algorithm to multiply P^T v where P is the matrix of coefficients of
     OPs, specified by the coefficients a, b, c, and the starting polynomials p0,
-    p_{-1}.
-    In particular, the recurrence is P_{n+1}(x) = (a[n] x + b[n]) P_n(x) + c[n] P_{n-1}(x).
+    p_1.
+    In particular, the recurrence is
+    P_{n+2}(x) = (a[n] x + b[n]) P_{n+1}(x) + c[n] P_n(x).
     Parameters:
         a: array of length n
         b: array of length n
         c: array of length n
         p0: real number representing P_0(x).
-        pm1: pair of real numbers representing P_{-1}(x).
+        p1: pair of real numbers representing P_1(x).
         v: array of length n
     Return:
         result: P^T v.
@@ -58,7 +59,7 @@ def ops_transpose_mult(a, b, c, p0, pm1, v):
     for i in range(1, m + 1):
         T[i] = polymatmul(T[i - 1][1::2], T[i - 1][::2])
     # Check that T is computed correctly
-    P_init = torch.tensor([[p0, 0], pm1], dtype=torch.float)  # [p_1, p_0]
+    P_init = torch.tensor([p1, [p0, 0]], dtype=torch.float)  # [p_1, p_0]
     P_init = P_init.unsqueeze(0).unsqueeze(-2)
     # These should be the polynomials P_{n+1} and P_n
     Pnp1n = polymatmul(T[m], P_init).squeeze()
@@ -71,7 +72,7 @@ def ops_transpose_mult(a, b, c, p0, pm1, v):
     for i in range(1, m):
         S[i] = polymatmul(S[i - 1][1::2], T[i][::2])
         S[i][:, :, :, :S[i - 1].shape[-1]] += S[i - 1][::2]
-    result = polymatmul(S[m - 1], P_init)[:, 0, :, :n].squeeze()
+    result = polymatmul(S[m - 1], P_init)[:, 1, :, :n].squeeze()
     return result
 
 
@@ -109,7 +110,6 @@ def legendre_transpose_mult_slow(v):
     return P.t() @ v
 
 
-
 def ops_transpose_mult_test():
     n = 8
     v = torch.randn(n)
@@ -119,6 +119,10 @@ def ops_transpose_mult_test():
     assert torch.allclose(result, result_slow)
     # Legendre polynomials
     n_range = torch.arange(n, dtype=torch.float)
-    result = ops_transpose_mult((2 * n_range + 1) / (n_range + 1), torch.zeros(n), -n_range / (n_range + 1), 1.0, (0.0, 1.0), v)
+    result = ops_transpose_mult((2 * n_range + 3) / (n_range + 2), torch.zeros(n), -(n_range + 1) / (n_range + 2), 1.0, (0.0, 1.0), v)
     result_slow = legendre_transpose_mult_slow(v)
     assert torch.allclose(result, result_slow)
+
+
+if __name__ == '__main__':
+    ops_transpose_mult_test()
