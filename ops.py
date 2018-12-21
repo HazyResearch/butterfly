@@ -6,7 +6,7 @@ from numpy.polynomial import chebyshev, legendre
 
 
 def polymatmul(A, B):
-    """Multiply two matrices of polynomials
+    """Batch-multiply two matrices of polynomials
     Parameters:
         A: (N, batch_size, n, m, d1)
         B: (batch_size, m, p, d2)
@@ -21,13 +21,17 @@ def polymatmul(A, B):
     batch_size_, m_, p, d2 = B.shape
     assert batch_size == batch_size_
     assert m == m_
-    # Need to transpose B
-    Bt = B.transpose(1, 2)
-    # TODO: Figure out how to batch this. Maybe I'll need to use my own FFT-based multiplication
-    result = torch.stack([
-        F.conv1d(A[:, i].reshape(-1, m, d1), Bt[i].flip(-1), padding=Bt[i].shape[-1] - 1).reshape(N, n, p, -1)
-        for i in range(batch_size)
-    ], dim=1)
+    # Naive implementation using conv1d and loop, slower but easier to understand
+    # Bt_flipped = B.transpose(1, 2).flip(-1)
+    # result = torch.stack([
+    #     F.conv1d(A[:, i].reshape(-1, m, d1), Bt_flipped[i], padding=d2 - 1).reshape(N, n, p, -1)
+    #     for i in range(batch_size)
+    # ], dim=1)
+    # Batched implementation using grouped convolution, faster
+    result = F.conv1d(A.transpose(1, 2).reshape(N * n, batch_size * m, d1),
+                      B.transpose(1, 2).reshape(batch_size * p, m, d2).flip(-1),
+                      padding=d2 - 1,
+                      groups=batch_size).reshape(N, n, batch_size, p, d1 + d2 - 1).transpose(1, 2)
     return result.squeeze(0) if unsqueezed else result
 
 
@@ -62,11 +66,12 @@ def ops_transpose_mult(a, b, c, p0, p1, v):
     T[0][:, 1, 0, 0] = 1.0
     for i in range(1, m + 1):
         T[i] = polymatmul(T[i - 1][1::2], T[i - 1][::2])
-    # Check that T is computed correctly
+
     P_init = torch.tensor([p1, [p0, 0.0]], dtype=torch.float)  # [p_1, p_0]
     P_init = P_init.unsqueeze(0).unsqueeze(-2)
+    # Check that T is computed correctly
     # These should be the polynomials P_{n+1} and P_n
-    Pnp1n = polymatmul(T[m], P_init).squeeze()
+    # Pnp1n = polymatmul(T[m], P_init).squeeze()
 
     # Bottom-up multiplication algorithm to avoid recursion
     S = [None] * m
@@ -76,7 +81,7 @@ def ops_transpose_mult(a, b, c, p0, p1, v):
     for i in range(1, m):
         S[i] = polymatmul(S[i - 1][:, 1::2], T[i][::2])
         S[i][:, :, :, :, :S[i - 1].shape[-1]] += S[i - 1][:, ::2]
-    result = polymatmul(S[m - 1], P_init)[:, :, 1, :, :n].squeeze(1).squeeze(1)
+    result = polymatmul(S[m - 1][:, :, [1], :, :n-1], P_init).squeeze(1).squeeze(1).squeeze(1)
     return result
 
 
