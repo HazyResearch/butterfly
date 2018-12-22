@@ -37,16 +37,19 @@ class Butterfly(nn.Module):
         superdiag_shape = subdiag_shape = (size - diagonal, 2) if complex else (size - diagonal,)
         if diag is None:
             self.diag = nn.Parameter(torch.randn(diag_shape))
+            # self.diag = nn.Parameter(torch.ones(diag_shape))
         else:
             assert diag.shape == diag_shape, f'diag must have shape {diag_shape}'
             self.diag = diag
         if subdiag is None:
             self.subdiag = nn.Parameter(torch.randn(subdiag_shape))
+            # self.subdiag = nn.Parameter(torch.ones(subdiag_shape))
         else:
             assert subdiag.shape == subdiag_shape, f'subdiag must have shape {subdiag_shape}'
             self.subdiag = subdiag
         if superdiag is None:
             self.superdiag = nn.Parameter(torch.randn(superdiag_shape))
+            # self.superdiag = nn.Parameter(torch.ones(superdiag_shape))
         else:
             assert superdiag.shape == superdiag_shape, f'superdiag must have shape {superdiag_shape}'
             self.superdiag = superdiag
@@ -87,7 +90,7 @@ class ButterflyProduct(nn.Module):
     are learnable.
     """
 
-    def __init__(self, size, n_terms=None, complex=False):
+    def __init__(self, size, n_terms=None, complex=False, fixed_order=False):
         super().__init__()
         self.m = int(math.log2(size))
         assert size == 1 << self.m, "size must be a power of 2"
@@ -97,21 +100,26 @@ class ButterflyProduct(nn.Module):
         self.complex = complex
         self.matmul_op = complex_matmul if complex else operator.matmul
         self.butterflies = nn.ModuleList([Butterfly(size, diagonal=1 << i, complex=complex)
-                                          for i in range(self.m)])
-        self.logit = nn.Parameter(torch.randn((n_terms, self.m)))
+                                          for i in range(self.m)[::-1]])
+        self.fixed_order = fixed_order
+        if not fixed_order:
+            self.logit = nn.Parameter(torch.randn((n_terms, self.m)))
 
     def matrix(self):
-        prob = nn.functional.softmax(self.logit, dim=-1)
-        # prob = sm(self.logit)
-        # matrix = None
-        # for i in range(self.n_terms):
-        #     term = (torch.stack([butterfly.matrix() for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
-        #     matrix = term if matrix is None else term @ matrix
-        stack = torch.stack([butterfly.matrix() for butterfly in self.butterflies], dim=-1)
-        matrices = [(stack * prob[i]).sum(dim=-1) for i in range(self.n_terms)]
-        # matrix = torch.chain_matmul(matrices)  ## Only in Pytorch 1.0
-        matrix = functools.reduce(self.matmul_op, matrices)
-        return matrix
+        if self.fixed_order:
+            matrices = [butterfly.matrix() for butterfly in self.butterflies]
+            return functools.reduce(self.matmul_op, matrices)
+        else:
+            prob = nn.functional.softmax(self.logit, dim=-1)
+            # prob = sm(self.logit)
+            # matrix = None
+            # for i in range(self.n_terms):
+            #     term = (torch.stack([butterfly.matrix() for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
+            #     matrix = term if matrix is None else term @ matrix
+            stack = torch.stack([butterfly.matrix() for butterfly in self.butterflies], dim=-1)
+            matrices = [(stack * prob[i]).sum(dim=-1) for i in range(self.n_terms)]
+            # return torch.chain_matmul(matrices)  ## Doesn't work for complex
+            return functools.reduce(self.matmul_op, matrices)
 
     def forward(self, input_):
         """
@@ -120,12 +128,18 @@ class ButterflyProduct(nn.Module):
         Return:
             output: (..., size) if real or (..., size, 2) if complex
         """
-        prob = nn.functional.softmax(self.logit, dim=-1)
-        # prob = sm(self.logit)
-        output = input_
-        for i in range(self.n_terms)[::-1]:
-            output = (torch.stack([butterfly(output) for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
-        return output
+        if self.fixed_order:
+            output = input_
+            for butterfly in self.butterflies[::-1]:
+                output = self.butterflies(output)
+            return output
+        else:
+            prob = nn.functional.softmax(self.logit, dim=-1)
+            # prob = sm(self.logit)
+            output = input_
+            for i in range(self.n_terms)[::-1]:
+                output = (torch.stack([butterfly(output) for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
+            return output
 
 
 def test_butterfly():
