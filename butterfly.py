@@ -131,7 +131,7 @@ class ButterflyProduct(nn.Module):
         if self.fixed_order:
             output = input_
             for butterfly in self.butterflies[::-1]:
-                output = self.butterflies(output)
+                output = butterfly(output)
             return output
         else:
             prob = nn.functional.softmax(self.logit, dim=-1)
