@@ -95,9 +95,13 @@ if __name__ == '__main__':
     parser.add_argument('--nsteps', type=int, default=200, help='Number of steps per epoch')
     parser.add_argument('--nmaxepochs', type=int, default=200, help='Maximum number of epochs')
     parser.add_argument('--result-dir', type=str, default='./results', help='Directory to store results')
+    parser.add_argument('--nthreads', type=int, default=1, help='Number of CPU threads per job')
     parser.add_argument('--smoke-test', action='store_true', help='Finish quickly for testing')
     args = parser.parse_args()
     N_STEPS_PER_EPOCH = args.nsteps
+
+    # We'll use multiple processes so disable MKL multithreading
+    os.environ['MKL_NUM_THREADS'] = str(args.nthreads)
 
     ray.init()
 
@@ -107,6 +111,7 @@ if __name__ == '__main__':
         local_dir=args.result_dir,
         num_samples=args.ntrials,
         checkpoint_at_end=True,
+        resources_per_trial={'cpu': args.nthreads, 'gpu': 0},
         stop={
             'training_iteration': 1 if args.smoke_test else 99999,
             'negative_loss': -1e-8
