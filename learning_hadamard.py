@@ -71,7 +71,7 @@ class TrainHadamardFactor(PytorchTrainable):
 
     def _setup(self, config):
         torch.manual_seed(config['seed'])
-        self.model = ButterflyProduct(size=config['size'])
+        self.model = ButterflyProduct(size=config['size'], fixed_order=True)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         # detach to set H.requires_grad = False
         self.hadamard_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
@@ -126,6 +126,7 @@ if __name__ == '__main__':
     trials = run_experiments(experiment, scheduler=ahb)
     losses = [-trial.last_result['negative_loss'] for trial in trials]
     print(np.array(losses))
+    print(np.sort(losses))
 
     with open(args.result_dir + '/' + f'Hadamard_factorization_{args.size}/trials.pkl', 'wb') as f:
         pickle.dump(trials, f)
