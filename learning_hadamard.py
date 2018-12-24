@@ -104,7 +104,7 @@ if __name__ == '__main__':
     experiment = Experiment(
         name=f'Hadamard_factorization_{args.size}',
         run=TrainHadamardFactor,
-        local_dir='./results',
+        local_dir=args.result_dir,
         num_samples=args.ntrials,
         checkpoint_at_end=True,
         stop={
@@ -122,10 +122,10 @@ if __name__ == '__main__':
     losses = [-trial.last_result['negative_loss'] for trial in trials]
     print(np.array(losses))
 
-    with open('trials.pkl', 'wb') as f:
+    with open(args.result_dir + '/' + f'Hadamard_factorization_{args.size}/trials.pkl', 'wb') as f:
         pickle.dump(trials, f)
 
-    # with open('trials.pkl', 'rb') as f:
+    # with open(args.result_dir + '/' + f'Hadamard_factorization_{args.size}/trials.pkl', 'wb') as f:
     #     trials = pickle.load(f)
 
     # best_trial = max(trials, key=lambda trial: trial.last_result['negative_loss'])
