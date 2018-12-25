@@ -1,6 +1,7 @@
 import argparse
 import math
 import os
+from pathlib import Path
 import pickle
 import random
 
@@ -72,12 +73,14 @@ class TrainHadamardFactor(PytorchTrainable):
     def _setup(self, config):
         torch.manual_seed(config['seed'])
         self.model = ButterflyProduct(size=config['size'], fixed_order=True)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        # self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.optimizer = optim.SGD(self.model.parameters(), lr=config['lr'], momentum=config['momentum'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
         # detach to set H.requires_grad = False
         self.hadamard_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
 
     def _train(self):
-        for _ in range(N_STEPS_PER_EPOCH):
+        for _ in range(self.n_steps_per_epoch):
             self.optimizer.zero_grad()
             y = self.model.matrix()
             loss = nn.functional.mse_loss(y, self.hadamard_matrix)
@@ -86,7 +89,7 @@ class TrainHadamardFactor(PytorchTrainable):
         return {'negative_loss': -loss.item()}
 
 
-# args_strings = ['--size', '8']  # for dirty testing with ipython
+# argv = ['--size', '8']  # for dirty testing with ipython
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Learn to factor Hadamard matrix')
@@ -98,15 +101,13 @@ if __name__ == '__main__':
     parser.add_argument('--nthreads', type=int, default=1, help='Number of CPU threads per job')
     parser.add_argument('--smoke-test', action='store_true', help='Finish quickly for testing')
     args = parser.parse_args()
-    N_STEPS_PER_EPOCH = args.nsteps
 
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(args.nthreads)
 
-    ray.init()
-
+    experiment_name = f'Hadamard_factorization_fixed_order_{args.size}'
     experiment = Experiment(
-        name=f'Hadamard_factorization_{args.size}',
+        name=experiment_name,
         run=TrainHadamardFactor,
         local_dir=args.result_dir,
         num_samples=args.ntrials,
@@ -118,20 +119,27 @@ if __name__ == '__main__':
         },
         config={
             'size': args.size,
-            'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
-            'seed': sample_from(lambda spec: random.randint(0, 1 << 16))
+            'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-0)))),
+            'momentum': sample_from(lambda spec: random.uniform(0.0, 0.99)),
+            'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+            'n_steps_per_epoch': args.nsteps,
         },
     )
+
+    ray.init()
     ahb = AsyncHyperBandScheduler(reward_attr='negative_loss', max_t=args.nmaxepochs)
     trials = run_experiments(experiment, scheduler=ahb)
     losses = [-trial.last_result['negative_loss'] for trial in trials]
     print(np.array(losses))
     print(np.sort(losses))
 
-    with open(args.result_dir + '/' + f'Hadamard_factorization_{args.size}/trials.pkl', 'wb') as f:
+    checkpoint_path = Path(args.result_dir) / experiment_name
+    checkpoint_path.mkdir(parents=True, exist_ok=True)
+    checkpoint_path /= 'trial.pkl'
+    with checkpoint_path.open('wb') as f:
         pickle.dump(trials, f)
 
-    # with open(args.result_dir + '/' + f'Hadamard_factorization_{args.size}/trials.pkl', 'wb') as f:
+    # with checkpoint_path.open('wb') as f:
     #     trials = pickle.load(f)
 
     # best_trial = max(trials, key=lambda trial: trial.last_result['negative_loss'])
