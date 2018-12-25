@@ -73,8 +73,8 @@ class TrainHadamardFactor(PytorchTrainable):
     def _setup(self, config):
         torch.manual_seed(config['seed'])
         self.model = ButterflyProduct(size=config['size'], fixed_order=True)
-        # self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
-        self.optimizer = optim.SGD(self.model.parameters(), lr=config['lr'], momentum=config['momentum'])
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        # self.optimizer = optim.SGD(self.model.parameters(), lr=config['lr'], momentum=config['momentum'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         # detach to set H.requires_grad = False
         self.hadamard_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
@@ -119,8 +119,8 @@ if __name__ == '__main__':
         },
         config={
             'size': args.size,
-            'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-0)))),
-            'momentum': sample_from(lambda spec: random.uniform(0.0, 0.99)),
+            'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+            # 'momentum': sample_from(lambda spec: random.uniform(0.0, 0.99)),
             'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
             'n_steps_per_epoch': args.nsteps,
         },
