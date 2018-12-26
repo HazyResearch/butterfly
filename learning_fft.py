@@ -222,7 +222,7 @@ if __name__ == '__main__':
     with checkpoint_path.open('wb') as f:
         pickle.dump(trials, f)
 
-    # with checkpoint_path.open('wb') as f:
+    # with checkpoint_path.open('rb') as f:
     #     trials = pickle.load(f)
 
     # best_trial = max(trials, key=lambda trial: trial.last_result['negative_loss'])

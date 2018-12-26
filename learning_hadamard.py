@@ -90,7 +90,7 @@ class TrainableHadamardFactorSoftmax(PytorchTrainable):
 
     def _setup(self, config):
         torch.manual_seed(config['seed'])
-        self.model = ButterflyProduct(size=config['size'], fixed_order=config['fixed_order'])
+        self.model = ButterflyProduct(size=config['size'], fixed_order=False)
         self.semantic_loss_weight = config['semantic_loss_weight']
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
@@ -240,7 +240,7 @@ if __name__ == '__main__':
     with checkpoint_path.open('wb') as f:
         pickle.dump(trials, f)
 
-    # with checkpoint_path.open('wb') as f:
+    # with checkpoint_path.open('rb') as f:
     #     trials = pickle.load(f)
 
     # best_trial = max(trials, key=lambda trial: trial.last_result['negative_loss'])
