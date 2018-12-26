@@ -177,7 +177,6 @@ def hadamard_factorization_softmax(argv):
         config={
             'size': args.size,
             'fixed_order': args.fixed_order,
-            'softmax': args.softmax,
             'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
             # 'momentum': sample_from(lambda spec: random.uniform(0.0, 0.99)),
             'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),

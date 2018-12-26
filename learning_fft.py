@@ -71,6 +71,44 @@ class TrainableFftFactorFixedOrder(PytorchTrainable):
         return {'negative_loss': -loss.item()}
 
 
+class TrainableFftFactorSoftmax(PytorchTrainable):
+
+    def _setup(self, config):
+        size = config['size']
+        torch.manual_seed(config['seed'])
+        self.model = ButterflyProduct(size=size, complex=True, fixed_order=False)
+        self.semantic_loss_weight = config['semantic_loss_weight']
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        self.dft_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.br_perm = torch.tensor(bitreversal_permutation(size))
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model.matrix()[:, self.br_perm]
+            loss = nn.functional.mse_loss(y, self.dft_matrix)
+            semantic_loss = semantic_loss_exactly_one(nn.functional.softmax(self.model.logit, dim=-1), dim=-1)
+            total_loss = loss + self.semantic_loss_weight * semantic_loss.mean()
+            total_loss.backward()
+            self.optimizer.step()
+        # Stop early if loss is NaN
+        is_nan = bool(torch.isnan(loss))
+        return {'negative_loss': -loss.item() if not is_nan else float('-inf'), 'is_nan': is_nan}
+
+
+class TrainableFftFactorSparsemax(TrainableFftFactorFixedOrder):
+
+    def _setup(self, config):
+        size = config['size']
+        torch.manual_seed(config['seed'])
+        self.model = ButterflyProduct(size=size, complex=True, fixed_order=False, softmax='sparsemax')
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        self.dft_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.br_perm = torch.tensor(bitreversal_permutation(size))
+
+
 def fft_factorization_fixed_order(argv):
     parser = argparse.ArgumentParser(description='Learn to factor Fft matrix')
     parser.add_argument('--size', type=int, default=8, help='Size of matrix to factor, must be power of 2')
@@ -95,7 +133,6 @@ def fft_factorization_fixed_order(argv):
         config={
             'size': args.size,
             'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
-            # 'momentum': sample_from(lambda spec: random.uniform(0.0, 0.99)),
             'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
             'n_steps_per_epoch': args.nsteps,
         },
@@ -103,10 +140,73 @@ def fft_factorization_fixed_order(argv):
     return experiment, args
 
 
+def fft_factorization_softmax(argv):
+    parser = argparse.ArgumentParser(description='Learn to factor Fft matrix')
+    parser.add_argument('--size', type=int, default=8, help='Size of matrix to factor, must be power of 2')
+    parser.add_argument('--ntrials', type=int, default=20, help='Number of trials for hyperparameter tuning')
+    parser.add_argument('--nsteps', type=int, default=200, help='Number of steps per epoch')
+    parser.add_argument('--nmaxepochs', type=int, default=200, help='Maximum number of epochs')
+    parser.add_argument('--result-dir', type=str, default='./results', help='Directory to store results')
+    parser.add_argument('--nthreads', type=int, default=1, help='Number of CPU threads per job')
+    parser.add_argument('--smoke-test', action='store_true', help='Finish quickly for testing')
+    args = parser.parse_args(argv)
+    experiment = Experiment(
+        name=f'Fft_factorization_softmax_{args.size}',
+        run=TrainableFftFactorSoftmax,
+        local_dir=args.result_dir,
+        num_samples=args.ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': args.nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if args.smoke_test else 99999,
+            'is_nan': True,
+            'negative_loss': -1e-8
+        },
+        config={
+            'size': args.size,
+            'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+            'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+            'semantic_loss_weight': sample_from(lambda spec: math.exp(random.uniform(math.log(5e-4), math.log(5e-1)))),
+            'n_steps_per_epoch': args.nsteps,
+        },
+    )
+    return experiment, args
+
+
+def fft_factorization_sparsemax(argv):
+    parser = argparse.ArgumentParser(description='Learn to factor Fft matrix')
+    parser.add_argument('--size', type=int, default=8, help='Size of matrix to factor, must be power of 2')
+    parser.add_argument('--ntrials', type=int, default=20, help='Number of trials for hyperparameter tuning')
+    parser.add_argument('--nsteps', type=int, default=200, help='Number of steps per epoch')
+    parser.add_argument('--nmaxepochs', type=int, default=200, help='Maximum number of epochs')
+    parser.add_argument('--result-dir', type=str, default='./results', help='Directory to store results')
+    parser.add_argument('--nthreads', type=int, default=1, help='Number of CPU threads per job')
+    parser.add_argument('--smoke-test', action='store_true', help='Finish quickly for testing')
+    args = parser.parse_args(argv)
+    experiment = Experiment(
+        name=f'Fft_factorization_sparsemax_{args.size}',
+        run=TrainableFftFactorSparsemax,
+        local_dir=args.result_dir,
+        num_samples=args.ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': args.nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if args.smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config={
+            'size': args.size,
+            'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+            'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+            'n_steps_per_epoch': args.nsteps,
+        },
+    )
+    return experiment, args
+
 if __name__ == '__main__':
-    experiment, args = fft_factorization_fixed_order(sys.argv[1:])
+    # experiment, args = fft_factorization_fixed_order(sys.argv[1:])
     # experiment, args = fft_factorization_softmax(sys.argv[1:])
-    # experiment, args = fft_factorization_sparsemax(sys.argv[1:])
+    experiment, args = fft_factorization_sparsemax(sys.argv[1:])
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(args.nthreads)
     ray.init()
