@@ -26,7 +26,7 @@ def project_simplex(v, z=1.0):
     # rho = (v_sorted - cumsum_divided > 0).nonzero()[-1]
     cond = (v_sorted - cumsum_divided > 0).type(v.dtype)
     rho = (cond * range_).argmax(dim=-1)
-    tau = cumsum_divided[range(v.dim()), rho]
+    tau = cumsum_divided[range(v.shape[0]), rho]
     return torch.clamp(v - tau.unsqueeze(-1), min=0)
 
 

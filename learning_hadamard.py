@@ -97,7 +97,6 @@ class TrainableHadamardFactorSoftmax(PytorchTrainable):
         self.model = ButterflyProduct(size=config['size'], fixed_order=config['fixed_order'])
         self.semantic_loss_weight = config['semantic_loss_weight']
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
-        # self.optimizer = optim.SGD(self.model.parameters(), lr=config['lr'], momentum=config['momentum'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         # detach to set H.requires_grad = False
         self.hadamard_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
@@ -112,6 +111,17 @@ class TrainableHadamardFactorSoftmax(PytorchTrainable):
             total_loss.backward()
             self.optimizer.step()
         return {'negative_loss': -loss.item()}
+
+
+class TrainableHadamardFactorSparsemax(TrainableHadamardFactorFixedOrder):
+
+    def _setup(self, config):
+        torch.manual_seed(config['seed'])
+        self.model = ButterflyProduct(size=config['size'], softmax='sparsemax')
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        # detach to set H.requires_grad = False
+        self.hadamard_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
 
 
 def hadamard_factorization_fixed_order(argv):
@@ -150,7 +160,6 @@ def hadamard_factorization_softmax(argv):
     parser = argparse.ArgumentParser(description='Learn to factor Hadamard matrix')
     parser.add_argument('--size', type=int, default=8, help='Size of matrix to factor, must be power of 2')
     parser.add_argument('--fixed-order', action='store_true', help='Whether the order of the butterfly matrices are fixed or learned')
-    parser.add_argument('--softmax', choices=['softmax', 'sparsemax'], default='softmax', help='Whether to use softmax or sparsemax')
     parser.add_argument('--ntrials', type=int, default=20, help='Number of trials for hyperparameter tuning')
     parser.add_argument('--nsteps', type=int, default=200, help='Number of steps per epoch')
     parser.add_argument('--nmaxepochs', type=int, default=200, help='Maximum number of epochs')
@@ -183,11 +192,44 @@ def hadamard_factorization_softmax(argv):
     return experiment, args
 
 
+def hadamard_factorization_sparsemax(argv):
+    parser = argparse.ArgumentParser(description='Learn to factor Hadamard matrix')
+    parser.add_argument('--size', type=int, default=8, help='Size of matrix to factor, must be power of 2')
+    parser.add_argument('--ntrials', type=int, default=20, help='Number of trials for hyperparameter tuning')
+    parser.add_argument('--nsteps', type=int, default=200, help='Number of steps per epoch')
+    parser.add_argument('--nmaxepochs', type=int, default=200, help='Maximum number of epochs')
+    parser.add_argument('--result-dir', type=str, default='./results', help='Directory to store results')
+    parser.add_argument('--nthreads', type=int, default=1, help='Number of CPU threads per job')
+    parser.add_argument('--smoke-test', action='store_true', help='Finish quickly for testing')
+    args = parser.parse_args(argv)
+    experiment = Experiment(
+        name=f'Hadamard_factorization_sparsemax_{args.size}',
+        run=TrainableHadamardFactorSparsemax,
+        local_dir=args.result_dir,
+        num_samples=args.ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': args.nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if args.smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config={
+            'size': args.size,
+            'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+            # 'momentum': sample_from(lambda spec: random.uniform(0.0, 0.99)),
+            'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+            'n_steps_per_epoch': args.nsteps,
+        },
+    )
+    return experiment, args
+
+
 # argv = ['--size', '8']  # for dirty testing with ipython
 
 if __name__ == '__main__':
     # experiment, args = hadamard_factorization_fixed_order(sys.argv[1:])
-    experiment, args = hadamard_factorization_softmax(sys.argv[1:])
+    # experiment, args = hadamard_factorization_softmax(sys.argv[1:])
+    experiment, args = hadamard_factorization_sparsemax(sys.argv[1:])
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(args.nthreads)
     ray.init()

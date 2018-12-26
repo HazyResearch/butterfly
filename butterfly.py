@@ -6,9 +6,7 @@ import torch
 from torch import nn
 
 from complex_utils import complex_mul, complex_matmul
-
-# from sparsemax import SparsemaxFunction
-# sm = SparsemaxFunction()
+from sparsemax import sparsemax
 
 
 class Butterfly(nn.Module):
@@ -90,7 +88,7 @@ class ButterflyProduct(nn.Module):
     are learnable.
     """
 
-    def __init__(self, size, n_terms=None, complex=False, fixed_order=False):
+    def __init__(self, size, n_terms=None, complex=False, fixed_order=False, softmax='softmax'):
         super().__init__()
         self.m = int(math.log2(size))
         assert size == 1 << self.m, "size must be a power of 2"
@@ -99,6 +97,11 @@ class ButterflyProduct(nn.Module):
         self.n_terms = n_terms
         self.complex = complex
         self.matmul_op = complex_matmul if complex else operator.matmul
+        assert softmax in ['softmax', 'sparsemax']
+        if softmax == 'softmax':
+            self.softmax_fn = lambda logit: nn.functional.softmax(logit, dim=-1)
+        else:
+            self.softmax_fn = sparsemax
         self.butterflies = nn.ModuleList([Butterfly(size, diagonal=1 << i, complex=complex)
                                           for i in range(self.m)[::-1]])
         self.fixed_order = fixed_order
@@ -110,8 +113,7 @@ class ButterflyProduct(nn.Module):
             matrices = [butterfly.matrix() for butterfly in self.butterflies]
             return functools.reduce(self.matmul_op, matrices)
         else:
-            prob = nn.functional.softmax(self.logit, dim=-1)
-            # prob = sm(self.logit)
+            prob = self.softmax_fn(self.logit)
             # matrix = None
             # for i in range(self.n_terms):
             #     term = (torch.stack([butterfly.matrix() for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
@@ -134,8 +136,7 @@ class ButterflyProduct(nn.Module):
                 output = butterfly(output)
             return output
         else:
-            prob = nn.functional.softmax(self.logit, dim=-1)
-            # prob = sm(self.logit)
+            prob = self.softmax_fn(self.logit)
             output = input_
             for i in range(self.n_terms)[::-1]:
                 output = (torch.stack([butterfly(output) for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
