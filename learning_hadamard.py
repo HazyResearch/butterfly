@@ -44,10 +44,6 @@ def hadamard_test():
     M.butterflies[1] = M1
     assert torch.allclose(M.matrix(), H)
 
-# size = 64
-# H = torch.tensor(hadamard(size), dtype=torch.float)
-# H = H.detach()  # to set H.requires_grad = False
-
 
 # semantic_loss_weight = 0.05
 # model = ButterflyProduct(size, fixed_order=True)
