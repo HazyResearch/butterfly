@@ -4,13 +4,17 @@ import numpy as np
 
 result_dir = 'results'
 experiment_names = [[f'Hadamard_factorization_fixed_order_{size}' for size in [8, 16, 32, 64, 128, 256]]]
-experiment_names += [[f'Hadamard_factorization_softmax_{size}' for size in [8, 16, 32, 64, 128]]]
+experiment_names += [[f'Hadamard_factorization_softmax_{size}' for size in [8, 16, 32, 64, 128, 256]]]
 experiment_names += [[f'Hadamard_factorization_sparsemax_{size}' for size in [8, 16, 32, 64, 128]]]
 experiment_names += [[f'Fft_factorization_fixed_order_{size}' for size in [8, 16, 32, 64, 128]]]
 experiment_names += [[f'Fft_factorization_softmax_{size}' for size in [8, 16, 32, 64, 128]]]
-experiment_names += [[f'Fft_factorization_sparsemax_{size}' for size in [8, 16, 32, 64]]]
+experiment_names += [[f'Fft_factorization_sparsemax_{size}' for size in [8, 16, 32, 64, 128]]]
+experiment_names += [[f'Fft_factorization_sparsemax_no_perm_{size}' for size in [8, 16, 32]]]
+experiment_names += [[f'Fft_factorization_softmax_no_perm_{size}' for size in [8, 16, 32]]]
+experiment_names += [[f'Randn_factorization_softmax_no_perm_{size}' for size in [8, 16, 32]]]
 
 for experiment_names_ in experiment_names:
+    print(experiment_names_[0])
     best_loss = []
     for experiment_name in experiment_names_:
         checkpoint_path = Path(result_dir) / experiment_name / 'trial.pkl'

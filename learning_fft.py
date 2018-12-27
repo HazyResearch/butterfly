@@ -109,6 +109,58 @@ class TrainableFftFactorSparsemax(TrainableFftFactorFixedOrder):
         self.br_perm = torch.tensor(bitreversal_permutation(size))
 
 
+class TrainableFftFactorSparsemaxNoPerm(TrainableFftFactorSparsemax):
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model.matrix()
+            loss = nn.functional.mse_loss(y, self.dft_matrix)
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
+class TrainableFftFactorSoftmaxNoPerm(PytorchTrainable):
+
+    def _setup(self, config):
+        size = config['size']
+        torch.manual_seed(config['seed'])
+        self.model = ButterflyProduct(size=size, complex=True, fixed_order=False, softmax='softmax')
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model.matrix()
+            loss = nn.functional.mse_loss(y, self.target_matrix)
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
+class TrainableRandnFactorSoftmaxNoPerm(PytorchTrainable):
+
+    def _setup(self, config):
+        size = config['size']
+        torch.manual_seed(config['seed'])
+        self.model = ButterflyProduct(size=size, complex=False, fixed_order=False, softmax='softmax')
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        self.target_matrix = torch.rand(size, size, requires_grad=False)
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model.matrix()
+            loss = nn.functional.mse_loss(y, self.target_matrix)
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
 def fft_factorization_fixed_order(argv):
     parser = argparse.ArgumentParser(description='Learn to factor Fft matrix')
     parser.add_argument('--size', type=int, default=8, help='Size of matrix to factor, must be power of 2')
@@ -203,10 +255,106 @@ def fft_factorization_sparsemax(argv):
     )
     return experiment, args
 
+
+def fft_factorization_sparsemax_no_perm(argv):
+    parser = argparse.ArgumentParser(description='Learn to factor Fft matrix')
+    parser.add_argument('--size', type=int, default=8, help='Size of matrix to factor, must be power of 2')
+    parser.add_argument('--ntrials', type=int, default=20, help='Number of trials for hyperparameter tuning')
+    parser.add_argument('--nsteps', type=int, default=200, help='Number of steps per epoch')
+    parser.add_argument('--nmaxepochs', type=int, default=200, help='Maximum number of epochs')
+    parser.add_argument('--result-dir', type=str, default='./results', help='Directory to store results')
+    parser.add_argument('--nthreads', type=int, default=1, help='Number of CPU threads per job')
+    parser.add_argument('--smoke-test', action='store_true', help='Finish quickly for testing')
+    args = parser.parse_args(argv)
+    experiment = Experiment(
+        name=f'Fft_factorization_sparsemax_no_perm_{args.size}',
+        run=TrainableFftFactorSparsemaxNoPerm,
+        local_dir=args.result_dir,
+        num_samples=args.ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': args.nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if args.smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config={
+            'size': args.size,
+            'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+            'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+            'n_steps_per_epoch': args.nsteps,
+        },
+    )
+    return experiment, args
+
+
+def fft_factorization_softmax_no_perm(argv):
+    parser = argparse.ArgumentParser(description='Learn to factor Fft matrix')
+    parser.add_argument('--size', type=int, default=8, help='Size of matrix to factor, must be power of 2')
+    parser.add_argument('--ntrials', type=int, default=20, help='Number of trials for hyperparameter tuning')
+    parser.add_argument('--nsteps', type=int, default=200, help='Number of steps per epoch')
+    parser.add_argument('--nmaxepochs', type=int, default=200, help='Maximum number of epochs')
+    parser.add_argument('--result-dir', type=str, default='./results', help='Directory to store results')
+    parser.add_argument('--nthreads', type=int, default=1, help='Number of CPU threads per job')
+    parser.add_argument('--smoke-test', action='store_true', help='Finish quickly for testing')
+    args = parser.parse_args(argv)
+    experiment = Experiment(
+        name=f'Fft_factorization_softmax_no_perm_{args.size}',
+        run=TrainableFftFactorSoftmaxNoPerm,
+        local_dir=args.result_dir,
+        num_samples=args.ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': args.nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if args.smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config={
+            'size': args.size,
+            'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+            'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+            'n_steps_per_epoch': args.nsteps,
+        },
+    )
+    return experiment, args
+
+
+def randn_factorization_softmax_no_perm(argv):
+    parser = argparse.ArgumentParser(description='Learn to factor Fft matrix')
+    parser.add_argument('--size', type=int, default=8, help='Size of matrix to factor, must be power of 2')
+    parser.add_argument('--ntrials', type=int, default=20, help='Number of trials for hyperparameter tuning')
+    parser.add_argument('--nsteps', type=int, default=200, help='Number of steps per epoch')
+    parser.add_argument('--nmaxepochs', type=int, default=200, help='Maximum number of epochs')
+    parser.add_argument('--result-dir', type=str, default='./results', help='Directory to store results')
+    parser.add_argument('--nthreads', type=int, default=1, help='Number of CPU threads per job')
+    parser.add_argument('--smoke-test', action='store_true', help='Finish quickly for testing')
+    args = parser.parse_args(argv)
+    experiment = Experiment(
+        name=f'Randn_factorization_softmax_no_perm_{args.size}',
+        run=TrainableRandnFactorSoftmaxNoPerm,
+        local_dir=args.result_dir,
+        num_samples=args.ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': args.nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if args.smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config={
+            'size': args.size,
+            'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+            'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+            'n_steps_per_epoch': args.nsteps,
+        },
+    )
+    return experiment, args
+
 if __name__ == '__main__':
     # experiment, args = fft_factorization_fixed_order(sys.argv[1:])
     # experiment, args = fft_factorization_softmax(sys.argv[1:])
-    experiment, args = fft_factorization_sparsemax(sys.argv[1:])
+    # experiment, args = fft_factorization_sparsemax(sys.argv[1:])
+    # experiment, args = fft_factorization_sparsemax_no_perm(sys.argv[1:])
+    experiment, args = fft_factorization_softmax_no_perm(sys.argv[1:])
+    # experiment, args = randn_factorization_softmax_no_perm(sys.argv[1:])
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(args.nthreads)
     ray.init()

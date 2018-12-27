@@ -6,6 +6,7 @@ Classification. André F. T. Martins, Ramón Fernandez Astudillo
 In: Proc. of ICML 2016, https://arxiv.org/abs/1602.02068
 
 Code adapted from https://github.com/vene/sparse-structured-attention
+and https://github.com/KrisKorrel/sparsemax-pytorch
 """
 
 import torch
