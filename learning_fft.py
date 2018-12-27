@@ -58,14 +58,14 @@ class TrainableFftFactorFixedOrder(PytorchTrainable):
         self.model = ButterflyProduct(size=size, complex=True, fixed_order=True)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.dft_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
         self.br_perm = torch.tensor(bitreversal_permutation(size))
 
     def _train(self):
         for _ in range(self.n_steps_per_epoch):
             self.optimizer.zero_grad()
             y = self.model.matrix()[:, self.br_perm]
-            loss = nn.functional.mse_loss(y, self.dft_matrix)
+            loss = nn.functional.mse_loss(y, self.target_matrix)
             loss.backward()
             self.optimizer.step()
         return {'negative_loss': -loss.item()}
@@ -80,14 +80,14 @@ class TrainableFftFactorSoftmax(PytorchTrainable):
         self.semantic_loss_weight = config['semantic_loss_weight']
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.dft_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
         self.br_perm = torch.tensor(bitreversal_permutation(size))
 
     def _train(self):
         for _ in range(self.n_steps_per_epoch):
             self.optimizer.zero_grad()
             y = self.model.matrix()[:, self.br_perm]
-            loss = nn.functional.mse_loss(y, self.dft_matrix)
+            loss = nn.functional.mse_loss(y, self.target_matrix)
             semantic_loss = semantic_loss_exactly_one(nn.functional.softmax(self.model.logit, dim=-1), dim=-1)
             total_loss = loss + self.semantic_loss_weight * semantic_loss.mean()
             total_loss.backward()
@@ -105,7 +105,7 @@ class TrainableFftFactorSparsemax(TrainableFftFactorFixedOrder):
         self.model = ButterflyProduct(size=size, complex=True, fixed_order=False, softmax='sparsemax')
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.dft_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
         self.br_perm = torch.tensor(bitreversal_permutation(size))
 
 
@@ -115,21 +115,13 @@ class TrainableFftFactorSparsemaxNoPerm(TrainableFftFactorSparsemax):
         for _ in range(self.n_steps_per_epoch):
             self.optimizer.zero_grad()
             y = self.model.matrix()
-            loss = nn.functional.mse_loss(y, self.dft_matrix)
+            loss = nn.functional.mse_loss(y, self.target_matrix)
             loss.backward()
             self.optimizer.step()
         return {'negative_loss': -loss.item()}
 
 
-class TrainableFftFactorSoftmaxNoPerm(PytorchTrainable):
-
-    def _setup(self, config):
-        size = config['size']
-        torch.manual_seed(config['seed'])
-        self.model = ButterflyProduct(size=size, complex=True, fixed_order=False, softmax='softmax')
-        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
-        self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+class TrainableFftFactorSoftmaxNoPerm(TrainableFftFactorSoftmax):
 
     def _train(self):
         for _ in range(self.n_steps_per_epoch):

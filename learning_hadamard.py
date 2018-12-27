@@ -74,13 +74,13 @@ class TrainableHadamardFactorFixedOrder(PytorchTrainable):
         # self.optimizer = optim.SGD(self.model.parameters(), lr=config['lr'], momentum=config['momentum'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         # detach to set H.requires_grad = False
-        self.hadamard_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
+        self.target_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
 
     def _train(self):
         for _ in range(self.n_steps_per_epoch):
             self.optimizer.zero_grad()
             y = self.model.matrix()
-            loss = nn.functional.mse_loss(y, self.hadamard_matrix)
+            loss = nn.functional.mse_loss(y, self.target_matrix)
             loss.backward()
             self.optimizer.step()
         return {'negative_loss': -loss.item()}
@@ -95,13 +95,13 @@ class TrainableHadamardFactorSoftmax(PytorchTrainable):
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         # detach to set H.requires_grad = False
-        self.hadamard_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
+        self.target_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
 
     def _train(self):
         for _ in range(self.n_steps_per_epoch):
             self.optimizer.zero_grad()
             y = self.model.matrix()
-            loss = nn.functional.mse_loss(y, self.hadamard_matrix)
+            loss = nn.functional.mse_loss(y, self.target_matrix)
             semantic_loss = semantic_loss_exactly_one(nn.functional.softmax(self.model.logit, dim=-1), dim=-1)
             total_loss = loss + self.semantic_loss_weight * semantic_loss.mean()
             total_loss.backward()
@@ -117,7 +117,7 @@ class TrainableHadamardFactorSparsemax(TrainableHadamardFactorFixedOrder):
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         # detach to set H.requires_grad = False
-        self.hadamard_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
+        self.target_matrix = torch.tensor(hadamard(config['size']), dtype=torch.float).detach()
 
 
 def hadamard_factorization_fixed_order(argv):
