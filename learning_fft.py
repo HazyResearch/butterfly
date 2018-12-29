@@ -88,13 +88,11 @@ class TrainableFftFactorSoftmax(PytorchTrainable):
             self.optimizer.zero_grad()
             y = self.model.matrix()[:, self.br_perm]
             loss = nn.functional.mse_loss(y, self.target_matrix)
-            semantic_loss = semantic_loss_exactly_one(nn.functional.softmax(self.model.logit, dim=-1), dim=-1)
+            semantic_loss = semantic_loss_exactly_one(nn.functional.log_softmax(self.model.logit, dim=-1))
             total_loss = loss + self.semantic_loss_weight * semantic_loss.mean()
             total_loss.backward()
             self.optimizer.step()
-        # Stop early if loss is NaN
-        is_nan = bool(torch.isnan(loss))
-        return {'negative_loss': -loss.item() if not is_nan else float('-inf'), 'is_nan': is_nan}
+        return {'negative_loss': -loss.item()}
 
 
 class TrainableFftFactorSparsemax(TrainableFftFactorFixedOrder):
