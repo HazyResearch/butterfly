@@ -45,26 +45,6 @@ def hadamard_test():
     assert torch.allclose(M.matrix(), H)
 
 
-# semantic_loss_weight = 0.05
-# model = ButterflyProduct(size, fixed_order=True)
-# optimizer = optim.Adam(model.parameters(), lr=0.03)
-# for i in range(15000):
-#     optimizer.zero_grad()
-#     # x = torch.randn(64, size)
-#     # y = model(x)
-#     # loss = nn.functional.mse_loss(y, x @ H.t())
-#     y = model.matrix()
-#     # semantic_loss = semantic_loss_exactly_one(nn.functional.softmax(model.logit, dim=-1), dim=-1)
-#     # loss = nn.functional.mse_loss(y, H) + semantic_loss_weight * semantic_loss.mean()
-#     loss = nn.functional.mse_loss(y, H)
-#     loss.backward()
-#     optimizer.step()
-#     if i % 500 == 0:
-#         # y = model.matrix()
-#         # loss = nn.functional.mse_loss(y, H)
-#         print(f'Loss: {loss.item()}')
-
-
 class TrainableHadamardFactorFixedOrder(PytorchTrainable):
 
     def _setup(self, config):
@@ -102,7 +82,6 @@ class TrainableHadamardFactorSoftmax(PytorchTrainable):
             self.optimizer.zero_grad()
             y = self.model.matrix()
             loss = nn.functional.mse_loss(y, self.target_matrix)
-            # semantic_loss = semantic_loss_exactly_one(nn.functional.softmax(self.model.logit, dim=-1), dim=-1)
             semantic_loss = semantic_loss_exactly_one(nn.functional.log_softmax(self.model.logit, dim=-1))
             total_loss = loss + self.semantic_loss_weight * semantic_loss.mean()
             total_loss.backward()
@@ -240,15 +219,3 @@ if __name__ == '__main__':
     checkpoint_path /= 'trial.pkl'
     with checkpoint_path.open('wb') as f:
         pickle.dump(trials, f)
-
-    # with checkpoint_path.open('rb') as f:
-    #     trials = pickle.load(f)
-
-    # best_trial = max(trials, key=lambda trial: trial.last_result['negative_loss'])
-    # train_model = best_trial._get_trainable_cls()(best_trial.config)
-    # train_model.restore(str(Path(best_trial.logdir) / best_trial._checkpoint.value))
-    # model = train_model.model
-
-    # train_model.optimizer.lr
-    # for i in range(200):
-    #     train_model.train()
