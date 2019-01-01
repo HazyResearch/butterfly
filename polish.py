@@ -82,36 +82,36 @@ def polish_fft(trial):
 
 
 
-# ray.init()
+if __name__ == '__main__':
+    # ray.init()
+    result_dir = 'results'
+    experiment_names = [[f'Hadamard_factorization_fixed_order_{size}' for size in [8, 16, 32, 64, 128, 256]]]
+    experiment_names += [[f'Hadamard_factorization_softmax_{size}' for size in [8, 16, 32, 64, 128, 256]]]
+    experiment_names += [[f'Hadamard_factorization_sparsemax_{size}' for size in [8, 16, 32, 64, 128]]]
+    experiment_names += [[f'Fft_factorization_fixed_order_{size}' for size in [8, 16, 32, 64, 128]]]
+    experiment_names += [[f'Fft_factorization_softmax_{size}' for size in [8, 16, 32, 64, 128]]]
+    experiment_names += [[f'Fft_factorization_sparsemax_{size}' for size in [8, 16, 32, 64, 128]]]
 
-result_dir = 'results'
-experiment_names = [[f'Hadamard_factorization_fixed_order_{size}' for size in [8, 16, 32, 64, 128, 256]]]
-experiment_names += [[f'Hadamard_factorization_softmax_{size}' for size in [8, 16, 32, 64, 128, 256]]]
-experiment_names += [[f'Hadamard_factorization_sparsemax_{size}' for size in [8, 16, 32, 64, 128]]]
-experiment_names += [[f'Fft_factorization_fixed_order_{size}' for size in [8, 16, 32, 64, 128]]]
-experiment_names += [[f'Fft_factorization_softmax_{size}' for size in [8, 16, 32, 64, 128]]]
-experiment_names += [[f'Fft_factorization_sparsemax_{size}' for size in [8, 16, 32, 64, 128]]]
-
-pool = mp.Pool()
-for experiment_names_ in experiment_names:
-    # print(experiment_names_[0])
-    for experiment_name in experiment_names_:
-        print(experiment_name)
-        checkpoint_path = Path(result_dir) / experiment_name / 'trial.pkl'
-        with checkpoint_path.open('rb') as f:
-            trials = pickle.load(f)
-        sorted_trials = sorted(trials, key=lambda trial: -trial.last_result['negative_loss'])
-        losses = [-trial.last_result['negative_loss'] for trial in sorted_trials]
-        # polished_losses = ray.get([polish.remote(trial) for trial in sorted_trials[:N_TRIALS_TO_POLISH]])
-        if experiment_name.startswith('Hadamard'):
-            polished_losses = pool.map(polish_hadamard, sorted_trials[:20])
-        elif experiment_name.startswith('Fft'):
-            polished_losses = pool.map(polish_fft, sorted_trials[:20])
-        else:
-            assert False, 'Unknown experiment'
-        print(np.sort(losses)[:N_TRIALS_TO_POLISH])
-        for i in range(N_TRIALS_TO_POLISH):
-            sorted_trials[i].last_result['polished_negative_loss'] = -polished_losses[i]
-        print(np.array([trial.last_result['polished_negative_loss'] for trial in sorted_trials[:N_TRIALS_TO_POLISH]]))
-        with checkpoint_path.open('wb') as f:
-            pickle.dump(trials, f)
+    pool = mp.Pool()
+    for experiment_names_ in experiment_names:
+        # print(experiment_names_[0])
+        for experiment_name in experiment_names_:
+            print(experiment_name)
+            checkpoint_path = Path(result_dir) / experiment_name / 'trial.pkl'
+            with checkpoint_path.open('rb') as f:
+                trials = pickle.load(f)
+            sorted_trials = sorted(trials, key=lambda trial: -trial.last_result['negative_loss'])
+            losses = [-trial.last_result['negative_loss'] for trial in sorted_trials]
+            # polished_losses = ray.get([polish.remote(trial) for trial in sorted_trials[:N_TRIALS_TO_POLISH]])
+            if experiment_name.startswith('Hadamard'):
+                polished_losses = pool.map(polish_hadamard, sorted_trials[:20])
+            elif experiment_name.startswith('Fft'):
+                polished_losses = pool.map(polish_fft, sorted_trials[:20])
+            else:
+                assert False, 'Unknown experiment'
+            print(np.sort(losses)[:N_TRIALS_TO_POLISH])
+            for i in range(N_TRIALS_TO_POLISH):
+                sorted_trials[i].last_result['polished_negative_loss'] = -polished_losses[i]
+            print(np.array([trial.last_result['polished_negative_loss'] for trial in sorted_trials[:N_TRIALS_TO_POLISH]]))
+            with checkpoint_path.open('wb') as f:
+                pickle.dump(trials, f)

@@ -1,3 +1,7 @@
 python>=3.6
 pytorch>=1.0
 ray>=0.6.1
+sacred
+tinydb
+tinydb-serialization
+hashfs

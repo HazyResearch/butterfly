@@ -100,7 +100,7 @@ class TrainableFftFactorSparsemax(TrainableFftFactorFixedOrder):
     def _setup(self, config):
         size = config['size']
         torch.manual_seed(config['seed'])
-        self.model = ButterflyProduct(size=size, complex=True, fixed_order=False, softmax='sparsemax')
+        self.model = ButterflyProduct(size=size, complex=True, fixed_order=False, softmax_fn='sparsemax')
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
@@ -136,7 +136,7 @@ class TrainableRandnFactorSoftmaxNoPerm(PytorchTrainable):
     def _setup(self, config):
         size = config['size']
         torch.manual_seed(config['seed'])
-        self.model = ButterflyProduct(size=size, complex=False, fixed_order=False, softmax='softmax')
+        self.model = ButterflyProduct(size=size, complex=False, fixed_order=False, softmax_fn='softmax')
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.target_matrix = torch.rand(size, size, requires_grad=False)

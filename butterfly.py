@@ -88,7 +88,7 @@ class ButterflyProduct(nn.Module):
     are learnable.
     """
 
-    def __init__(self, size, n_terms=None, complex=False, fixed_order=False, softmax='softmax'):
+    def __init__(self, size, n_terms=None, complex=False, fixed_order=False, softmax_fn='softmax'):
         super().__init__()
         self.m = int(math.log2(size))
         assert size == 1 << self.m, "size must be a power of 2"
@@ -97,16 +97,16 @@ class ButterflyProduct(nn.Module):
         self.n_terms = n_terms
         self.complex = complex
         self.matmul_op = complex_matmul if complex else operator.matmul
-        assert softmax in ['softmax', 'sparsemax']
-        if softmax == 'softmax':
-            self.softmax_fn = lambda logit: nn.functional.softmax(logit, dim=-1)
-        else:
-            self.softmax_fn = sparsemax
+        self.fixed_order = fixed_order
+        if not self.fixed_order:
+            assert softmax_fn in ['softmax', 'sparsemax']
+            self.logit = nn.Parameter(torch.randn((n_terms, self.m)))
+            if softmax_fn == 'softmax':
+                self.softmax_fn = lambda logit: nn.functional.softmax(logit, dim=-1)
+            else:
+                self.softmax_fn = sparsemax
         self.butterflies = nn.ModuleList([Butterfly(size, diagonal=1 << i, complex=complex)
                                           for i in range(self.m)[::-1]])
-        self.fixed_order = fixed_order
-        if not fixed_order:
-            self.logit = nn.Parameter(torch.randn((n_terms, self.m)))
 
     def matrix(self):
         if self.fixed_order:
