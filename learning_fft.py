@@ -444,6 +444,22 @@ class TrainableFft(PytorchTrainable):
         return {'negative_loss': -loss.item()}
 
 
+class TrainableFftTempAnnealing(TrainableFft):
+
+    def _train(self):
+        temperature = 1.0 / (0.1 * self._iteration + 1)
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model.matrix(temperature)[:, self.br_perm]
+            loss = nn.functional.mse_loss(y, self.target_matrix)
+            if (not self.model.fixed_order) and hasattr(self, 'semantic_loss_weight'):
+                semantic_loss = semantic_loss_exactly_one(nn.functional.log_softmax(self.model.logit, dim=-1))
+                loss += self.semantic_loss_weight * semantic_loss.mean()
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
 def polish_fft(trial):
     """Load model from checkpoint, then fix the order of the butterflies
     matrices (using the largest logits), and re-optimize using L-BFGS to find
@@ -521,6 +537,35 @@ def fft_experiment(fixed_order, softmax_fn, size, ntrials, nsteps, result_dir, n
     experiment = RayExperiment(
         name=f'Fft_factorization_{fixed_order}_{softmax_fn}_{size}',
         run=TrainableFft,
+        local_dir=result_dir,
+        num_samples=ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config=config,
+    )
+    return experiment
+
+
+@ex.capture
+def fft_experiment_temp_annealing(fixed_order, softmax_fn, size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+    assert softmax_fn in ['softmax', 'sparsemax']
+    config={
+        'fixed_order': fixed_order,
+        'softmax_fn': softmax_fn,
+        'size': size,
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+        'n_steps_per_epoch': nsteps,
+     }
+    if (not fixed_order) and softmax_fn == 'softmax':
+        config['semantic_loss_weight'] = sample_from(lambda spec: math.exp(random.uniform(math.log(5e-3), math.log(5e-1))))
+    experiment = RayExperiment(
+        name=f'Fft_factorization_Temp_{fixed_order}_{softmax_fn}_{size}',
+        run=TrainableFftTempAnnealing,
         local_dir=result_dir,
         num_samples=ntrials,
         checkpoint_at_end=True,

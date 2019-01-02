@@ -108,12 +108,12 @@ class ButterflyProduct(nn.Module):
         self.butterflies = nn.ModuleList([Butterfly(size, diagonal=1 << i, complex=complex)
                                           for i in range(self.m)[::-1]])
 
-    def matrix(self):
+    def matrix(self, temperature=1.0):
         if self.fixed_order:
             matrices = [butterfly.matrix() for butterfly in self.butterflies]
             return functools.reduce(self.matmul_op, matrices)
         else:
-            prob = self.softmax_fn(self.logit)
+            prob = self.softmax_fn(self.logit / temperature)
             # matrix = None
             # for i in range(self.n_terms):
             #     term = (torch.stack([butterfly.matrix() for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
@@ -123,7 +123,7 @@ class ButterflyProduct(nn.Module):
             # return torch.chain_matmul(matrices)  ## Doesn't work for complex
             return functools.reduce(self.matmul_op, matrices)
 
-    def forward(self, input_):
+    def forward(self, input_, temperature=1.0):
         """
         Parameters:
             input_: (..., size) if real or (..., size, 2) if complex
@@ -136,7 +136,7 @@ class ButterflyProduct(nn.Module):
                 output = butterfly(output)
             return output
         else:
-            prob = self.softmax_fn(self.logit)
+            prob = self.softmax_fn(self.logit / temperature)
             output = input_
             for i in range(self.n_terms)[::-1]:
                 output = (torch.stack([butterfly(output) for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
