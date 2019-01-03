@@ -42,17 +42,17 @@ class ComplexMatmulNp(torch.autograd.Function):
     @staticmethod
     def forward(ctx, X, Y):
         ctx.save_for_backward(X, Y)
-        X_np = X.detach().numpy().view('complex64').squeeze(-1)
-        Y_np = Y.detach().numpy().view('complex64').squeeze(-1)
+        X_np = X.detach().contiguous().numpy().view('complex64').squeeze(-1)
+        Y_np = Y.detach().contiguous().numpy().view('complex64').squeeze(-1)
         prod = torch.from_numpy(np.expand_dims(X_np @ Y_np, -1).view('float32'))
         return prod
 
     @staticmethod
     def backward(ctx, grad):
         X, Y  = ctx.saved_tensors
-        X_np = X.detach().numpy().view('complex64').squeeze(-1)
-        Y_np = Y.detach().numpy().view('complex64').squeeze(-1)
-        grad_np = grad.detach().numpy().view('complex64').squeeze(-1)
+        X_np = X.detach().contiguous().numpy().view('complex64').squeeze(-1)
+        Y_np = Y.detach().contiguous().numpy().view('complex64').squeeze(-1)
+        grad_np = grad.detach().contiguous().numpy().view('complex64').squeeze(-1)
         dX = torch.from_numpy(np.expand_dims(grad_np @ Y_np.conj().T, -1).view('float32'))
         dY = torch.from_numpy(np.expand_dims(X_np.conj().T @ grad_np, -1).view('float32'))
         return dX, dY
@@ -74,8 +74,8 @@ def test_complex_mm():
     # Y = torch.rand(batch_size, m, p, 2)
     # Z = complex_matmul(X, Y)
     # assert Z.shape == (batch_size, n, p, 2)
-    X_np = X.detach().numpy().view('complex64').squeeze(-1)
-    Y_np = Y.detach().numpy().view('complex64').squeeze(-1)
+    X_np = X.detach().contiguous().numpy().view('complex64').squeeze(-1)
+    Y_np = Y.detach().contiguous().numpy().view('complex64').squeeze(-1)
     Z_np = np.expand_dims(X_np @ Y_np, axis=-1).view('float32')
     assert np.allclose(Z.numpy(), Z_np)
     Z_torch = complex_matmul_torch(X, Y)

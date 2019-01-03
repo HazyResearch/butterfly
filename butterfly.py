@@ -83,44 +83,39 @@ class Butterfly(nn.Module):
         return output
 
 
-class ButterflyProduct(nn.Module):
-    """Product of butterfly matrices. The order are chosen by softmaxes, which
-    are learnable.
+class MatrixProduct(nn.Module):
+    """Product of matrices. The order are chosen by softmaxes, which are learnable.
+    Each factor matrix must implement .matrix() function.
     """
 
-    def __init__(self, size, n_terms=None, complex=False, fixed_order=False, softmax_fn='softmax'):
+    def __init__(self, factors, n_terms=None, complex=False, fixed_order=False, softmax_fn='softmax'):
         super().__init__()
-        self.m = int(math.log2(size))
-        assert size == 1 << self.m, "size must be a power of 2"
+        self.factors = nn.ModuleList(factors)
         if n_terms is None:
-            n_terms = self.m
+            n_terms = len(factors)
         self.n_terms = n_terms
         self.complex = complex
         self.matmul_op = complex_matmul if complex else operator.matmul
         self.fixed_order = fixed_order
         if not self.fixed_order:
             assert softmax_fn in ['softmax', 'sparsemax']
-            self.logit = nn.Parameter(torch.randn((n_terms, self.m)))
+            self.logit = nn.Parameter(torch.randn((self.n_terms, len(factors))))
             if softmax_fn == 'softmax':
                 self.softmax_fn = lambda logit: nn.functional.softmax(logit, dim=-1)
             else:
                 self.softmax_fn = sparsemax
-        self.butterflies = nn.ModuleList([Butterfly(size, diagonal=1 << i, complex=complex)
-                                          for i in range(self.m)[::-1]])
 
     def matrix(self, temperature=1.0):
         if self.fixed_order:
-            matrices = [butterfly.matrix() for butterfly in self.butterflies]
+            matrices = [factor.matrix() for factor in self.factors]
             return functools.reduce(self.matmul_op, matrices)
         else:
             prob = self.softmax_fn(self.logit / temperature)
-            # matrix = None
-            # for i in range(self.n_terms):
-            #     term = (torch.stack([butterfly.matrix() for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
-            #     matrix = term if matrix is None else term @ matrix
-            stack = torch.stack([butterfly.matrix() for butterfly in self.butterflies], dim=-1)
-            matrices = [(stack * prob[i]).sum(dim=-1) for i in range(self.n_terms)]
-            # return torch.chain_matmul(matrices)  ## Doesn't work for complex
+            stack = torch.stack([factor.matrix() for factor in self.factors])
+            matrices = (prob @ stack.reshape(stack.shape[0], -1)).reshape((-1,) + stack.shape[1:])
+            # Alternative: slightly slower but easier to understand
+            # matrices = torch.einsum('ab, b...->a...', (prob, stack))
+            # return torch.chain_matmul(*matrices)  ## Doesn't work for complex
             return functools.reduce(self.matmul_op, matrices)
 
     def forward(self, input_, temperature=1.0):
@@ -132,15 +127,29 @@ class ButterflyProduct(nn.Module):
         """
         if self.fixed_order:
             output = input_
-            for butterfly in self.butterflies[::-1]:
-                output = butterfly(output)
+            for factor in self.factors[::-1]:
+                output = factor(output)
             return output
         else:
             prob = self.softmax_fn(self.logit / temperature)
             output = input_
             for i in range(self.n_terms)[::-1]:
-                output = (torch.stack([butterfly(output) for butterfly in self.butterflies], dim=-1) * prob[i]).sum(dim=-1)
+                # output = (torch.stack([factor(output) for factor in self.factors], dim=-1) * prob[i]).sum(dim=-1)
+                stack = torch.stack([factor(output) for factor in self.factors])
+                output = (prob[i:i+1] @ stack.reshape(stack.shape[0], -1)).reshape(stack.shape[1:])
             return output
+
+
+class ButterflyProduct(MatrixProduct):
+    """Product of butterfly matrices. The order are chosen by softmaxes, which
+    are learnable.
+    """
+
+    def __init__(self, size, n_terms=None, complex=False, fixed_order=False, softmax_fn='softmax'):
+        m = int(math.log2(size))
+        assert size == 1 << m, "size must be a power of 2"
+        factors = [Butterfly(size, diagonal=1 << i, complex=complex) for i in range(m)[::-1]]
+        super().__init__(factors, n_terms, complex, fixed_order, softmax_fn)
 
 
 def test_butterfly():
@@ -171,7 +180,7 @@ def test_butterfly_product():
     model = ButterflyProduct(size, complex=True)
     model.logit = nn.Parameter(torch.tensor([[1.0, float('-inf')], [float('-inf'), 1.0]]))
     assert torch.allclose(model.matrix(),
-                          complex_matmul(model.butterflies[0].matrix(), model.butterflies[1].matrix()))
+                          complex_matmul(model.factors[0].matrix(), model.factors[1].matrix()))
 
     batch_size = 3
     x = torch.randn((batch_size, size, 2))
