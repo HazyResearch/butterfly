@@ -46,8 +46,8 @@ def hadamard_test():
     H = M0.matrix() @ M1.matrix()
     assert torch.allclose(H, torch.tensor(hadamard(4), dtype=torch.float))
     M = ButterflyProduct(size, fixed_order=True)
-    M.butterflies[0] = M0
-    M.butterflies[1] = M1
+    M.factors[0] = M0
+    M.factors[1] = M1
     assert torch.allclose(M.matrix(), H)
 
 
@@ -78,7 +78,7 @@ class TrainableHadamard(PytorchTrainable):
 
 
 def polish_hadamard(trial):
-    """Load model from checkpoint, then fix the order of the butterflies
+    """Load model from checkpoint, then fix the order of the factor
     matrices (using the largest logits), and re-optimize using L-BFGS to find
     the nearest local optima.
     """
@@ -90,9 +90,9 @@ def polish_hadamard(trial):
     if not model.fixed_order:
         prob = model.softmax_fn(model.logit)
         maxes, argmaxes = torch.max(prob, dim=-1)
-        polished_model.butterflies = nn.ModuleList([model.butterflies[argmax] for argmax in argmaxes])
+        polished_model.factors = nn.ModuleList([model.factors[argmax] for argmax in argmaxes])
     else:
-        polished_model.butterflies = model.butterflies
+        polished_model.factors = model.factors
     optimizer = optim.LBFGS(polished_model.parameters())
     def closure():
         optimizer.zero_grad()

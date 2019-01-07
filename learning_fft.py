@@ -461,7 +461,7 @@ class TrainableFftTempAnnealing(TrainableFft):
 
 
 def polish_fft(trial):
-    """Load model from checkpoint, then fix the order of the butterflies
+    """Load model from checkpoint, then fix the order of the factor
     matrices (using the largest logits), and re-optimize using L-BFGS to find
     the nearest local optima.
     """
@@ -473,9 +473,9 @@ def polish_fft(trial):
     if not model.fixed_order:
         prob = model.softmax_fn(model.logit)
         maxes, argmaxes = torch.max(prob, dim=-1)
-        polished_model.butterflies = nn.ModuleList([model.butterflies[argmax] for argmax in argmaxes])
+        polished_model.factors = nn.ModuleList([model.factors[argmax] for argmax in argmaxes])
     else:
-        polished_model.butterflies = model.butterflies
+        polished_model.factors = model.factors
     optimizer = optim.LBFGS(polished_model.parameters())
     def closure():
         optimizer.zero_grad()
