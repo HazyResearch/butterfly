@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from complex_utils import complex_mul, complex_matmul
-from ops import polymatmul
+from ops import polymatmul, ops_transpose_mult_br
 from sparsemax import sparsemax
 from utils import bitreversal_permutation
 
@@ -50,6 +50,7 @@ class HstackDiagProduct(nn.Module):
         m = int(math.log2(size))
         assert size == 1 << m, "size must be a power of 2"
         super().__init__()
+        self.size = size
         self.factors = nn.ModuleList([HstackDiag(size >> (i + 1), deg=(1 << i)) for i in range(m)[::-1]])
         self.P_init = nn.Parameter(torch.randn(1, 2, 1, 2))
 
