@@ -4,6 +4,8 @@ from torch.nn import functional as F
 
 from numpy.polynomial import chebyshev, legendre
 
+from utils import bitreversal_permutation
+
 
 def polymatmul(A, B):
     """Batch-multiply two matrices of polynomials
@@ -85,6 +87,59 @@ def ops_transpose_mult(a, b, c, p0, p1, v):
     return result
 
 
+def ops_transpose_mult_br(a, b, c, p0, p1, v):
+    """Fast algorithm to multiply P^T v where P is the matrix of coefficients of
+    OPs, specified by the coefficients a, b, c, and the starting polynomials p0,
+    p_1. Implementation with bit-reversal.
+    In particular, the recurrence is
+    P_{n+2}(x) = (a[n] x + b[n]) P_{n+1}(x) + c[n] P_n(x).
+    Parameters:
+        a: array of length n
+        b: array of length n
+        c: array of length n
+        p0: real number representing P_0(x).
+        p1: pair of real numbers representing P_1(x).
+        v: (batch_size, n)
+    Return:
+        result: P^T v.
+    """
+    n = v.shape[-1]
+    m = int(np.log2(n))
+    assert n == 1 << m, "Length n must be a power of 2."
+
+    # Preprocessing: compute T_{i:j}, the transition matrix from p_i to p_j.
+    T_br = [None] * (m + 1)
+    # Lowest level, filled with T_{i:i+1}
+    # n matrices, each 2 x 2, with coefficients being polynomials of degree <= 1
+    T_br[0] = torch.zeros(n, 2, 2, 2)
+    T_br[0][:, 0, 0, 1] = a
+    T_br[0][:, 0, 0, 0] = b
+    T_br[0][:, 0, 1, 0] = c
+    T_br[0][:, 1, 0, 0] = 1.0
+    br_perm = bitreversal_permutation(n)
+    T_br[0] = T_br[0][br_perm]
+    for i in range(1, m + 1):
+        T_br[i] = polymatmul(T_br[i - 1][n >> i:], T_br[i - 1][:n >> i])
+
+    P_init = torch.tensor([p1, [p0, 0.0]], dtype=torch.float)  # [p_1, p_0]
+    P_init = P_init.unsqueeze(0).unsqueeze(-2)
+    # Check that T_br is computed correctly
+    # These should be the polynomials P_{n+1} and P_n
+    # Pnp1n = polymatmul(T_br[m], P_init).squeeze()
+
+    v_br = v[:, br_perm]
+    # Bottom-up multiplication algorithm to avoid recursion
+    S_br = [None] * m
+    Tidentity = torch.eye(2).unsqueeze(0).unsqueeze(3)
+    S_br[0] = v_br[:, n//2:, None, None, None] * T_br[0][:n // 2]
+    S_br[0][:, :, :, :, :1] += v_br[:, :n//2, None, None, None] * Tidentity
+    for i in range(1, m):
+        S_br[i] = polymatmul(S_br[i - 1][:, (n >> (i + 1)):], T_br[i][:(n >> (i + 1))])
+        S_br[i][:, :, :, :, :S_br[i - 1].shape[-1]] += S_br[i - 1][:, :(n >> (i + 1))]
+    result = polymatmul(S_br[m - 1][:, :, [1], :, :n-1], P_init).squeeze(1).squeeze(1).squeeze(1)
+    return result
+
+
 def chebyshev_transpose_mult_slow(v):
     """Naive multiplication P^T v where P is the matrix of coefficients of
     Chebyshev polynomials.
@@ -125,13 +180,17 @@ def ops_transpose_mult_test():
     v = torch.randn(batch_size, n)
     # Chebyshev polynomials
     result = ops_transpose_mult(2.0 * torch.ones(n), torch.zeros(n), -torch.ones(n), 1.0, (0.0, 1.0), v)
+    result_br = ops_transpose_mult_br(2.0 * torch.ones(n), torch.zeros(n), -torch.ones(n), 1.0, (0.0, 1.0), v)
     result_slow = chebyshev_transpose_mult_slow(v)
     assert torch.allclose(result, result_slow)
+    assert torch.allclose(result, result_br)
     # Legendre polynomials
     n_range = torch.arange(n, dtype=torch.float)
     result = ops_transpose_mult((2 * n_range + 3) / (n_range + 2), torch.zeros(n), -(n_range + 1) / (n_range + 2), 1.0, (0.0, 1.0), v)
+    result_br = ops_transpose_mult_br((2 * n_range + 3) / (n_range + 2), torch.zeros(n), -(n_range + 1) / (n_range + 2), 1.0, (0.0, 1.0), v)
     result_slow = legendre_transpose_mult_slow(v)
     assert torch.allclose(result, result_slow)
+    assert torch.allclose(result, result_br)
 
 
 if __name__ == '__main__':

@@ -39,4 +39,4 @@ def bitreversal_permutation(n):
     for i in range(m):
         n1 = perm.shape[0] // 2
         perm = np.hstack((perm[:n1], perm[n1:]))
-    return perm.squeeze()
+    return perm.squeeze(0)
