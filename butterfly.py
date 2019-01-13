@@ -9,6 +9,22 @@ from complex_utils import complex_mul, complex_matmul
 from sparsemax import sparsemax
 
 
+def sinkhorn(logit, n_iters=5):
+    """Sinkhorn iterations.
+    Parameters:
+        logit: (..., n, n)
+        n_iters: integer
+    Return:
+        (..., n, n) matrix that's close to a doubly stochastic matrix.
+    """
+    assert logit.dim() >= 2, 'logit must be at least a 2D tensor'
+    assert logit.shape[-2] == logit.shape[-1], 'logit must be a square matrix'
+    for _ in range(n_iters):
+        logit -= torch.logsumexp(logit, dim=-1, keepdim=True)
+        logit -= torch.logsumexp(logit, dim=-2, keepdim=True)
+    return torch.exp(logit)
+
+
 class Butterfly(nn.Module):
     """Butterfly matrix of size n x n where only the diagonal and the k-th
     subdiagonal and superdiagonal are nonzero.
@@ -145,11 +161,36 @@ class ButterflyProduct(MatrixProduct):
     are learnable.
     """
 
-    def __init__(self, size, n_terms=None, complex=False, fixed_order=False, softmax_fn='softmax'):
+    def __init__(self, size, n_terms=None, complex=False, fixed_order=False, learn_perm=False, softmax_fn='softmax'):
         m = int(math.log2(size))
         assert size == 1 << m, "size must be a power of 2"
         factors = [Butterfly(size, diagonal=1 << i, complex=complex) for i in range(m)[::-1]]
         super().__init__(factors, n_terms, complex, fixed_order, softmax_fn)
+        self.learn_perm = learn_perm
+        if learn_perm:
+            self.perm_logit = nn.Parameter(torch.randn((size, size)))
+
+    def matrix(self, temperature=1.0):
+        matrix = super().matrix(temperature)
+        if self.learn_perm:
+            perm = sinkhorn(self.perm_logit / temperature)
+            matrix = matrix @ perm
+        return matrix
+
+    def forward(self, input_, temperature=1.0):
+        """
+        Parameters:
+            input_: (..., size) if real or (..., size, 2) if complex
+        Return:
+            output: (..., size) if real or (..., size, 2) if complex
+        """
+        if self.learn_perm:
+            perm = sinkhorn(self.perm_logit / temperature)
+            if not self.complex:
+                input_ = input_ @ perm.t()
+            else:
+                input_ = (input_.transpose(-1, -2) @ perm.t()).transpose(-1, -2)
+        return super().forward(input_, temperature)
 
 
 def test_butterfly():
