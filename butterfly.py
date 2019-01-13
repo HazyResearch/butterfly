@@ -161,7 +161,7 @@ class ButterflyProduct(MatrixProduct):
     are learnable.
     """
 
-    def __init__(self, size, n_terms=None, complex=False, fixed_order=False, learn_perm=False, softmax_fn='softmax'):
+    def __init__(self, size, n_terms=None, complex=False, fixed_order=False, softmax_fn='softmax', learn_perm=False):
         m = int(math.log2(size))
         assert size == 1 << m, "size must be a power of 2"
         factors = [Butterfly(size, diagonal=1 << i, complex=complex) for i in range(m)[::-1]]
@@ -174,7 +174,10 @@ class ButterflyProduct(MatrixProduct):
         matrix = super().matrix(temperature)
         if self.learn_perm:
             perm = sinkhorn(self.perm_logit / temperature)
-            matrix = matrix @ perm
+            if not self.complex:
+                matrix = matrix @ perm
+            else:
+                matrix = (matrix.transpose(-1, -2) @ perm).transpose(-1, -2)
         return matrix
 
     def forward(self, input_, temperature=1.0):
