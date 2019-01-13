@@ -20,8 +20,8 @@ def sinkhorn(logit, n_iters=5):
     assert logit.dim() >= 2, 'logit must be at least a 2D tensor'
     assert logit.shape[-2] == logit.shape[-1], 'logit must be a square matrix'
     for _ in range(n_iters):
-        logit -= torch.logsumexp(logit, dim=-1, keepdim=True)
-        logit -= torch.logsumexp(logit, dim=-2, keepdim=True)
+        logit = logit - torch.logsumexp(logit, dim=-1, keepdim=True)
+        logit = logit - torch.logsumexp(logit, dim=-2, keepdim=True)
     return torch.exp(logit)
 
 
