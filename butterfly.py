@@ -80,22 +80,22 @@ class Butterfly(nn.Module):
                     + torch.diag_embed(self.subdiag.t(), -self.diagonal, dim1=0, dim2=1)
                     + torch.diag_embed(self.superdiag.t(), self.diagonal, dim1=0, dim2=1))
 
-    def forward(self, input_):
+    def forward(self, input):
         """
         Parameters:
-            input_: (..., size) if real or (..., size, 2) if complex
+            input: (..., size) if real or (..., size, 2) if complex
         Return:
             output: (..., size) if real or (..., size, 2) if complex
         """
         if not self.complex:
-            output = self.diag * input_
-            output[..., self.diagonal:] += self.subdiag * input_[..., :-self.diagonal]
-            output[..., :-self.diagonal] += self.superdiag * input_[..., self.diagonal:]
+            output = self.diag * input
+            output[..., self.diagonal:] += self.subdiag * input[..., :-self.diagonal]
+            output[..., :-self.diagonal] += self.superdiag * input[..., self.diagonal:]
         else:
-            output = self.mul_op(self.diag, input_)
-            output[..., self.diagonal:, :] += self.mul_op(self.subdiag, input_[..., :-self.diagonal, :])
-            output[..., :-self.diagonal, :] += self.mul_op(self.superdiag, input_[..., self.diagonal:, :])
-        # assert torch.allclose(output, input_ @ self.matrix().t())
+            output = self.mul_op(self.diag, input)
+            output[..., self.diagonal:, :] += self.mul_op(self.subdiag, input[..., :-self.diagonal, :])
+            output[..., :-self.diagonal, :] += self.mul_op(self.superdiag, input[..., self.diagonal:, :])
+        # assert torch.allclose(output, input @ self.matrix().t())
         return output
 
 
@@ -134,21 +134,21 @@ class MatrixProduct(nn.Module):
             # return torch.chain_matmul(*matrices)  ## Doesn't work for complex
             return functools.reduce(self.matmul_op, matrices)
 
-    def forward(self, input_, temperature=1.0):
+    def forward(self, input, temperature=1.0):
         """
         Parameters:
-            input_: (..., size) if real or (..., size, 2) if complex
+            input: (..., size) if real or (..., size, 2) if complex
         Return:
             output: (..., size) if real or (..., size, 2) if complex
         """
         if self.fixed_order:
-            output = input_
+            output = input
             for factor in self.factors[::-1]:
                 output = factor(output)
             return output
         else:
             prob = self.softmax_fn(self.logit / temperature)
-            output = input_
+            output = input
             for i in range(self.n_terms)[::-1]:
                 # output = (torch.stack([factor(output) for factor in self.factors], dim=-1) * prob[i]).sum(dim=-1)
                 stack = torch.stack([factor(output) for factor in self.factors])
@@ -164,6 +164,7 @@ class ButterflyProduct(MatrixProduct):
     def __init__(self, size, n_terms=None, complex=False, fixed_order=False, softmax_fn='softmax', learn_perm=False):
         m = int(math.log2(size))
         assert size == 1 << m, "size must be a power of 2"
+        self.size = size
         factors = [Butterfly(size, diagonal=1 << i, complex=complex) for i in range(m)[::-1]]
         super().__init__(factors, n_terms, complex, fixed_order, softmax_fn)
         self.learn_perm = learn_perm
@@ -180,20 +181,207 @@ class ButterflyProduct(MatrixProduct):
                 matrix = (matrix.transpose(-1, -2) @ perm).transpose(-1, -2)
         return matrix
 
-    def forward(self, input_, temperature=1.0):
+    def forward(self, input, temperature=1.0):
         """
         Parameters:
-            input_: (..., size) if real or (..., size, 2) if complex
+            input: (..., size) if real or (..., size, 2) if complex
         Return:
             output: (..., size) if real or (..., size, 2) if complex
         """
         if self.learn_perm:
             perm = sinkhorn(self.perm_logit / temperature)
             if not self.complex:
-                input_ = input_ @ perm.t()
+                input = input @ perm.t()
             else:
-                input_ = (input_.transpose(-1, -2) @ perm.t()).transpose(-1, -2)
-        return super().forward(input_, temperature)
+                input = (input.transpose(-1, -2) @ perm.t()).transpose(-1, -2)
+        return super().forward(input, temperature)
+
+
+class Block2x2Diag(nn.Module):
+    """Block matrix of size n x n of the form [[A, B], [C, D]] where each of A, B,
+    C, D are diagonal. This means that only the diagonal and the n//2-th
+    subdiagonal and superdiagonal are nonzero.
+    """
+
+    def __init__(self, size, complex=False, ABCD=None):
+        """
+        Parameters:
+            size: size of butterfly matrix
+            complex: real or complex matrix
+            ABCD: block of [[A, B], [C, D]], of shape (2, 2, size//2) if real or (2, 2, size//2, 2) if complex
+        """
+        super().__init__()
+        assert size % 2 == 0, 'size must be even'
+        self.size = size
+        self.complex = complex
+        self.mul_op = complex_mul if complex else operator.mul
+        ABCD_shape = (2, 2, size // 2) if not complex else (2, 2, size // 2, 2)
+        if ABCD is None:
+            self.ABCD = nn.Parameter(torch.randn(ABCD_shape))
+        else:
+            assert ABCD.shape == ABCD_shape, f'ABCD must have shape {ABCD_shape}'
+            self.ABCD = ABCD
+
+    def forward(self, input):
+        """
+        Parameters:
+            input: (..., size) if real or (..., size, 2) if complex
+        Return:
+            output: (..., size) if real or (..., size, 2) if complex
+        """
+        if not self.complex:
+            return ((self.ABCD * input.reshape(input.shape[:-1] + (1, 2, self.size // 2))).sum(dim=-2)).reshape(input.shape)
+        else:
+            return (self.mul_op(self.ABCD, input.reshape(input.shape[:-2] + (1, 2, self.size // 2, 2))).sum(dim=-3)).reshape(input.shape)
+
+
+class Block2x2DiagProduct(nn.Module):
+    """Product of block 2x2 diagonal matrices.
+    """
+
+    def __init__(self, size, complex=False, decreasing_size=True):
+        super().__init__()
+        m = int(math.log2(size))
+        assert size == 1 << m, "size must be a power of 2"
+        self.size = size
+        self.complex = complex
+        sizes = [size >> i for i in range(m)] if decreasing_size else [size >> i for i in range(m)[::-1]]
+        self.factors = nn.ModuleList([Block2x2Diag(size_, complex=complex) for size_ in sizes])
+
+    def forward(self, input):
+        """
+        Parameters:
+            input: (..., size) if real or (..., size, 2) if complex
+        Return:
+            output: (..., size) if real or (..., size, 2) if complex
+        """
+        output = input
+        for factor in self.factors[::-1]:
+            if not self.complex:
+                output = factor(output.reshape(output.shape[:-1] + (-1, factor.size))).reshape(output.shape)
+            else:
+                output = factor(output.reshape(output.shape[:-2] + (-1, factor.size, 2))).reshape(output.shape)
+        return output
+
+
+class BlockPerm(nn.Module):
+    """Block permutation matrix of size n x n.
+    """
+
+    def __init__(self, size, logit=None, complex=False):
+        """
+        Parameters:
+            size: size of permutation matrix
+            complex: real of complex input
+            logit: (3, ) nn.Parameter, containing logits for probability of
+                   separating even and odd (logit[0]), probability of reversing
+                   the first half (logit[1]), and probability of reversing the
+                   second half (logit[2]).
+        """
+        super().__init__()
+        assert size % 2 == 0, 'size must be even'
+        self.size = size
+        self.complex = complex
+        if logit is None:
+            self.logit = nn.Parameter(torch.randn(3))
+        else:
+            self.logit = logit
+
+    def forward(self, input):
+        """
+        Parameters:
+            input: (..., size) if real or (..., size, 2) if complex
+        Return:
+            output: (..., size) if real or (..., size, 2) if complex
+        """
+        prob = torch.sigmoid(self.logit)
+        output = input
+        if not self.complex:
+            # There's a lot of complicated logic here buried under the reshape's and unsqueeze's and so on
+            # First step: weighted mean of identity permutation and permutation that yields [even, odd]
+            output = (1 - prob[0]) * output.reshape(output.shape[:-1] + (2, self.size // 2)) + prob[0] * output.reshape(output.shape[:-1] + (self.size // 2, 2)).transpose(-1, -2)
+            # Second step: weighted mean of identity permutation and permutation that reverses the first and the second half
+            output = (((1 - prob[1:]).unsqueeze(-1) * output + prob[1:].unsqueeze(-1) * output.flip(-1))).reshape(output.shape[:-2] + (self.size, ))
+        else:
+            output = (1 - prob[0]) * output.reshape(output.shape[:-2] + (2, self.size // 2, 2)) + prob[0] * output.reshape(output.shape[:-2] + (self.size // 2, 2, 2)).transpose(-2, -3)
+            output = (((1 - prob[1:]).unsqueeze(-1).unsqueeze(-1) * output + prob[1:].unsqueeze(-1).unsqueeze(-1) * output.flip(-2))).reshape(output.shape[:-3] + (self.size, 2))
+        return output
+
+    def argmax(self):
+        """
+        Return:
+            p: (self.size, ) array of int, the most probable permutation.
+        """
+        logit_bak = self.logit
+        self.logit = nn.Parameter(torch.where(self.logit >= 0, torch.tensor(float('inf')), torch.tensor(float('-inf'))))
+        if not self.complex:
+            p = self.forward(torch.arange(self.size, dtype=torch.float)).round().long()
+        else:
+            p = self.forward(torch.stack((torch.arange(self.size, dtype=torch.float), torch.zeros(self.size)), dim=-1))[:, 0].round().long()
+        self.logit = logit_bak
+        return p
+
+
+class BlockPermProduct(nn.Module):
+    """Product of block permutation matrices.
+    """
+
+    def __init__(self, size, complex=False, share_logit=False, increasing_size=True):
+        super().__init__()
+        m = int(math.log2(size))
+        assert size == 1 << m, "size must be a power of 2"
+        self.size = size
+        self.complex = complex
+        self.share_logit = share_logit
+        sizes = [size >> i for i in range(m)[::-1]] if increasing_size else [size >> i for i in range(m)]
+        if share_logit:
+            self.logit = nn.Parameter(torch.randn(3))
+            self.factors = nn.ModuleList([BlockPerm(size_, self.logit, complex=complex) for size_ in sizes])
+        else:
+            self.factors = nn.ModuleList([BlockPerm(size_, complex=complex) for size_ in sizes])
+
+    def forward(self, input):
+        """
+        Parameters:
+            input: (..., size) if real or (..., size, 2) if complex
+        Return:
+            output: (..., size) if real or (..., size, 2) if complex
+        """
+        output = input
+        for factor in self.factors[::-1]:
+            if not self.complex:
+                output = factor(output.reshape(output.shape[:-1] + (-1, factor.size))).reshape(output.shape)
+            else:
+                output = factor(output.reshape(output.shape[:-2] + (-1, factor.size, 2))).reshape(output.shape)
+        return output
+
+    def argmax(self):
+        """
+        Return:
+            p: (self.size, ) array of int, the most probable permutation.
+        """
+        p = torch.arange(self.size)
+        for factor in self.factors[::-1]:
+            p = p.reshape(-1, factor.size)[:, factor.argmax()].reshape(self.size)
+        return p
+        # if self.share_logit:
+        #     logit_bak = self.logit.clone()
+        #     self.logit = nn.Parameter(torch.where(self.logit >= 0, torch.tensor(float('inf')), torch.tensor(float('-inf'))))
+        # else:
+        #     logit_bak = [factor.logit.clone() for factor in self.factors]
+        #     for factor in self.factors:
+        #         factor.logit = nn.Parameter(torch.where(factor.logit >= 0, torch.tensor(float('inf')), torch.tensor(float('-inf'))))
+        # if not self.complex:
+        #     p = self.forward(torch.arange(self.size, dtype=torch.float)).round().long()
+        # else:
+        #     p = self.forward(torch.stack((torch.arange(self.size, dtype=torch.float), torch.zeros(self.size)), dim=-1))[:, 0].round().long()
+        # if self.share_logit:
+        #     self.logit = nn.Parameter(logit_bak)
+        # else:
+        #     for logit, factor in zip(logit_bak, self.factors):
+        #         factor.logit = nn.Parameter(logit)
+        # return p
+
 
 
 def test_butterfly():
@@ -229,6 +417,32 @@ def test_butterfly_product():
     batch_size = 3
     x = torch.randn((batch_size, size, 2))
     assert torch.allclose(model.forward(x), complex_matmul(x, model.matrix().transpose(0, 1)))
+
+
+def test_block2x2diagproduct():
+    # Factorization of the DFT matrix
+    size = 4
+    model = Block2x2DiagProduct(size, complex=True)
+    model.factors[1].ABCD = nn.Parameter(torch.tensor([[[[1.0, 0.0]], [[1.0, 0.0]]], [[[1.0, 0.0]], [[-1.0, 0.0]]]]))
+    model.factors[0].ABCD = nn.Parameter(torch.tensor([[[[1.0, 0.0],
+                                                         [1.0, 0.0]],
+                                                        [[1.0, 0.0],
+                                                         [0.0, -1.0]]],
+                                                       [[[1.0, 0.0],
+                                                         [1.0, 0.0]],
+                                                        [[-1.0, 0.0],
+                                                         [0.0, 1.0]]]]))
+    input = torch.stack((torch.eye(size), torch.zeros(size, size)), dim=-1)
+    assert torch.allclose(model(input[:, [0, 2, 1, 3]]), torch.fft(input, 1))
+
+
+def test_blockpermproduct():
+    size = 8
+    input = torch.randn(3, size, 2)
+    perm = BlockPermProduct(size, complex=True, share_logit=True)
+    perm.logit[0] = float('inf')
+    from utils import bitreversal_permutation
+    assert torch.allclose(perm(input), input[:, bitreversal_permutation(size)])
 
 
 def main():
