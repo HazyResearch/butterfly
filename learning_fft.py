@@ -494,7 +494,8 @@ class TrainableFftBlockPerm(PytorchTrainable):
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         size = config['size']
-        self.target_matrix = size * torch.ifft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        # self.target_matrix = size * torch.ifft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
         self.input = torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1)
 
     def _train(self):
