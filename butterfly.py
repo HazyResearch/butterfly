@@ -312,13 +312,9 @@ class BlockPerm(nn.Module):
         Return:
             p: (self.size, ) array of int, the most probable permutation.
         """
-        logit_bak = self.logit
-        self.logit = nn.Parameter(torch.where(self.logit >= 0, torch.tensor(float('inf')), torch.tensor(float('-inf'))))
-        if not self.complex:
-            p = self.forward(torch.arange(self.size, dtype=torch.float)).round().long()
-        else:
-            p = self.forward(torch.stack((torch.arange(self.size, dtype=torch.float), torch.zeros(self.size)), dim=-1))[:, 0].round().long()
-        self.logit = logit_bak
+        logit = nn.Parameter(torch.where(self.logit >= 0, torch.tensor(float('inf')), torch.tensor(float('-inf'))))
+        argmax_instance = self.__class__(self.size, logit, complex=False)
+        p = argmax_instance.forward(torch.arange(self.size, dtype=torch.float)).round().long()
         return p
 
 
@@ -333,7 +329,8 @@ class BlockPermProduct(nn.Module):
         self.size = size
         self.complex = complex
         self.share_logit = share_logit
-        sizes = [size >> i for i in range(m)[::-1]] if increasing_size else [size >> i for i in range(m)]
+        # We don't need the permutation with size 2 since it's always the identity
+        sizes = [size >> i for i in range(m - 1)[::-1]] if increasing_size else [size >> i for i in range(m - 1)]
         if share_logit:
             self.logit = nn.Parameter(torch.randn(3))
             self.factors = nn.ModuleList([BlockPerm(size_, self.logit, complex=complex) for size_ in sizes])
