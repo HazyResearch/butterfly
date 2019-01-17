@@ -468,28 +468,29 @@ class TrainableFftBlockPerm(TrainableMatrixFactorization):
         self.model[0] = FixedPermutation(self.model[0].argmax(), complex=self.model[0].complex)
 
 
-class TrainableFftBlockPermTranspose(TrainableFftBlockPerm):
+class TrainableFftBlockPermTranspose(TrainableMatrixFactorization):
 
     def _setup(self, config):
+        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float)
+        assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
+        assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
+        size = self.target_matrix.shape[0]
         torch.manual_seed(config['seed'])
+        # Transposing the permutation product won't capture the FFT, since we'll
+        # permutations that interleave the first half and second half (inverse
+        # of the permutation that separates the even and the odd).
+        # However, using the permutation product with increasing size will work
+        # since it can represent bit reversal, which is its own inverse.
         self.model = nn.Sequential(
-            Block2x2DiagProduct(size=config['size'], complex=True, decreasing_size=False),
-            BlockPermProduct(size=config['size'], complex=True, share_logit=False, increasing_size=True),
+            Block2x2DiagProduct(size=size, complex=True, decreasing_size=False),
+            BlockPermProduct(size=size, complex=True, share_logit=False, increasing_size=True),
         )
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
-        size = config['size']
-        self.target_matrix = torch.fft(real_to_complex(torch.eye(size)), 1)
         self.input = real_to_complex(torch.eye(size))
 
-    def _train(self):
-        for _ in range(self.n_steps_per_epoch):
-            self.optimizer.zero_grad()
-            y = self.model(self.input)
-            loss = nn.functional.mse_loss(y, self.target_matrix)
-            loss.backward()
-            self.optimizer.step()
-        return {'negative_loss': -loss.item()}
+    def freeze(self):
+        self.model[1] = FixedPermutation(self.model[1].argmax(), complex=self.model[1].complex)
 
 
 class TrainableFftTempAnnealing(TrainableFft):
@@ -633,56 +634,6 @@ def polished_loss_fft_learn_perm(trainable):
     loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.perm], trainable.target_matrix)
     # return loss.item() if not torch.isnan(loss) else preopt_loss.item() if not torch.isnan(preopt_loss) else float('inf')
     return loss.item() if not torch.isnan(loss) else preopt_loss.item() if not torch.isnan(preopt_loss) else 9999.0
-
-
-def polish_fft_blockperm(trial):
-    """Load model from checkpoint, then fix the order of the factor
-    matrices (using the largest logits), and re-optimize using L-BFGS to find
-    the nearest local optima.
-    """
-    trainable = eval(trial.trainable_name)(trial.config)
-    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
-    model = trainable.model
-    config = trial.config
-    perm = model[0].argmax()
-    polished_model = Block2x2DiagProduct(size=config['size'], complex=True)
-    polished_model.load_state_dict(model[1].state_dict())
-    optimizer = optim.LBFGS(polished_model.parameters())
-    def closure():
-        optimizer.zero_grad()
-        loss = nn.functional.mse_loss(polished_model(trainable.input[:, perm]), trainable.target_matrix)
-        loss.backward()
-        return loss
-    for i in range(N_LBFGS_STEPS):
-        optimizer.step(closure)
-    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
-    loss = nn.functional.mse_loss(polished_model(trainable.input[:, perm]), trainable.target_matrix)
-    return loss.item()
-
-
-def polish_fft_blockperm_transpose(trial):
-    """Load model from checkpoint, then fix the order of the factor
-    matrices (using the largest logits), and re-optimize using L-BFGS to find
-    the nearest local optima.
-    """
-    trainable = eval(trial.trainable_name)(trial.config)
-    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
-    model = trainable.model
-    config = trial.config
-    perm = model[1].argmax()
-    polished_model = Block2x2DiagProduct(size=config['size'], complex=True, decreasing_size=False)
-    polished_model.load_state_dict(model[0].state_dict())
-    optimizer = optim.LBFGS(polished_model.parameters())
-    def closure():
-        optimizer.zero_grad()
-        loss = nn.functional.mse_loss(polished_model(trainable.input)[:, perm], trainable.target_matrix)
-        loss.backward()
-        return loss
-    for i in range(N_LBFGS_STEPS):
-        optimizer.step(closure)
-    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
-    loss = nn.functional.mse_loss(polished_model(trainable.input)[:, perm], trainable.target_matrix)
-    return loss.item()
 
 
 ex = Experiment('Fft_factorization')
@@ -855,7 +806,7 @@ def fft_experiment_blockperm(size, ntrials, nsteps, result_dir, nthreads, smoke_
 @ex.capture
 def fft_experiment_blockperm_transpose(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
     config={
-        'size': size,
+        'target_matrix': named_target_matrix('dft', size),
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_steps_per_epoch': nsteps,
