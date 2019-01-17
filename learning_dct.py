@@ -20,7 +20,7 @@ import ray
 from ray.tune import Trainable, Experiment as RayExperiment, sample_from, run_experiments
 from ray.tune.schedulers import AsyncHyperBandScheduler
 
-from butterfly import Butterfly, ButterflyProduct
+from butterfly import Butterfly, ButterflyProduct, sinkhorn, Block2x2DiagProduct, BlockPerm, BlockPermProduct
 from semantic_loss import semantic_loss_exactly_one
 from utils import PytorchTrainable, bitreversal_permutation
 from complex_utils import complex_mul, complex_matmul
@@ -97,6 +97,114 @@ class TrainableDct(PytorchTrainable):
         return {'negative_loss': -loss.item()}
 
 
+class TrainableDctBlockPerm(PytorchTrainable):
+
+    def _setup(self, config):
+        torch.manual_seed(config['seed'])
+        self.model = nn.Sequential(
+            BlockPermProduct(size=config['size'], complex=True, share_logit=False),
+            Block2x2DiagProduct(size=config['size'], complex=True)
+        )
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        size = config['size']
+        # Need to transpose as dct acts on rows of matrix np.eye, not columns
+        self.target_matrix = torch.tensor(dct(np.eye(size)).T, dtype=torch.float)
+        self.input = torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1)
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model(self.input).transpose(0, 1)[:, :, 0]
+            loss = nn.functional.mse_loss(y, self.target_matrix)
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
+class TrainableDctBlockPermOneExtra(TrainableDctBlockPerm):
+
+    def _setup(self, config):
+        torch.manual_seed(config['seed'])
+        self.model = nn.Sequential(
+            BlockPerm(size=config['size'], complex=True),
+            BlockPermProduct(size=config['size'], complex=True, share_logit=False),
+            Block2x2DiagProduct(size=config['size'], complex=True)
+        )
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        size = config['size']
+        # Need to transpose as dct acts on rows of matrix np.eye, not columns
+        self.target_matrix = torch.tensor(dct(np.eye(size)).T, dtype=torch.float)
+        self.input = torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1)
+
+
+class TrainableDctBlockPermReal(PytorchTrainable):
+
+    def _setup(self, config):
+        torch.manual_seed(config['seed'])
+        self.model = nn.Sequential(
+            BlockPermProduct(size=config['size'], complex=False, share_logit=False),
+            Block2x2DiagProduct(size=config['size'], complex=False)
+        )
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        size = config['size']
+        # Need to transpose as dct acts on rows of matrix np.eye, not columns
+        self.target_matrix = torch.tensor(dct(np.eye(size)).T, dtype=torch.float)
+        self.input = torch.eye(size)
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model(self.input).t()
+            loss = nn.functional.mse_loss(y, self.target_matrix)
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
+class TrainableDctReal(PytorchTrainable):
+
+    def _setup(self, config):
+        torch.manual_seed(config['seed'])
+        self.model = ButterflyProduct(size=config['size'],
+                                      complex=False,
+                                      fixed_order=config['fixed_order'],
+                                      softmax_fn=config['softmax_fn'])
+        if (not config['fixed_order']) and config['softmax_fn'] == 'softmax':
+            self.semantic_loss_weight = config['semantic_loss_weight']
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        size = config['size']
+        # Need to transpose as dct acts on rows of matrix np.eye, not columns
+        self.target_matrix = torch.tensor(dct(np.eye(size)).T, dtype=torch.float)
+        arange_ = np.arange(size)
+        dct_perm = np.concatenate((arange_[::2], arange_[::-2]))
+        br_perm = bitreversal_permutation(size)
+        assert config['perm'] in ['id', 'br', 'dct']
+        if config['perm'] == 'id':
+            self.perm = torch.arange(size)
+        elif config['perm'] == 'br':
+            self.perm = br_perm
+        elif config['perm'] == 'dct':
+            self.perm = torch.arange(size)[dct_perm][br_perm]
+        else:
+            assert False, 'Wrong perm in config'
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model.matrix()[:, self.perm]
+            loss = nn.functional.mse_loss(y, self.target_matrix)
+            if (not self.model.fixed_order) and hasattr(self, 'semantic_loss_weight'):
+                semantic_loss = semantic_loss_exactly_one(nn.functional.log_softmax(self.model.logit, dim=-1))
+                loss += self.semantic_loss_weight * semantic_loss.mean()
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
 class TrainableDctTempAnnealing(TrainableDct):
 
     def _train(self):
@@ -139,6 +247,110 @@ def polish_dct(trial):
         optimizer.step(closure)
     torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
     loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.perm, 0], trainable.target_matrix)
+    return loss.item()
+
+
+def polish_dct_blockperm(trial):
+    """Load model from checkpoint, then fix the order of the factor
+    matrices (using the largest logits), and re-optimize using L-BFGS to find
+    the nearest local optima.
+    """
+    trainable = eval(trial.trainable_name)(trial.config)
+    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
+    model = trainable.model
+    config = trial.config
+    perm = model[0].argmax()
+    polished_model = Block2x2DiagProduct(size=config['size'], complex=True)
+    polished_model.load_state_dict(model[1].state_dict())
+    optimizer = optim.LBFGS(polished_model.parameters())
+    def closure():
+        optimizer.zero_grad()
+        loss = nn.functional.mse_loss(polished_model(trainable.input[:, perm]).transpose(0, 1)[:, :, 0], trainable.target_matrix)
+        loss.backward()
+        return loss
+    for i in range(N_LBFGS_STEPS):
+        optimizer.step(closure)
+    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
+    loss = nn.functional.mse_loss(polished_model(trainable.input[:, perm]).transpose(0, 1)[:, :, 0], trainable.target_matrix)
+    return loss.item()
+
+
+def polish_dct_blockperm_one_extra(trial):
+    """Load model from checkpoint, then fix the order of the factor
+    matrices (using the largest logits), and re-optimize using L-BFGS to find
+    the nearest local optima.
+    """
+    trainable = eval(trial.trainable_name)(trial.config)
+    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
+    model = trainable.model
+    config = trial.config
+    perm = model[0].argmax()[model[1].argmax()]
+    polished_model = Block2x2DiagProduct(size=config['size'], complex=True)
+    polished_model.load_state_dict(model[2].state_dict())
+    optimizer = optim.LBFGS(polished_model.parameters())
+    def closure():
+        optimizer.zero_grad()
+        loss = nn.functional.mse_loss(polished_model(trainable.input[:, perm]).transpose(0, 1)[:, :, 0], trainable.target_matrix)
+        loss.backward()
+        return loss
+    for i in range(N_LBFGS_STEPS):
+        optimizer.step(closure)
+    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
+    loss = nn.functional.mse_loss(polished_model(trainable.input[:, perm]).transpose(0, 1)[:, :, 0], trainable.target_matrix)
+    return loss.item()
+
+
+def polish_dct_blockperm_real(trial):
+    """Load model from checkpoint, then fix the order of the factor
+    matrices (using the largest logits), and re-optimize using L-BFGS to find
+    the nearest local optima.
+    """
+    trainable = eval(trial.trainable_name)(trial.config)
+    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
+    model = trainable.model
+    config = trial.config
+    perm = model[0].argmax()
+    polished_model = Block2x2DiagProduct(size=config['size'], complex=False)
+    polished_model.load_state_dict(model[1].state_dict())
+    optimizer = optim.LBFGS(polished_model.parameters())
+    def closure():
+        optimizer.zero_grad()
+        loss = nn.functional.mse_loss(polished_model(trainable.input[:, perm]).t(), trainable.target_matrix)
+        loss.backward()
+        return loss
+    for i in range(N_LBFGS_STEPS):
+        optimizer.step(closure)
+    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
+    loss = nn.functional.mse_loss(polished_model(trainable.input[:, perm]).t(), trainable.target_matrix)
+    return loss.item()
+
+
+def polish_dct_real(trial):
+    """Load model from checkpoint, then fix the order of the factor
+    matrices (using the largest logits), and re-optimize using L-BFGS to find
+    the nearest local optima.
+    """
+    trainable = eval(trial.trainable_name)(trial.config)
+    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
+    model = trainable.model
+    config = trial.config
+    polished_model = ButterflyProduct(size=config['size'], complex=model.complex, fixed_order=True)
+    if not model.fixed_order:
+        prob = model.softmax_fn(model.logit)
+        maxes, argmaxes = torch.max(prob, dim=-1)
+        polished_model.factors = nn.ModuleList([model.factors[argmax] for argmax in argmaxes])
+    else:
+        polished_model.factors = model.factors
+    optimizer = optim.LBFGS(polished_model.parameters())
+    def closure():
+        optimizer.zero_grad()
+        loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.perm], trainable.target_matrix)
+        loss.backward()
+        return loss
+    for i in range(N_LBFGS_STEPS):
+        optimizer.step(closure)
+    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
+    loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.perm], trainable.target_matrix)
     return loss.item()
 
 
@@ -203,9 +415,115 @@ def dct_experiment(fixed_order, softmax_fn, size, ntrials, nsteps, result_dir, n
     return experiment
 
 
+@ex.capture
+def dct_experiment_blockperm(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+    config={
+        'size': size,
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+        'n_steps_per_epoch': nsteps,
+     }
+    experiment = RayExperiment(
+        name=f'Dct_factorization_block_perm_{size}',
+        run=TrainableDctBlockPerm,
+        local_dir=result_dir,
+        num_samples=ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config=config,
+    )
+    return experiment
+
+
+@ex.capture
+def dct_experiment_blockperm_one_extra(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+    config={
+        'size': size,
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+        'n_steps_per_epoch': nsteps,
+     }
+    experiment = RayExperiment(
+        name=f'Dct_factorization_block_perm_one_extra_{size}',
+        run=TrainableDctBlockPermOneExtra,
+        local_dir=result_dir,
+        num_samples=ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config=config,
+    )
+    return experiment
+
+
+@ex.capture
+def dct_experiment_blockperm_real(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+    config={
+        'size': size,
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+        'n_steps_per_epoch': nsteps,
+     }
+    experiment = RayExperiment(
+        name=f'Dct_factorization_block_perm_real_{size}',
+        run=TrainableDctBlockPermReal,
+        local_dir=result_dir,
+        num_samples=ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config=config,
+    )
+    return experiment
+
+
+@ex.capture
+def dct_experiment_real(fixed_order, softmax_fn, size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+    assert softmax_fn in ['softmax', 'sparsemax']
+    config={
+        'fixed_order': fixed_order,
+        'softmax_fn': softmax_fn,
+        'size': size,
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+        'perm': sample_from(lambda spec: random.choice(['id', 'br', 'dct'])),
+        'n_steps_per_epoch': nsteps,
+     }
+    if (not fixed_order) and softmax_fn == 'softmax':
+        config['semantic_loss_weight'] = sample_from(lambda spec: math.exp(random.uniform(math.log(5e-3), math.log(5e-1))))
+    experiment = RayExperiment(
+        name=f'Dct_factorization_real_{fixed_order}_{softmax_fn}_{size}',
+        run=TrainableDctReal,
+        local_dir=result_dir,
+        num_samples=ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config=config,
+    )
+    return experiment
+
+
 @ex.automain
 def run(result_dir, nmaxepochs, nthreads):
-    experiment = dct_experiment()
+    # experiment = dct_experiment()
+    # experiment = dct_experiment_real()
+    # experiment = dct_experiment_blockperm()
+    experiment = dct_experiment_blockperm_one_extra()
+    # experiment = dct_experiment_blockperm_real()
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(nthreads)
     ray.init()
@@ -216,7 +534,11 @@ def run(result_dir, nmaxepochs, nthreads):
     # Polish solutions with L-BFGS
     pool = mp.Pool()
     sorted_trials = sorted(trials, key=lambda trial: -trial.last_result['negative_loss'])
-    polished_losses = pool.map(polish_dct, sorted_trials[:N_TRIALS_TO_POLISH])
+    # polished_losses = pool.map(polish_dct, sorted_trials[:N_TRIALS_TO_POLISH])
+    # polished_losses = pool.map(polish_dct_real, sorted_trials[:N_TRIALS_TO_POLISH])
+    # polished_losses = pool.map(polish_dct_blockperm, sorted_trials[:N_TRIALS_TO_POLISH])
+    polished_losses = pool.map(polish_dct_blockperm_one_extra, sorted_trials[:N_TRIALS_TO_POLISH])
+    # polished_losses = pool.map(polish_dct_blockperm_real, sorted_trials[:N_TRIALS_TO_POLISH])
     pool.close()
     pool.join()
     for i in range(N_TRIALS_TO_POLISH):
