@@ -20,7 +20,7 @@ import ray
 from ray.tune import Trainable, Experiment as RayExperiment, sample_from, run_experiments
 from ray.tune.schedulers import AsyncHyperBandScheduler
 
-from butterfly import Butterfly, ButterflyProduct, sinkhorn, Block2x2DiagProduct, BlockPermProduct
+from butterfly import Butterfly, ButterflyProduct, sinkhorn, Block2x2DiagProduct, BlockPermProduct, FixedPermutation
 from semantic_loss import semantic_loss_exactly_one
 from utils import PytorchTrainable, bitreversal_permutation, TrainableMatrixFactorization
 from complex_utils import real_to_complex, complex_matmul
@@ -448,28 +448,24 @@ class TrainableFftBlock2x2(TrainableMatrixFactorization):
         self.input = real_to_complex(torch.eye(size)[:, torch.tensor(bitreversal_permutation(size))])
 
 
-class TrainableFftBlockPerm(PytorchTrainable):
+class TrainableFftBlockPerm(TrainableMatrixFactorization):
 
     def _setup(self, config):
+        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float)
+        assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
+        assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
+        size = self.target_matrix.shape[0]
         torch.manual_seed(config['seed'])
         self.model = nn.Sequential(
-            BlockPermProduct(size=config['size'], complex=True, share_logit=False),
-            Block2x2DiagProduct(size=config['size'], complex=True)
+            BlockPermProduct(size=size, complex=True, share_logit=False),
+            Block2x2DiagProduct(size=size, complex=True)
         )
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
-        size = config['size']
-        self.target_matrix = torch.fft(real_to_complex(torch.eye(size)))
         self.input = real_to_complex(torch.eye(size))
 
-    def _train(self):
-        for _ in range(self.n_steps_per_epoch):
-            self.optimizer.zero_grad()
-            y = self.model(self.input)
-            loss = nn.functional.mse_loss(y, self.target_matrix)
-            loss.backward()
-            self.optimizer.step()
-        return {'negative_loss': -loss.item()}
+    def freeze(self):
+        self.model[0] = FixedPermutation(self.model[0].argmax(), complex=self.model[0].complex)
 
 
 class TrainableFftBlockPermTranspose(TrainableFftBlockPerm):
@@ -637,30 +633,6 @@ def polished_loss_fft_learn_perm(trainable):
     loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.perm], trainable.target_matrix)
     # return loss.item() if not torch.isnan(loss) else preopt_loss.item() if not torch.isnan(preopt_loss) else float('inf')
     return loss.item() if not torch.isnan(loss) else preopt_loss.item() if not torch.isnan(preopt_loss) else 9999.0
-
-
-def polish_fft_block2x2(trial):
-    """Load model from checkpoint, then fix the order of the factor
-    matrices (using the largest logits), and re-optimize using L-BFGS to find
-    the nearest local optima.
-    """
-    trainable = eval(trial.trainable_name)(trial.config)
-    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
-    model = trainable.model
-    config = trial.config
-    polished_model = Block2x2DiagProduct(size=config['size'], complex=model.complex)
-    polished_model.factors = model.factors
-    optimizer = optim.LBFGS(polished_model.parameters())
-    def closure():
-        optimizer.zero_grad()
-        loss = nn.functional.mse_loss(polished_model(trainable.input), trainable.target_matrix)
-        loss.backward()
-        return loss
-    for i in range(N_LBFGS_STEPS):
-        optimizer.step(closure)
-    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
-    loss = nn.functional.mse_loss(polished_model(trainable.input), trainable.target_matrix)
-    return loss.item()
 
 
 def polish_fft_blockperm(trial):
@@ -859,7 +831,7 @@ def fft_experiment_block2x2(size, ntrials, nsteps, result_dir, nthreads, smoke_t
 @ex.capture
 def fft_experiment_blockperm(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
     config={
-        'size': size,
+        'target_matrix': named_target_matrix('dft', size),
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_steps_per_epoch': nsteps,
@@ -909,8 +881,8 @@ def run(result_dir, nmaxepochs, nthreads):
     # experiment = fft_experiment()
     # experiment = fft_experiment_temp_annealing()
     # experiment = fft_experiment_learn_perm()
-    experiment = fft_experiment_block2x2()
-    # experiment = fft_experiment_blockperm()
+    # experiment = fft_experiment_block2x2()
+    experiment = fft_experiment_blockperm()
     # experiment = fft_experiment_blockperm_transpose()
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(nthreads)

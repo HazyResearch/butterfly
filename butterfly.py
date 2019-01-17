@@ -319,6 +319,21 @@ class BlockPerm(nn.Module):
         return p
 
 
+class FixedPermutation(nn.Module):
+
+    def __init__(self, permutation, complex=False):
+        """Fixed permutation. Used to store argmax of BlockPerm.
+        Parameter:
+            permutation: (n, ) tensor of ints
+        """
+        super().__init__()
+        self.permutation = nn.Parameter(permutation, requires_grad=False)
+        self.complex = complex
+
+    def forward(self, input):
+        return input[..., self.permutation] if not self.complex else input[..., self.permutation, :]
+
+
 class BlockPermProduct(nn.Module):
     """Product of block permutation matrices.
     """

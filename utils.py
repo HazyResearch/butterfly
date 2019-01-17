@@ -67,7 +67,7 @@ class TrainableMatrixFactorization(TrainableFixedData):
 
     def polish(self, nsteps):
         self.freeze()
-        optimizer = optim.LBFGS(self.model.parameters())
+        optimizer = optim.LBFGS(filter(lambda p: p.requires_grad, self.model.parameters()))
         def closure():
             optimizer.zero_grad()
             loss = self.loss()
