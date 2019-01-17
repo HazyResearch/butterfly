@@ -218,7 +218,7 @@ class Block2x2Diag(nn.Module):
         self.mul_op = complex_mul if complex else operator.mul
         ABCD_shape = (2, 2, size // 2) if not complex else (2, 2, size // 2, 2)
         if ABCD is None:
-            self.ABCD = nn.Parameter(torch.randn(ABCD_shape))
+            self.ABCD = nn.Parameter(torch.randn(ABCD_shape) / 2)
         else:
             assert ABCD.shape == ABCD_shape, f'ABCD must have shape {ABCD_shape}'
             self.ABCD = ABCD
