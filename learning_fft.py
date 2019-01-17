@@ -23,7 +23,7 @@ from ray.tune.schedulers import AsyncHyperBandScheduler
 from butterfly import Butterfly, ButterflyProduct, sinkhorn, Block2x2DiagProduct, BlockPermProduct
 from semantic_loss import semantic_loss_exactly_one
 from utils import PytorchTrainable, bitreversal_permutation
-from complex_utils import complex_matmul
+from complex_utils import real_to_complex, complex_matmul
 
 
 N_LBFGS_STEPS = 300
@@ -34,7 +34,7 @@ N_TRIALS_TO_POLISH = 60
 def fft_test():
     # DFT matrix for n = 4
     size = 4
-    DFT = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+    DFT = torch.fft(real_to_complex(torch.eye(size)), 1)
     P = torch.stack((torch.tensor([[1., 0., 0., 0.],
                                    [0., 0., 1., 0.],
                                    [0., 1., 0., 0.],
@@ -67,7 +67,7 @@ class TrainableFftFactorFixedOrder(PytorchTrainable):
         self.model = ButterflyProduct(size=size, complex=True, fixed_order=True)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.target_matrix = torch.fft(real_to_complex(torch.eye(size)), 1)
         self.br_perm = torch.tensor(bitreversal_permutation(size))
 
     def _train(self):
@@ -89,7 +89,7 @@ class TrainableFftFactorSoftmax(PytorchTrainable):
         self.semantic_loss_weight = config['semantic_loss_weight']
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.target_matrix = torch.fft(real_to_complex(torch.eye(size)), 1)
         self.br_perm = torch.tensor(bitreversal_permutation(size))
 
     def _train(self):
@@ -112,7 +112,7 @@ class TrainableFftFactorSparsemax(TrainableFftFactorFixedOrder):
         self.model = ButterflyProduct(size=size, complex=True, fixed_order=False, softmax_fn='sparsemax')
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.target_matrix = torch.fft(real_to_complex(torch.eye(size)), 1)
         self.br_perm = torch.tensor(bitreversal_permutation(size))
 
 
@@ -429,7 +429,7 @@ class TrainableFft(PytorchTrainable):
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         size = config['size']
-        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.target_matrix = torch.fft(real_to_complex(torch.eye(size)), 1)
         self.br_perm = torch.tensor(bitreversal_permutation(size))
         # br_perm = bitreversal_permutation(size)
         # br_reverse = torch.tensor(list(br_perm[::-1]))
@@ -469,9 +469,9 @@ class TrainableFftBlock2x2(PytorchTrainable):
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         size = config['size']
-        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.target_matrix = torch.fft(real_to_complex(torch.eye(size)), 1)
         self.br_perm = torch.tensor(bitreversal_permutation(size))
-        self.input = torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1)[:, self.br_perm]
+        self.input = real_to_complex(torch.eye(size))[:, self.br_perm]
 
     def _train(self):
         for _ in range(self.n_steps_per_epoch):
@@ -494,9 +494,9 @@ class TrainableFftBlockPerm(PytorchTrainable):
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         size = config['size']
-        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
-        # self.target_matrix = size * torch.ifft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
-        self.input = torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1)
+        self.target_matrix = torch.fft(real_to_complex(torch.eye(size)))
+        # self.target_matrix = size * torch.ifft(real_to_complex(torch.eye(size)))
+        self.input = real_to_complex(torch.eye(size))
 
     def _train(self):
         for _ in range(self.n_steps_per_epoch):
@@ -519,8 +519,8 @@ class TrainableFftBlockPermTranspose(TrainableFftBlockPerm):
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         size = config['size']
-        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
-        self.input = torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1)
+        self.target_matrix = torch.fft(real_to_complex(torch.eye(size)), 1)
+        self.input = real_to_complex(torch.eye(size))
 
     def _train(self):
         for _ in range(self.n_steps_per_epoch):
@@ -562,7 +562,7 @@ class TrainableFftLearnPerm(PytorchTrainable):
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         size = config['size']
-        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.target_matrix = torch.fft(real_to_complex(torch.eye(size)), 1)
 
     def _train(self):
         temperature = 1.0 / (0.3 * self._iteration + 1)

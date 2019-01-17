@@ -7,6 +7,16 @@ import numpy as np
 import torch
 
 
+def real_to_complex(X):
+    """A version of X that's complex (i.e., last dimension is 2).
+    Parameters:
+        X: (...) tensor
+    Return:
+        X_complex: (..., 2) tensor
+    """
+    return torch.stack((X, torch.zeros_like(X)), dim=-1)
+
+
 def conjugate(X):
     assert X.shape[-1] == 2, 'Last dimension must be 2'
     return X * torch.tensor((1, -1), dtype=X.dtype, device=X.device)
