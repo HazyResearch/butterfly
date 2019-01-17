@@ -20,14 +20,15 @@ import ray
 from ray.tune import Trainable, Experiment as RayExperiment, sample_from, run_experiments
 from ray.tune.schedulers import AsyncHyperBandScheduler
 
-from butterfly import Butterfly, ButterflyProduct
+from butterfly import Butterfly, ButterflyProduct, sinkhorn, Block2x2DiagProduct, BlockPermProduct
 from semantic_loss import semantic_loss_exactly_one
 from utils import PytorchTrainable, bitreversal_permutation
 from complex_utils import complex_matmul
 
 
 N_LBFGS_STEPS = 300
-N_TRIALS_TO_POLISH = 20
+N_LBFGS_STEPS_VALIDATION = 15
+N_TRIALS_TO_POLISH = 60
 
 
 def fft_test():
@@ -430,6 +431,22 @@ class TrainableFft(PytorchTrainable):
         size = config['size']
         self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
         self.br_perm = torch.tensor(bitreversal_permutation(size))
+        # br_perm = bitreversal_permutation(size)
+        # br_reverse = torch.tensor(list(br_perm[::-1]))
+        # br_reverse = torch.cat((torch.tensor(list(br_perm[:size//2][::-1])), torch.tensor(list(br_perm[size//2:][::-1]))))
+        # Same as [6, 2, 4, 0, 7, 3, 5, 1], which is [0, 1]^4 * [0, 2, 1, 3]^2 * [6, 4, 2, 0, 7, 5, 3, 1]
+        # br_reverse = torch.cat((torch.tensor(list(br_perm[:size//4][::-1])), torch.tensor(list(br_perm[size//4:size//2][::-1])), torch.tensor(list(br_perm[size//2:3*size//4][::-1])), torch.tensor(list(br_perm[3*size//4:][::-1]))))
+        # self.br_perm = br_reverse
+        # self.br_perm = torch.tensor([0, 7, 4, 3, 2, 5, 6, 1])  # Doesn't work
+        # self.br_perm = torch.tensor([7, 3, 0, 4, 2, 6, 5, 1])  # Doesn't work
+        # self.br_perm = torch.tensor([4, 0, 6, 2, 5, 1, 7, 3])  # This works, [0, 1]^4 * [2, 0, 3, 1]^2 * [0, 2, 4, 6, 1, 3, 5, 7] or [1, 0]^4 * [0, 2, 1, 3]^2 * [0, 2, 4, 6, 1, 3, 5, 7]
+        # self.br_perm = torch.tensor([4, 0, 2, 6, 5, 1, 3, 7])  # Doesn't work, [0, 1]^4 * [2, 0, 1, 3]^2 * [0, 2, 4, 6, 1, 3, 5, 7]
+        # self.br_perm = torch.tensor([1, 5, 3, 7, 0, 4, 2, 6])  # This works, [0, 1]^4 * [4, 6, 5, 7, 0, 4, 2, 6]
+        # self.br_perm = torch.tensor([4, 0, 6, 2, 5, 1, 3, 7])  # Doesn't work
+        # self.br_perm = torch.tensor([4, 0, 6, 2, 1, 5, 3, 7])  # Doesn't work
+        # self.br_perm = torch.tensor([0, 4, 6, 2, 1, 5, 7, 3])  # Doesn't work
+        # self.br_perm = torch.tensor([4, 1, 6, 2, 5, 0, 7, 3])  # This works, since it's just swapping 0 and 1
+        # self.br_perm = torch.tensor([5, 1, 6, 2, 4, 0, 7, 3])  # This works, since it's swapping 4 and 5
 
     def _train(self):
         for _ in range(self.n_steps_per_epoch):
@@ -439,6 +456,76 @@ class TrainableFft(PytorchTrainable):
             if (not self.model.fixed_order) and hasattr(self, 'semantic_loss_weight'):
                 semantic_loss = semantic_loss_exactly_one(nn.functional.log_softmax(self.model.logit, dim=-1))
                 loss += self.semantic_loss_weight * semantic_loss.mean()
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
+class TrainableFftBlock2x2(PytorchTrainable):
+
+    def _setup(self, config):
+        torch.manual_seed(config['seed'])
+        self.model = Block2x2DiagProduct(size=config['size'], complex=True)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        size = config['size']
+        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.br_perm = torch.tensor(bitreversal_permutation(size))
+        self.input = torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1)[:, self.br_perm]
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model(self.input)
+            loss = nn.functional.mse_loss(y, self.target_matrix)
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
+class TrainableFftBlockPerm(PytorchTrainable):
+
+    def _setup(self, config):
+        torch.manual_seed(config['seed'])
+        self.model = nn.Sequential(
+            BlockPermProduct(size=config['size'], complex=True, share_logit=False),
+            Block2x2DiagProduct(size=config['size'], complex=True)
+        )
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        size = config['size']
+        self.target_matrix = size * torch.ifft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.input = torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1)
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model(self.input)
+            loss = nn.functional.mse_loss(y, self.target_matrix)
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
+class TrainableFftBlockPermTranspose(TrainableFftBlockPerm):
+
+    def _setup(self, config):
+        torch.manual_seed(config['seed'])
+        self.model = nn.Sequential(
+            Block2x2DiagProduct(size=config['size'], complex=True, decreasing_size=False),
+            BlockPermProduct(size=config['size'], complex=True, share_logit=False, increasing_size=False),
+        )
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        size = config['size']
+        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+        self.input = torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1)
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model(self.input)
+            loss = nn.functional.mse_loss(y, self.target_matrix)
             loss.backward()
             self.optimizer.step()
         return {'negative_loss': -loss.item()}
@@ -458,6 +545,36 @@ class TrainableFftTempAnnealing(TrainableFft):
             loss.backward()
             self.optimizer.step()
         return {'negative_loss': -loss.item()}
+
+
+class TrainableFftLearnPerm(PytorchTrainable):
+
+    def _setup(self, config):
+        torch.manual_seed(config['seed'])
+        self.model = ButterflyProduct(size=config['size'],
+                                      complex=True,
+                                      fixed_order=config['fixed_order'],
+                                      softmax_fn=config['softmax_fn'],
+                                      learn_perm=True)
+        if (not config['fixed_order']) and config['softmax_fn'] == 'softmax':
+            self.semantic_loss_weight = config['semantic_loss_weight']
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        self.n_steps_per_epoch = config['n_steps_per_epoch']
+        size = config['size']
+        self.target_matrix = torch.fft(torch.stack((torch.eye(size), torch.zeros((size, size))), dim=-1), 1)
+
+    def _train(self):
+        temperature = 1.0 / (0.3 * self._iteration + 1)
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            y = self.model.matrix(temperature)
+            loss = nn.functional.mse_loss(y, self.target_matrix)
+            if (not self.model.fixed_order) and hasattr(self, 'semantic_loss_weight'):
+                semantic_loss = semantic_loss_exactly_one(nn.functional.log_softmax(self.model.logit, dim=-1))
+                loss += self.semantic_loss_weight * semantic_loss.mean()
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -polished_loss_fft_learn_perm(self)}
 
 
 def polish_fft(trial):
@@ -486,6 +603,136 @@ def polish_fft(trial):
         optimizer.step(closure)
     torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
     loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.br_perm], trainable.target_matrix)
+    return loss.item()
+
+
+def polish_fft_learn_perm(trial):
+    """Load model from checkpoint, then fix the order of the factor
+    matrices (using the largest logits), and re-optimize using L-BFGS to find
+    the nearest local optima.
+    """
+    trainable = eval(trial.trainable_name)(trial.config)
+    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
+    model = trainable.model
+    config = trial.config
+    polished_model = ButterflyProduct(size=config['size'], complex=model.complex, fixed_order=True)
+    temperature = 1.0 / (0.3 * trainable._iteration + 1)
+    trainable.perm = torch.argmax(sinkhorn(model.perm_logit / temperature), dim=1)
+    if not model.fixed_order:
+        prob = model.softmax_fn(model.logit)
+        maxes, argmaxes = torch.max(prob, dim=-1)
+        polished_model.factors = nn.ModuleList([model.factors[argmax] for argmax in argmaxes])
+    else:
+        polished_model.factors = model.factors
+    optimizer = optim.LBFGS(polished_model.parameters())
+    def closure():
+        optimizer.zero_grad()
+        loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.perm], trainable.target_matrix)
+        loss.backward()
+        return loss
+    for i in range(N_LBFGS_STEPS):
+        optimizer.step(closure)
+    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
+    loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.perm], trainable.target_matrix)
+    return loss.item()
+
+
+def polished_loss_fft_learn_perm(trainable):
+    model = trainable.model
+    polished_model = ButterflyProduct(size=model.size, complex=model.complex, fixed_order=True)
+    temperature = 1.0 / (0.3 * trainable._iteration + 1)
+    trainable.perm = torch.argmax(sinkhorn(model.perm_logit / temperature), dim=1)
+    if not model.fixed_order:
+        prob = model.softmax_fn(model.logit)
+        maxes, argmaxes = torch.max(prob, dim=-1)
+        polished_model.factors = nn.ModuleList([model.factors[argmax] for argmax in argmaxes])
+    else:
+        polished_model.factors = model.factors
+    preopt_loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.perm], trainable.target_matrix)
+    optimizer = optim.LBFGS(polished_model.parameters())
+    def closure():
+        optimizer.zero_grad()
+        loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.perm], trainable.target_matrix)
+        loss.backward()
+        return loss
+    for i in range(N_LBFGS_STEPS_VALIDATION):
+        optimizer.step(closure)
+    loss = nn.functional.mse_loss(polished_model.matrix()[:, trainable.perm], trainable.target_matrix)
+    # return loss.item() if not torch.isnan(loss) else preopt_loss.item() if not torch.isnan(preopt_loss) else float('inf')
+    return loss.item() if not torch.isnan(loss) else preopt_loss.item() if not torch.isnan(preopt_loss) else 9999.0
+
+
+def polish_fft_block2x2(trial):
+    """Load model from checkpoint, then fix the order of the factor
+    matrices (using the largest logits), and re-optimize using L-BFGS to find
+    the nearest local optima.
+    """
+    trainable = eval(trial.trainable_name)(trial.config)
+    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
+    model = trainable.model
+    config = trial.config
+    polished_model = Block2x2DiagProduct(size=config['size'], complex=model.complex)
+    polished_model.factors = model.factors
+    optimizer = optim.LBFGS(polished_model.parameters())
+    def closure():
+        optimizer.zero_grad()
+        loss = nn.functional.mse_loss(polished_model(trainable.input), trainable.target_matrix)
+        loss.backward()
+        return loss
+    for i in range(N_LBFGS_STEPS):
+        optimizer.step(closure)
+    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
+    loss = nn.functional.mse_loss(polished_model(trainable.input), trainable.target_matrix)
+    return loss.item()
+
+
+def polish_fft_blockperm(trial):
+    """Load model from checkpoint, then fix the order of the factor
+    matrices (using the largest logits), and re-optimize using L-BFGS to find
+    the nearest local optima.
+    """
+    trainable = eval(trial.trainable_name)(trial.config)
+    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
+    model = trainable.model
+    config = trial.config
+    perm = model[0].argmax()
+    polished_model = Block2x2DiagProduct(size=config['size'], complex=True)
+    polished_model.load_state_dict(model[1].state_dict())
+    optimizer = optim.LBFGS(polished_model.parameters())
+    def closure():
+        optimizer.zero_grad()
+        loss = nn.functional.mse_loss(polished_model(trainable.input[:, perm]), trainable.target_matrix)
+        loss.backward()
+        return loss
+    for i in range(N_LBFGS_STEPS):
+        optimizer.step(closure)
+    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
+    loss = nn.functional.mse_loss(polished_model(trainable.input[:, perm]), trainable.target_matrix)
+    return loss.item()
+
+
+def polish_fft_blockperm_transpose(trial):
+    """Load model from checkpoint, then fix the order of the factor
+    matrices (using the largest logits), and re-optimize using L-BFGS to find
+    the nearest local optima.
+    """
+    trainable = eval(trial.trainable_name)(trial.config)
+    trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
+    model = trainable.model
+    config = trial.config
+    perm = model[1].argmax()
+    polished_model = Block2x2DiagProduct(size=config['size'], complex=True, decreasing_size=False)
+    polished_model.load_state_dict(model[0].state_dict())
+    optimizer = optim.LBFGS(polished_model.parameters())
+    def closure():
+        optimizer.zero_grad()
+        loss = nn.functional.mse_loss(polished_model(trainable.input)[:, perm], trainable.target_matrix)
+        loss.backward()
+        return loss
+    for i in range(N_LBFGS_STEPS):
+        optimizer.step(closure)
+    torch.save(polished_model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
+    loss = nn.functional.mse_loss(polished_model(trainable.input)[:, perm], trainable.target_matrix)
     return loss.item()
 
 
@@ -579,9 +826,115 @@ def fft_experiment_temp_annealing(fixed_order, softmax_fn, size, ntrials, nsteps
     return experiment
 
 
+@ex.capture
+def fft_experiment_learn_perm(fixed_order, softmax_fn, size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+    assert softmax_fn in ['softmax', 'sparsemax']
+    config={
+        'fixed_order': fixed_order,
+        'softmax_fn': softmax_fn,
+        'size': size,
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+        'n_steps_per_epoch': nsteps,
+     }
+    if (not fixed_order) and softmax_fn == 'softmax':
+        config['semantic_loss_weight'] = sample_from(lambda spec: math.exp(random.uniform(math.log(5e-3), math.log(5e-1))))
+    experiment = RayExperiment(
+        name=f'Fft_factorization_Learnperm_{fixed_order}_{softmax_fn}_{size}',
+        run=TrainableFftLearnPerm,
+        local_dir=result_dir,
+        num_samples=ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if smoke_test else 99999,
+            # 'negative_loss': -1e-8
+        },
+        config=config,
+    )
+    return experiment
+
+
+@ex.capture
+def fft_experiment_block2x2(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+    config={
+        'size': size,
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+        'n_steps_per_epoch': nsteps,
+     }
+    experiment = RayExperiment(
+        name=f'Fft_factorization_block_{size}',
+        run=TrainableFftBlock2x2,
+        local_dir=result_dir,
+        num_samples=ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config=config,
+    )
+    return experiment
+
+
+@ex.capture
+def fft_experiment_blockperm(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+    config={
+        'size': size,
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+        'n_steps_per_epoch': nsteps,
+     }
+    experiment = RayExperiment(
+        name=f'Fft_factorization_block_perm_{size}',
+        run=TrainableFftBlockPerm,
+        local_dir=result_dir,
+        num_samples=ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config=config,
+    )
+    return experiment
+
+
+@ex.capture
+def fft_experiment_blockperm_transpose(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+    config={
+        'size': size,
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
+        'n_steps_per_epoch': nsteps,
+     }
+    experiment = RayExperiment(
+        name=f'Fft_factorization_block_perm_transpose_{size}',
+        run=TrainableFftBlockPermTranspose,
+        local_dir=result_dir,
+        num_samples=ntrials,
+        checkpoint_at_end=True,
+        resources_per_trial={'cpu': nthreads, 'gpu': 0},
+        stop={
+            'training_iteration': 1 if smoke_test else 99999,
+            'negative_loss': -1e-8
+        },
+        config=config,
+    )
+    return experiment
+
+
 @ex.automain
 def run(result_dir, nmaxepochs, nthreads):
-    experiment = fft_experiment()
+    # experiment = fft_experiment()
+    # experiment = fft_experiment_temp_annealing()
+    # experiment = fft_experiment_learn_perm()
+    # experiment = fft_experiment_block2x2()
+    experiment = fft_experiment_blockperm()
+    # experiment = fft_experiment_blockperm_transpose()
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(nthreads)
     ray.init()
@@ -592,10 +945,14 @@ def run(result_dir, nmaxepochs, nthreads):
     # Polish solutions with L-BFGS
     pool = mp.Pool()
     sorted_trials = sorted(trials, key=lambda trial: -trial.last_result['negative_loss'])
-    polished_losses = pool.map(polish_fft, sorted_trials[:N_TRIALS_TO_POLISH])
+    # polished_losses = pool.map(polish_fft, sorted_trials[:N_TRIALS_TO_POLISH])
+    # polished_losses = pool.map(polish_fft_learn_perm, sorted_trials[:N_TRIALS_TO_POLISH])
+    # polished_losses = pool.map(polish_fft_block2x2, sorted_trials[:N_TRIALS_TO_POLISH])
+    polished_losses = pool.map(polish_fft_blockperm, sorted_trials[:N_TRIALS_TO_POLISH])
+    # polished_losses = pool.map(polish_fft_blockperm_transpose, sorted_trials[:N_TRIALS_TO_POLISH])
     pool.close()
     pool.join()
-    for i in range(N_TRIALS_TO_POLISH):
+    for i in range(min(N_TRIALS_TO_POLISH, len(trials))):
         sorted_trials[i].last_result['polished_negative_loss'] = -polished_losses[i]
     print(np.array(losses))
     print(np.sort(losses))
@@ -610,3 +967,5 @@ def run(result_dir, nmaxepochs, nthreads):
 
     ex.add_artifact(str(checkpoint_path))
     return min(losses + polished_losses)
+
+    polished_losses = [-trial.last_result['polished_negative_loss'] for trial in sorted_trials[:N_TRIALS_TO_POLISH]]
