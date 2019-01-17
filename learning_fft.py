@@ -31,34 +31,6 @@ N_LBFGS_STEPS_VALIDATION = 15
 N_TRIALS_TO_POLISH = 60
 
 
-def fft_test():
-    # DFT matrix for n = 4
-    size = 4
-    DFT = torch.fft(real_to_complex(torch.eye(size)), 1)
-    P = torch.stack((torch.tensor([[1., 0., 0., 0.],
-                                   [0., 0., 1., 0.],
-                                   [0., 1., 0., 0.],
-                                   [0., 0., 0., 1.]]),
-                     torch.zeros((size, size))), dim=-1)
-    M0 = Butterfly(size,
-                   diagonal=2,
-                   complex=True,
-                   diag=torch.tensor([[1.0, 0.0], [1.0, 0.0], [-1.0, 0.0], [0.0, 1.0]], requires_grad=True),
-                   subdiag=torch.tensor([[1.0, 0.0], [1.0, 0.0]], requires_grad=True),
-                   superdiag=torch.tensor([[1.0, 0.0], [0.0, -1.0]], requires_grad=True))
-    M1 = Butterfly(size,
-                   diagonal=1,
-                   complex=True,
-                   diag=torch.tensor([[1.0, 0.0], [-1.0, 0.0], [1.0, 0.0], [-1.0, 0.0]], requires_grad=True),
-                   subdiag=torch.tensor([[1.0, 0.0], [0.0, 0.0], [1.0, 0.0]], requires_grad=True),
-                   superdiag=torch.tensor([[1.0, 0.0], [0.0, 0.0], [1.0, 0.0]], requires_grad=True))
-    assert torch.allclose(complex_matmul(M0.matrix(), complex_matmul(M1.matrix(), P)), DFT)
-    br_perm = torch.tensor(bitreversal_permutation(size))
-    assert torch.allclose(complex_matmul(M0.matrix(), M1.matrix())[:, br_perm], DFT)
-    D = complex_matmul(DFT, P.transpose(0, 1))
-    assert torch.allclose(complex_matmul(M0.matrix(), M1.matrix()), D)
-
-
 class TrainableFftFactorFixedOrder(PytorchTrainable):
 
     def _setup(self, config):

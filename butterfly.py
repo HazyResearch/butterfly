@@ -5,8 +5,9 @@ import functools
 import torch
 from torch import nn
 
-from complex_utils import complex_mul, complex_matmul
+from complex_utils import real_to_complex, complex_mul, complex_matmul
 from sparsemax import sparsemax
+from utils import bitreversal_permutation
 
 
 def sinkhorn(logit, n_iters=5):
@@ -414,6 +415,33 @@ def test_butterfly_product():
     batch_size = 3
     x = torch.randn((batch_size, size, 2))
     assert torch.allclose(model.forward(x), complex_matmul(x, model.matrix().transpose(0, 1)))
+
+
+def test_butterfly_fft():
+    # DFT matrix for n = 4
+    size = 4
+    DFT = torch.fft(real_to_complex(torch.eye(size)), 1)
+    P = real_to_complex(torch.tensor([[1., 0., 0., 0.],
+                                      [0., 0., 1., 0.],
+                                      [0., 1., 0., 0.],
+                                      [0., 0., 0., 1.]]))
+    M0 = Butterfly(size,
+                   diagonal=2,
+                   complex=True,
+                   diag=torch.tensor([[1.0, 0.0], [1.0, 0.0], [-1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+                   subdiag=torch.tensor([[1.0, 0.0], [1.0, 0.0]], requires_grad=True),
+                   superdiag=torch.tensor([[1.0, 0.0], [0.0, -1.0]], requires_grad=True))
+    M1 = Butterfly(size,
+                   diagonal=1,
+                   complex=True,
+                   diag=torch.tensor([[1.0, 0.0], [-1.0, 0.0], [1.0, 0.0], [-1.0, 0.0]], requires_grad=True),
+                   subdiag=torch.tensor([[1.0, 0.0], [0.0, 0.0], [1.0, 0.0]], requires_grad=True),
+                   superdiag=torch.tensor([[1.0, 0.0], [0.0, 0.0], [1.0, 0.0]], requires_grad=True))
+    assert torch.allclose(complex_matmul(M0.matrix(), complex_matmul(M1.matrix(), P)), DFT)
+    br_perm = torch.tensor(bitreversal_permutation(size))
+    assert torch.allclose(complex_matmul(M0.matrix(), M1.matrix())[:, br_perm], DFT)
+    D = complex_matmul(DFT, P.transpose(0, 1))
+    assert torch.allclose(complex_matmul(M0.matrix(), M1.matrix()), D)
 
 
 def test_block2x2diagproduct():
