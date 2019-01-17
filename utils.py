@@ -4,6 +4,9 @@ import os
 import numpy as np
 
 import torch
+from torch import nn
+from torch import optim
+
 from ray.tune import Trainable
 
 
@@ -24,6 +27,55 @@ class PytorchTrainable(Trainable):
         checkpoint = torch.load(checkpoint_path)
         self.model.load_state_dict(checkpoint['model'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
+
+
+class TrainableFixedData(PytorchTrainable):
+    """Abstract Trainable class for Pytorch models with fixed data.
+    Subclass must initialize self.model, self.optimizer, and
+    self.n_steps_per_epoch in _setup, and have to implement self.loss().
+    """
+    def loss(self):
+        raise NotImplementedError
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            loss = self.loss()
+            loss.backward()
+            self.optimizer.step()
+        return {'negative_loss': -loss.item()}
+
+
+class TrainableMatrixFactorization(TrainableFixedData):
+    """Abstract Trainable class for Pytorch models that factor a target matrix.
+    Subclass must initialize self.model, self.optimizer,
+    self.n_steps_per_epoch, self.target_matrix, and self.input in _setup, and
+    may override self.freeze() to freeze model (e.g. taking argmax of logit
+    instead of logit).
+    """
+    def forward(self):
+        return self.model(self.input)
+
+    def loss(self):
+        output = self.forward()
+        if self.target_matrix.dim() == 2 and output.dim() == 3:  # Real target matrix, take real part
+            output = output[:, :, 0]
+        return nn.functional.mse_loss(output, self.target_matrix)
+
+    def freeze(self):
+        pass
+
+    def polish(self, nsteps):
+        self.freeze()
+        optimizer = optim.LBFGS(self.model.parameters())
+        def closure():
+            optimizer.zero_grad()
+            loss = self.loss()
+            loss.backward()
+            return loss
+        for i in range(nsteps):
+            loss = optimizer.step(closure)
+        return loss.item()
 
 
 def bitreversal_permutation(n):
