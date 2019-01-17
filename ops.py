@@ -175,6 +175,9 @@ def legendre_transpose_mult_slow(v):
 
 
 def ops_transpose_mult_test():
+    # Trying to find memory leak
+    # n = 64
+    # batch_size = 1000
     n = 8
     batch_size = 2
     v = torch.randn(batch_size, n)
@@ -195,3 +198,7 @@ def ops_transpose_mult_test():
 
 if __name__ == '__main__':
     ops_transpose_mult_test()
+
+# TODO: there might be a memory leak, trying to find it here
+# for _ in range(1000):
+#     temp = polymatmul(A, B)

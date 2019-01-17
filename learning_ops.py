@@ -37,19 +37,19 @@ class TrainableOps(PytorchTrainable):
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         size = config['size']
         # Target: Legendre polynomials
-        P = np.zeros((size, size), dtype=np.float32)
+        P = np.zeros((size, size), dtype=np.float64)
         for i, coef in enumerate(np.eye(size)):
             P[i, :i + 1] = legendre.leg2poly(coef)
         self.target_matrix = torch.tensor(P)
         self.br_perm = bitreversal_permutation(size)
+        self.input = (torch.eye(size)[:, :, None, None] * torch.eye(2)).unsqueeze(-1)
+        self.input_permuted = self.input[:, self.br_perm]
 
     def _train(self):
         for _ in range(self.n_steps_per_epoch):
             self.optimizer.zero_grad()
-            eye = torch.eye(self.model.size)
-            x = (eye[:, :, None, None] * torch.eye(2)).unsqueeze(-1)
-            y = self.model(x[:, self.br_perm])
-            loss = nn.functional.mse_loss(y, self.target_matrix)
+            y = self.model(self.input_permuted)
+            loss = nn.functional.mse_loss(y.double(), self.target_matrix)
             loss.backward()
             self.optimizer.step()
         return {'negative_loss': -loss.item()}
@@ -159,3 +159,16 @@ def run(result_dir, nmaxepochs, nthreads):
 
     ex.add_artifact(str(checkpoint_path))
     return min(losses + polished_losses)
+
+# TODO: there might be a memory leak, trying to find it here
+# import gc
+# import operator as op
+# from functools import reduce
+
+# for obj in gc.get_objects():
+#     try:
+#         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+#             print(reduce(op.mul, obj.size()) if len(obj.size()) > 0 else 0, type(obj), obj.size())
+#             # print(type(obj), obj.size(), obj.type())
+#     except:
+#         pass
