@@ -459,6 +459,7 @@ class TrainableFftBlockPerm(TrainableMatrixFactorization):
         assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
         assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
         size = self.target_matrix.shape[0]
+        complex = self.target_matrix.dim() == 3 or config['complex']
         torch.manual_seed(config['seed'])
         self.model = nn.Sequential(
             BlockPermProduct(size=size, complex=True, share_logit=False),
@@ -675,6 +676,7 @@ def fixed_order_config():
     result_dir = 'results'  # Directory to store results
     nthreads = 1  # Number of CPU threads per job
     smoke_test = False  # Finish quickly for testing
+    complex = True  # Whether to use complex factorization or real factorization
 
 
 @ex.capture
@@ -765,16 +767,18 @@ def fft_experiment_learn_perm(fixed_order, softmax_fn, size, ntrials, nsteps, re
 
 
 @ex.capture
-def fft_experiment_block2x2(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+def fft_experiment_block(trainable, size, ntrials, nsteps, nepochsvalid, result_dir, nthreads, smoke_test):
     config={
         'target_matrix': named_target_matrix('dft', size),
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_steps_per_epoch': nsteps,
+        'n_epochs_per_validation': nepochsvalid,
+        'complex': True,
      }
     experiment = RayExperiment(
-        name=f'Fft_factorization_block_{size}',
-        run=TrainableFftBlock2x2,
+        name=f'Fft_factorization_{trainable.__name__}_{size}',
+        run=trainable,
         local_dir=result_dir,
         num_samples=ntrials,
         checkpoint_at_end=True,
@@ -782,56 +786,6 @@ def fft_experiment_block2x2(size, ntrials, nsteps, result_dir, nthreads, smoke_t
         stop={
             'training_iteration': 1 if smoke_test else 99999,
             'negative_loss': -1e-8
-        },
-        config=config,
-    )
-    return experiment
-
-
-@ex.capture
-def fft_experiment_blockperm(size, ntrials, nsteps, nepochsvalid, result_dir, nthreads, smoke_test):
-    config={
-        'target_matrix': named_target_matrix('dft', size),
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
-        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
-        'n_steps_per_epoch': nsteps,
-        'n_epochs_per_validation': nepochsvalid,
-     }
-    experiment = RayExperiment(
-        name=f'Fft_factorization_block_perm_{size}',
-        run=TrainableFftBlockPerm,
-        local_dir=result_dir,
-        num_samples=ntrials,
-        checkpoint_at_end=True,
-        resources_per_trial={'cpu': nthreads, 'gpu': 0},
-        stop={
-            'training_iteration': 1 if smoke_test else 99999,
-            'negative_loss': -1e-8
-        },
-        config=config,
-    )
-    return experiment
-
-
-@ex.capture
-def fft_experiment_blockperm_transpose(size, ntrials, nsteps, nepochsvalid, result_dir, nthreads, smoke_test):
-    config={
-        'target_matrix': named_target_matrix('dft', size),
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
-        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
-        'n_steps_per_epoch': nsteps,
-        'n_epochs_per_validation': nepochsvalid,
-     }
-    experiment = RayExperiment(
-        name=f'Fft_factorization_block_perm_transpose_{size}',
-        run=TrainableFftBlockPermTranspose,
-        local_dir=result_dir,
-        num_samples=ntrials,
-        checkpoint_at_end=True,
-        resources_per_trial={'cpu': nthreads, 'gpu': 0},
-        stop={
-            'training_iteration': 1 if smoke_test else 99999,
-            'negative_loss': -1e-8,
         },
         config=config,
     )
@@ -843,9 +797,9 @@ def run(result_dir, nmaxepochs, nthreads):
     # experiment = fft_experiment()
     # experiment = fft_experiment_temp_annealing()
     # experiment = fft_experiment_learn_perm()
-    # experiment = fft_experiment_block2x2()
-    # experiment = fft_experiment_blockperm()
-    experiment = fft_experiment_blockperm_transpose()
+    experiment = fft_experiment_block(TrainableFftBlock2x2)
+    # experiment = fft_experiment_block(TrainableFftBlockPerm)
+    # experiment = fft_experiment_block(TrainableFftBlockPermTranspose)
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(nthreads)
     ray.init()
@@ -859,9 +813,6 @@ def run(result_dir, nmaxepochs, nthreads):
     sorted_trials = sorted(trials, key=lambda trial: -trial.last_result['negative_loss'])
     # polished_losses = pool.map(polish_fft, sorted_trials[:N_TRIALS_TO_POLISH])
     # polished_losses = pool.map(polish_fft_learn_perm, sorted_trials[:N_TRIALS_TO_POLISH])
-    # polished_losses = pool.map(polish_fft_block2x2, sorted_trials[:N_TRIALS_TO_POLISH])
-    # polished_losses = pool.map(polish_fft_blockperm, sorted_trials[:N_TRIALS_TO_POLISH])
-    # polished_losses = pool.map(polish_fft_blockperm_transpose, sorted_trials[:N_TRIALS_TO_POLISH])
     polished_losses = pool.map(polish, sorted_trials[:N_TRIALS_TO_POLISH])
     # polished_losses = [-trial.last_result['polished_negative_loss'] for trial in sorted_trials[:N_TRIALS_TO_POLISH]]
     pool.close()
