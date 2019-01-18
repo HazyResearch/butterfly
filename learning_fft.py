@@ -830,8 +830,7 @@ def fft_experiment_blockperm_transpose(size, ntrials, nsteps, nepochsvalid, resu
         resources_per_trial={'cpu': nthreads, 'gpu': 0},
         stop={
             'training_iteration': 1 if smoke_test else 99999,
-            'negative_loss': -1e-4,
-            'polished_negative_loss': -1e-10,
+            'negative_loss': -1e-8,
         },
         config=config,
     )

@@ -92,11 +92,10 @@ class TrainableMatrixFactorization(TrainableFixedData):
             loss = self.loss()
             loss.backward()
             self.optimizer.step()
-        # If we don't polish, then count polished_loss as just loss
-        result = {'negative_loss': -loss.item(), 'polished_negative_loss': -loss.item()}
+        loss = loss.item()
         if (self._iteration + 1) % self.n_epochs_per_validation == 0:
-            result['polished_negative_loss'] = self.polish(N_LBFGS_STEPS_VALIDATION, save_to_self_model=False)
-        return result
+            loss = min(loss, self.polish(N_LBFGS_STEPS_VALIDATION, save_to_self_model=False))
+        return {'negative_loss': -loss}
 
 
 def bitreversal_permutation(n):
