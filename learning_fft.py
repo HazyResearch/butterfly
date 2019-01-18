@@ -24,7 +24,8 @@ from tune import run_experiments
 
 from butterfly import Butterfly, ButterflyProduct, sinkhorn, Block2x2DiagProduct, BlockPermProduct, FixedPermutation
 from semantic_loss import semantic_loss_exactly_one
-from utils import PytorchTrainable, bitreversal_permutation, TrainableMatrixFactorization
+from training import PytorchTrainable, TrainableMatrixFactorization
+from utils import bitreversal_permutation
 from complex_utils import real_to_complex, complex_matmul
 from target_matrix import named_target_matrix
 
