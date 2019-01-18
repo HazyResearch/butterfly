@@ -319,21 +319,6 @@ class BlockPerm(nn.Module):
         return p
 
 
-class FixedPermutation(nn.Module):
-
-    def __init__(self, permutation, complex=False):
-        """Fixed permutation. Used to store argmax of BlockPerm.
-        Parameter:
-            permutation: (n, ) tensor of ints
-        """
-        super().__init__()
-        self.permutation = nn.Parameter(permutation, requires_grad=False)
-        self.complex = complex
-
-    def forward(self, input):
-        return input[..., self.permutation] if not self.complex else input[..., self.permutation, :]
-
-
 class BlockPermProduct(nn.Module):
     """Product of block permutation matrices.
     """
@@ -377,23 +362,21 @@ class BlockPermProduct(nn.Module):
         for factor in self.factors[::-1]:
             p = p.reshape(-1, factor.size)[:, factor.argmax()].reshape(self.size)
         return p
-        # if self.share_logit:
-        #     logit_bak = self.logit.clone()
-        #     self.logit = nn.Parameter(torch.where(self.logit >= 0, torch.tensor(float('inf')), torch.tensor(float('-inf'))))
-        # else:
-        #     logit_bak = [factor.logit.clone() for factor in self.factors]
-        #     for factor in self.factors:
-        #         factor.logit = nn.Parameter(torch.where(factor.logit >= 0, torch.tensor(float('inf')), torch.tensor(float('-inf'))))
-        # if not self.complex:
-        #     p = self.forward(torch.arange(self.size, dtype=torch.float)).round().long()
-        # else:
-        #     p = self.forward(torch.stack((torch.arange(self.size, dtype=torch.float), torch.zeros(self.size)), dim=-1))[:, 0].round().long()
-        # if self.share_logit:
-        #     self.logit = nn.Parameter(logit_bak)
-        # else:
-        #     for logit, factor in zip(logit_bak, self.factors):
-        #         factor.logit = nn.Parameter(logit)
-        # return p
+
+
+class FixedPermutation(nn.Module):
+
+    def __init__(self, permutation, complex=False):
+        """Fixed permutation. Used to store argmax of BlockPerm and BlockPermProduct.
+        Parameter:
+            permutation: (n, ) tensor of ints
+        """
+        super().__init__()
+        self.permutation = nn.Parameter(permutation, requires_grad=False)
+        self.complex = complex
+
+    def forward(self, input):
+        return input[..., self.permutation] if not self.complex else input[..., self.permutation, :]
 
 
 
