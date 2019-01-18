@@ -447,6 +447,7 @@ class TrainableFftBlock2x2(TrainableMatrixFactorization):
         self.model = Block2x2DiagProduct(size=size, complex=True)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
+        self.n_epochs_per_validation = config['n_epochs_per_validation']
         self.input = real_to_complex(torch.eye(size)[:, torch.tensor(bitreversal_permutation(size))])
 
 
@@ -464,6 +465,7 @@ class TrainableFftBlockPerm(TrainableMatrixFactorization):
         )
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
+        self.n_epochs_per_validation = config['n_epochs_per_validation']
         self.input = real_to_complex(torch.eye(size))
 
     def freeze(self):
@@ -490,6 +492,7 @@ class TrainableFftBlockPermTranspose(TrainableMatrixFactorization):
         )
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
+        self.n_epochs_per_validation = config['n_epochs_per_validation']
         self.input = real_to_complex(torch.eye(size))
 
     def freeze(self):
@@ -550,7 +553,7 @@ def polish(trial):
     """
     trainable = eval(trial.trainable_name)(trial.config)
     trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
-    loss = trainable.polish(N_LBFGS_STEPS)
+    loss = trainable.polish(N_LBFGS_STEPS, save_to_self_model=True)
     torch.save(trainable.model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
     return loss
 
@@ -666,6 +669,7 @@ def fixed_order_config():
     size = 8  # Size of matrix to factor, must be power of 2
     ntrials = 20  # Number of trials for hyperparameter tuning
     nsteps = 400  # Number of steps per epoch
+    nepochsvalid = 5  # Frequency of validation (polishing), in terms of epochs
     nmaxepochs = 200  # Maximum number of epochs
     result_dir = 'results'  # Directory to store results
     nthreads = 1  # Number of CPU threads per job
@@ -784,12 +788,13 @@ def fft_experiment_block2x2(size, ntrials, nsteps, result_dir, nthreads, smoke_t
 
 
 @ex.capture
-def fft_experiment_blockperm(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+def fft_experiment_blockperm(size, ntrials, nsteps, nepochsvalid, result_dir, nthreads, smoke_test):
     config={
         'target_matrix': named_target_matrix('dft', size),
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_steps_per_epoch': nsteps,
+        'n_epochs_per_validation': nepochsvalid,
      }
     experiment = RayExperiment(
         name=f'Fft_factorization_block_perm_{size}',
@@ -808,12 +813,13 @@ def fft_experiment_blockperm(size, ntrials, nsteps, result_dir, nthreads, smoke_
 
 
 @ex.capture
-def fft_experiment_blockperm_transpose(size, ntrials, nsteps, result_dir, nthreads, smoke_test):
+def fft_experiment_blockperm_transpose(size, ntrials, nsteps, nepochsvalid, result_dir, nthreads, smoke_test):
     config={
         'target_matrix': named_target_matrix('dft', size),
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_steps_per_epoch': nsteps,
+        'n_epochs_per_validation': nepochsvalid,
      }
     experiment = RayExperiment(
         name=f'Fft_factorization_block_perm_transpose_{size}',
@@ -824,8 +830,8 @@ def fft_experiment_blockperm_transpose(size, ntrials, nsteps, result_dir, nthrea
         resources_per_trial={'cpu': nthreads, 'gpu': 0},
         stop={
             'training_iteration': 1 if smoke_test else 99999,
-            'negative_loss': -1e-5,
-            # 'polished_negative_loss': -1e-10,
+            'negative_loss': -1e-4,
+            'polished_negative_loss': -1e-10,
         },
         config=config,
     )

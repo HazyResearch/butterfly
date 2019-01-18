@@ -1,3 +1,4 @@
+import copy
 import math
 import os
 
@@ -8,6 +9,9 @@ from torch import nn
 from torch import optim
 
 from ray.tune import Trainable
+
+
+N_LBFGS_STEPS_VALIDATION = 15
 
 
 class PytorchTrainable(Trainable):
@@ -49,9 +53,10 @@ class TrainableFixedData(PytorchTrainable):
 class TrainableMatrixFactorization(TrainableFixedData):
     """Abstract Trainable class for Pytorch models that factor a target matrix.
     Subclass must initialize self.model, self.optimizer,
-    self.n_steps_per_epoch, self.target_matrix, and self.input in _setup, and
-    may override self.freeze() to freeze model (e.g. taking argmax of logit
-    instead of logit).
+    self.n_steps_per_epoch, self.n_epochs_per_validation, self.target_matrix,
+    and self.input in _setup, and may override self.freeze() to freeze model
+    (e.g. taking argmax of logit instead of logit).
+
     """
     def forward(self):
         return self.model(self.input)
@@ -65,7 +70,9 @@ class TrainableMatrixFactorization(TrainableFixedData):
     def freeze(self):
         pass
 
-    def polish(self, nsteps):
+    def polish(self, nsteps, save_to_self_model=True):
+        if not save_to_self_model:
+            model_bak = copy.deepcopy(self.model)
         self.freeze()
         optimizer = optim.LBFGS(filter(lambda p: p.requires_grad, self.model.parameters()))
         def closure():
@@ -75,7 +82,21 @@ class TrainableMatrixFactorization(TrainableFixedData):
             return loss
         for i in range(nsteps):
             loss = optimizer.step(closure)
+        if not save_to_self_model:
+            self.model = model_bak
         return loss.item()
+
+    def _train(self):
+        for _ in range(self.n_steps_per_epoch):
+            self.optimizer.zero_grad()
+            loss = self.loss()
+            loss.backward()
+            self.optimizer.step()
+        # If we don't polish, then count polished_loss as just loss
+        result = {'negative_loss': -loss.item(), 'polished_negative_loss': -loss.item()}
+        if (self._iteration + 1) % self.n_epochs_per_validation == 0:
+            result['polished_negative_loss'] = self.polish(N_LBFGS_STEPS_VALIDATION, save_to_self_model=False)
+        return result
 
 
 def bitreversal_permutation(n):
