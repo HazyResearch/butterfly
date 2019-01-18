@@ -59,13 +59,14 @@ class TrainableMatrixFactorization(TrainableFixedData):
         return self.model(self.input)
 
     def loss(self):
-        output = self.forward()
+        # Take transpose since the transform acts on the rows of the input
+        output = self.forward().transpose(0, 1)
         if self.target_matrix.dim() == 2 and output.dim() == 3:  # Real target matrix, take real part
             output = output[:, :, 0]
         return nn.functional.mse_loss(output, self.target_matrix)
 
     def freeze(self):
-        return self.model
+        pass
 
     def polish(self, nsteps, save_to_self_model=False):
         if not save_to_self_model:

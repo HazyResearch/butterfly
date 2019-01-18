@@ -23,8 +23,13 @@ def named_target_matrix(name, size):
         return np.ascontiguousarray(LA.dft(size, scale='sqrtn').conj().T)[:, :, None].view('float64')
     elif name == 'dct':
         # Need to transpose as dct acts on rows of matrix np.eye, not columns
-        return dct(np.eye(size), norm='ortho').T
+        # return dct(np.eye(size), norm='ortho').T
+        return dct(np.eye(size)).T / math.sqrt(size)
     elif name == 'hadamard':
         return LA.hadamard(size) / math.sqrt(size)
+    elif name == 'convolution':
+        np.random.seed(0)
+        x = np.random.randn(size)
+        return LA.circulant(x) / math.sqrt(size)
     else:
         assert False, 'Target matrix name not recognized or implemented'
