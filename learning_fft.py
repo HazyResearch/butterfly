@@ -17,8 +17,10 @@ from sacred import Experiment
 from sacred.observers import FileStorageObserver, SlackObserver
 
 import ray
-from ray.tune import Trainable, Experiment as RayExperiment, sample_from, run_experiments
+from ray.tune import Trainable, Experiment as RayExperiment, sample_from
 from ray.tune.schedulers import AsyncHyperBandScheduler
+
+from tune import run_experiments
 
 from butterfly import Butterfly, ButterflyProduct, sinkhorn, Block2x2DiagProduct, BlockPermProduct, FixedPermutation
 from semantic_loss import semantic_loss_exactly_one
@@ -465,7 +467,8 @@ class TrainableFftBlockPerm(TrainableMatrixFactorization):
         self.input = real_to_complex(torch.eye(size))
 
     def freeze(self):
-        self.model[0] = FixedPermutation(self.model[0].argmax(), complex=self.model[0].complex)
+        if not isinstance(self.model[0], FixedPermutation):
+            self.model[0] = FixedPermutation(self.model[0].argmax(), complex=self.model[0].complex)
 
 
 class TrainableFftBlockPermTranspose(TrainableMatrixFactorization):
@@ -490,7 +493,8 @@ class TrainableFftBlockPermTranspose(TrainableMatrixFactorization):
         self.input = real_to_complex(torch.eye(size))
 
     def freeze(self):
-        self.model[1] = FixedPermutation(self.model[1].argmax(), complex=self.model[1].complex)
+        if not isinstance(self.model[1], FixedPermutation):
+            self.model[1] = FixedPermutation(self.model[1].argmax(), complex=self.model[1].complex)
 
 
 class TrainableFftTempAnnealing(TrainableFft):
@@ -820,7 +824,8 @@ def fft_experiment_blockperm_transpose(size, ntrials, nsteps, result_dir, nthrea
         resources_per_trial={'cpu': nthreads, 'gpu': 0},
         stop={
             'training_iteration': 1 if smoke_test else 99999,
-            'negative_loss': -1e-8
+            'negative_loss': -1e-5,
+            # 'polished_negative_loss': -1e-10,
         },
         config=config,
     )
@@ -833,14 +838,15 @@ def run(result_dir, nmaxepochs, nthreads):
     # experiment = fft_experiment_temp_annealing()
     # experiment = fft_experiment_learn_perm()
     # experiment = fft_experiment_block2x2()
-    experiment = fft_experiment_blockperm()
-    # experiment = fft_experiment_blockperm_transpose()
+    # experiment = fft_experiment_blockperm()
+    experiment = fft_experiment_blockperm_transpose()
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(nthreads)
     ray.init()
     ahb = AsyncHyperBandScheduler(reward_attr='negative_loss', max_t=nmaxepochs)
-    trials = run_experiments(experiment, scheduler=ahb, raise_on_failed_trial=False)
-    losses = [-trial.last_result['negative_loss'] for trial in trials]
+    trials = run_experiments(experiment, scheduler=ahb, raise_on_failed_trial=False, early_stop_all_trials=True)
+    trials = [trial for trial in trials if trial.last_result is not None]
+    losses = [-trial.last_result.get('negative_loss', float('inf')) for trial in trials]
 
     # Polish solutions with L-BFGS
     pool = mp.Pool()
@@ -851,6 +857,7 @@ def run(result_dir, nmaxepochs, nthreads):
     # polished_losses = pool.map(polish_fft_blockperm, sorted_trials[:N_TRIALS_TO_POLISH])
     # polished_losses = pool.map(polish_fft_blockperm_transpose, sorted_trials[:N_TRIALS_TO_POLISH])
     polished_losses = pool.map(polish, sorted_trials[:N_TRIALS_TO_POLISH])
+    # polished_losses = [-trial.last_result['polished_negative_loss'] for trial in sorted_trials[:N_TRIALS_TO_POLISH]]
     pool.close()
     pool.join()
     for i in range(min(N_TRIALS_TO_POLISH, len(trials))):
@@ -869,4 +876,3 @@ def run(result_dir, nmaxepochs, nthreads):
     ex.add_artifact(str(checkpoint_path))
     return min(losses + polished_losses)
 
-    polished_losses = [-trial.last_result['polished_negative_loss'] for trial in sorted_trials[:N_TRIALS_TO_POLISH]]
