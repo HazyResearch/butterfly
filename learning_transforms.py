@@ -30,7 +30,7 @@ from complex_utils import real_to_complex, complex_matmul
 from target_matrix import named_target_matrix
 
 
-N_LBFGS_STEPS = 300
+N_LBFGS_STEPS = 50
 N_LBFGS_STEPS_VALIDATION = 15
 N_TRIALS_TO_POLISH = 16
 
