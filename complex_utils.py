@@ -7,16 +7,20 @@ import numpy as np
 import torch
 from torch.utils.dlpack import to_dlpack, from_dlpack
 
-# Check if cupy is available
-if torch.cuda.is_available():
-    use_cupy = True
-    try:
-        import cupy as cp
-    except:
-        use_cupy = False
-        print("Cupy isn't installed or isn't working properly. Will use Pytorch's complex multiply, which is much slower.")
-else:
-    use_cupy = False
+# For now, it seems that the overhead of converting to cupy makes the cupy
+# version slower than the torch version. So I'll just disable cupy.
+
+# # Check if cupy is available
+# if torch.cuda.is_available():
+#     use_cupy = True
+#     try:
+#         import cupy as cp
+#     except:
+#         use_cupy = False
+#         print("Cupy isn't installed or isn't working properly. Will use Pytorch's complex multiply, which is slower.")
+# else:
+#     use_cupy = False
+use_cupy = False
 
 
 def torch2numpy(X):
@@ -43,9 +47,32 @@ def real_to_complex(X):
     return torch.stack((X, torch.zeros_like(X)), dim=-1)
 
 
-def conjugate(X):
+def conjugate_torch(X):
     assert X.shape[-1] == 2, 'Last dimension must be 2'
     return X * torch.tensor((1, -1), dtype=X.dtype, device=X.device)
+
+
+class Conjugate(torch.autograd.Function):
+    '''X is a complex64 tensors but stored as float32 tensors, with last dimension = 2.
+    '''
+    @staticmethod
+    def forward(ctx, X):
+        assert X.shape[-1] == 2, 'Last dimension must be 2'
+        if X.is_cuda:
+            if use_cupy:
+                # TODO: do we need .contiguous here? I think it doesn't work if the last dimension isn't contiguous
+                return cupy2torch(torch2cupy(X).view('complex64').conj().view('float32'))
+            else:
+                return conjugate_torch(X, Y)
+        else:
+            return torch.from_numpy(np.ascontiguousarray(torch2numpy(X)).view('complex64').conj().view('float32'))
+
+    @staticmethod
+    def backward(ctx, grad):
+        return Conjugate.apply(grad)
+
+
+conjugate = Conjugate.apply
 
 
 def complex_mul_torch(X, Y):
@@ -90,7 +117,10 @@ class ComplexMul(torch.autograd.Function):
         # Need to sum over dimensions that were broadcasted
         dims_to_sum_X = [-i for i in range(1, X.dim() + 1) if X.shape[-i] != grad.shape[-i]]
         dims_to_sum_Y = [-i for i in range(1, Y.dim() + 1) if Y.shape[-i] != grad.shape[-i]]
-        grad_X = grad_X.sum(dim=dims_to_sum_X, keepdim=True)
+        if dims_to_sum_X:  # If empty list is passed to sum, it sums all the dimensions
+            grad_X = grad_X.sum(dim=dims_to_sum_X, keepdim=True)
+        if dims_to_sum_Y:  # If empty list is passed to sum, it sums all the dimensions
+            grad_Y = grad_Y.sum(dim=dims_to_sum_Y, keepdim=True)
         if grad.dim() > X.dim():
             grad_X = grad_X.sum(tuple(range(grad.dim() - X.dim())))
         if grad.dim() > Y.dim():
@@ -116,6 +146,17 @@ def test_complex_mul():
     dX_torch, dY_torch = torch.autograd.grad(Z_torch, (X, Y), g)
     assert torch.allclose(dX, dX_torch)
     assert torch.allclose(dY, dY_torch)
+    if torch.cuda.is_available():
+        X, Y = X.cuda(), Y.cuda()
+        Z = complex_mul(X, Y)
+        Z_torch = complex_mul_torch(X, Y)
+        assert Z.shape == (n, p, m, 2)
+        assert torch.allclose(Z, Z_torch)
+        g = torch.rand_like(Z)
+        dX, dY = torch.autograd.grad(Z, (X, Y), g)
+        dX_torch, dY_torch = torch.autograd.grad(Z_torch, (X, Y), g)
+        assert torch.allclose(dX, dX_torch)
+        assert torch.allclose(dY, dY_torch)
 
 
 def complex_matmul_torch(X, Y):
