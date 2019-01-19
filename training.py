@@ -25,7 +25,10 @@ class PytorchTrainable(Trainable):
         return checkpoint_path
 
     def _restore(self, checkpoint_path):
-        checkpoint = torch.load(checkpoint_path)
+        if hasattr(self, 'device'):
+            checkpoint = torch.load(checkpoint_path, self.device)
+        else:
+            checkpoint = torch.load(checkpoint_path)
         self.model.load_state_dict(checkpoint['model'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
 

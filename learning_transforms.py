@@ -40,17 +40,19 @@ class TrainableButterfly(TrainableMatrixFactorization):
     """
 
     def _setup(self, config):
-        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float)
+        device = config['device']
+        self.device = device
+        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
         assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
         assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
         size = self.target_matrix.shape[0]
         complex = self.target_matrix.dim() == 3 or config['complex']
         torch.manual_seed(config['seed'])
-        self.model = Block2x2DiagProduct(size=size, complex=complex)
+        self.model = Block2x2DiagProduct(size=size, complex=complex).to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.n_epochs_per_validation = config['n_epochs_per_validation']
-        self.input = torch.eye(size)[:, torch.tensor(bitreversal_permutation(size))]
+        self.input = torch.eye(size)[:, torch.tensor(bitreversal_permutation(size))].to(device)
         if complex:
             self.input = real_to_complex(self.input)
 
@@ -60,7 +62,9 @@ class TrainableBP(TrainableMatrixFactorization):
     """
 
     def _setup(self, config):
-        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float)
+        device = config['device']
+        self.device = device
+        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
         assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
         assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
         size = self.target_matrix.shape[0]
@@ -69,11 +73,11 @@ class TrainableBP(TrainableMatrixFactorization):
         self.model = nn.Sequential(
             BlockPermProduct(size=size, complex=complex, share_logit=config['share_logit_0']),
             Block2x2DiagProduct(size=size, complex=complex)
-        )
+        ).to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.n_epochs_per_validation = config['n_epochs_per_validation']
-        self.input = torch.eye(size)
+        self.input = torch.eye(size).to(device)
         if complex:
             self.input = real_to_complex(self.input)
 
@@ -93,7 +97,9 @@ class TrainablePBT(TrainableMatrixFactorization):
     # represent bit reversal, which is its own inverse.
 
     def _setup(self, config):
-        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float)
+        device = config['device']
+        self.device = device
+        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
         assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
         assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
         size = self.target_matrix.shape[0]
@@ -102,11 +108,13 @@ class TrainablePBT(TrainableMatrixFactorization):
         self.model = nn.Sequential(
             Block2x2DiagProduct(size=size, complex=complex, decreasing_size=False),
             BlockPermProduct(size=size, complex=complex, share_logit=config['share_logit_0'], increasing_size=True),
-        )
+        ).to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.n_epochs_per_validation = config['n_epochs_per_validation']
-        self.input = real_to_complex(torch.eye(size))
+        self.input = torch.eye(size).to(device)
+        if complex:
+            self.input = real_to_complex(self.input)
 
     def freeze(self):
         if not isinstance(self.model[1], FixedPermutation):
@@ -119,7 +127,9 @@ class TrainableBPP(TrainableMatrixFactorization):
     """
 
     def _setup(self, config):
-        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float)
+        device = config['device']
+        self.device = device
+        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
         assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
         assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
         size = self.target_matrix.shape[0]
@@ -129,11 +139,11 @@ class TrainableBPP(TrainableMatrixFactorization):
             BlockPerm(size=size, complex=complex),
             BlockPermProduct(size=size, complex=complex, share_logit=config['share_logit_0']),
             Block2x2DiagProduct(size=size, complex=complex)
-        )
+        ).to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.n_epochs_per_validation = config['n_epochs_per_validation']
-        self.input = torch.eye(size)
+        self.input = torch.eye(size).to(device)
         if complex:
             self.input = real_to_complex(self.input)
 
@@ -150,7 +160,9 @@ class TrainableBPBP(TrainableMatrixFactorization):
     """
 
     def _setup(self, config):
-        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float)
+        device = config['device']
+        self.device = device
+        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
         assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
         assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
         size = self.target_matrix.shape[0]
@@ -161,11 +173,11 @@ class TrainableBPBP(TrainableMatrixFactorization):
             Block2x2DiagProduct(size=size, complex=complex),
             BlockPermProduct(size=size, complex=complex, share_logit=config['share_logit_0']),
             Block2x2DiagProduct(size=size, complex=complex),
-        )
+        ).to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.n_epochs_per_validation = config['n_epochs_per_validation']
-        self.input = torch.eye(size)
+        self.input = torch.eye(size).to(device)
         if complex:
             self.input = real_to_complex(self.input)
 
@@ -181,10 +193,14 @@ def polish(trial):
     matrices (using the largest logits), and re-optimize using L-BFGS to find
     the nearest local optima.
     """
+    # Polish on CPUs, not GPUs
+    device = trial.config['device']
+    trial.config['device'] = 'cpu'
     trainable = eval(trial.trainable_name)(trial.config)
     trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
     loss = trainable.polish(N_LBFGS_STEPS, save_to_self_model=True)
     torch.save(trainable.model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
+    trial.config['device'] = device
     return loss
 
 
@@ -217,12 +233,13 @@ def default_config():
     nepochsvalid = 5  # Frequency of validation (polishing), in terms of epochs
     nmaxepochs = 200  # Maximum number of epochs
     result_dir = 'results_new'  # Directory to store results
+    cuda = torch.cuda.is_available()  # Whether to use GPU
     nthreads = 1  # Number of CPU threads per job
     smoke_test = False  # Finish quickly for testing
 
 
 @ex.capture
-def transform_experiment(trainable, target, size, complex, ntrials, nsteps, nepochsvalid, result_dir, nthreads, smoke_test):
+def transform_experiment(trainable, target, size, complex, ntrials, nsteps, nepochsvalid, result_dir, cuda, nthreads, smoke_test):
     config={
         'target_matrix': named_target_matrix(target, size),
         'complex': complex,
@@ -232,6 +249,7 @@ def transform_experiment(trainable, target, size, complex, ntrials, nsteps, nepo
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_steps_per_epoch': nsteps,
         'n_epochs_per_validation': nepochsvalid,
+        'device': 'cuda' if cuda else 'cpu',
      }
     experiment = RayExperiment(
         name=f'{target}_factorization_{trainable.__name__}_{complex}_{size}',
@@ -239,7 +257,7 @@ def transform_experiment(trainable, target, size, complex, ntrials, nsteps, nepo
         local_dir=result_dir,
         num_samples=ntrials,
         checkpoint_at_end=True,
-        resources_per_trial={'cpu': nthreads, 'gpu': 0},
+        resources_per_trial={'cpu': nthreads, 'gpu': 0.2 if cuda else 0},
         stop={
             'training_iteration': 1 if smoke_test else 99999,
             'negative_loss': -1e-8

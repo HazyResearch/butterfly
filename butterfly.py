@@ -314,9 +314,9 @@ class BlockPerm(nn.Module):
         Return:
             p: (self.size, ) array of int, the most probable permutation.
         """
-        logit = nn.Parameter(torch.where(self.logit >= 0, torch.tensor(float('inf')), torch.tensor(float('-inf'))))
+        logit = nn.Parameter(torch.where(self.logit >= 0, torch.tensor(float('inf'), device=self.logit.device), torch.tensor(float('-inf'), device=self.logit.device)))
         argmax_instance = self.__class__(self.size, logit, complex=False)
-        p = argmax_instance.forward(torch.arange(self.size, dtype=torch.float)).round().long()
+        p = argmax_instance.forward(torch.arange(self.size, dtype=torch.float, device=self.logit.device)).round().long()
         return p
 
 
@@ -359,7 +359,7 @@ class BlockPermProduct(nn.Module):
         Return:
             p: (self.size, ) array of int, the most probable permutation.
         """
-        p = torch.arange(self.size)
+        p = torch.arange(self.size, device=self.factors[0].logit.device)
         for factor in self.factors[::-1]:
             p = p.reshape(-1, factor.size)[:, factor.argmax()].reshape(self.size)
         return p
