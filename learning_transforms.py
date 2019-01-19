@@ -32,7 +32,7 @@ from target_matrix import named_target_matrix
 
 N_LBFGS_STEPS = 300
 N_LBFGS_STEPS_VALIDATION = 15
-N_TRIALS_TO_POLISH = 60
+N_TRIALS_TO_POLISH = 16
 
 
 class TrainableButterfly(TrainableMatrixFactorization):
@@ -257,7 +257,7 @@ def transform_experiment(trainable, target, size, complex, ntrials, nsteps, nepo
         local_dir=result_dir,
         num_samples=ntrials,
         checkpoint_at_end=True,
-        resources_per_trial={'cpu': nthreads, 'gpu': 0.2 if cuda else 0},
+        resources_per_trial={'cpu': nthreads, 'gpu': 0.25 if cuda else 0},
         stop={
             'training_iteration': 1 if smoke_test else 99999,
             'negative_loss': -1e-8
