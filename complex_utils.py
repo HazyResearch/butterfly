@@ -63,7 +63,7 @@ class Conjugate(torch.autograd.Function):
                 # TODO: do we need .contiguous here? I think it doesn't work if the last dimension isn't contiguous
                 return cupy2torch(torch2cupy(X).view('complex64').conj().view('float32'))
             else:
-                return conjugate_torch(X, Y)
+                return conjugate_torch(X)
         else:
             return torch.from_numpy(np.ascontiguousarray(torch2numpy(X)).view('complex64').conj().view('float32'))
 
