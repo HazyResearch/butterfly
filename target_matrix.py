@@ -31,5 +31,8 @@ def named_target_matrix(name, size):
         np.random.seed(0)
         x = np.random.randn(size)
         return LA.circulant(x) / math.sqrt(size)
+    elif name == 'randn':
+        np.random.seed(0)
+        return np.random.randn(size, size) / math.sqrt(size)
     else:
         assert False, 'Target matrix name not recognized or implemented'
