@@ -30,6 +30,16 @@ def haar_matrix(n, normalized=False):
     return h
 
 
+def hartley_matrix(n):
+    """Matrix corresponding to the discrete Hartley transform.
+    https://en.wikipedia.org/wiki/Discrete_Hartley_transform
+    """
+    range_ = np.arange(n)
+    indices = np.outer(range_, range_)
+    arg = indices * 2 * math.pi / n
+    return np.cos(arg) + np.sin(arg)
+
+
 def named_target_matrix(name, size):
     """
     Parameter:
@@ -53,6 +63,8 @@ def named_target_matrix(name, size):
         np.random.seed(0)
         x = np.random.randn(size)
         return LA.circulant(x) / math.sqrt(size)
+    elif name == 'hartley':
+        return hartley_matrix(size) / math.sqrt(size)
     elif name == 'haar':
         return haar_matrix(size, normalized=True) / math.sqrt(size)
     elif name == 'randn':
