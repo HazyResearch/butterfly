@@ -7,7 +7,7 @@ import math
 
 import numpy as np
 import scipy.linalg as LA
-from scipy.fftpack import dct
+from scipy.fftpack import dct, dst
 
 # Copied from https://stackoverflow.com/questions/23869694/create-nxn-haar-matrix
 def haar_matrix(n, normalized=False):
@@ -45,6 +45,8 @@ def named_target_matrix(name, size):
         # Need to transpose as dct acts on rows of matrix np.eye, not columns
         # return dct(np.eye(size), norm='ortho').T
         return dct(np.eye(size)).T / math.sqrt(size)
+    elif name == 'dst':
+        return dst(np.eye(size)).T / math.sqrt(size)
     elif name == 'hadamard':
         return LA.hadamard(size) / math.sqrt(size)
     elif name == 'convolution':
