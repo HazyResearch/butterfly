@@ -6,6 +6,7 @@ Complex complex must be converted to real matrices with 2 as the last dimension
 import math
 
 import numpy as np
+from numpy.polynomial import legendre
 import scipy.linalg as LA
 from scipy.fftpack import dct, dst
 
@@ -67,6 +68,9 @@ def named_target_matrix(name, size):
         return hartley_matrix(size) / math.sqrt(size)
     elif name == 'haar':
         return haar_matrix(size, normalized=True) / math.sqrt(size)
+    elif name == 'legendre':
+        grid = np.linspace(-1, 1, size + 2)[1:-1]
+        return legendre.legvander(grid, size - 1).T / math.sqrt(size)
     elif name == 'randn':
         np.random.seed(0)
         return np.random.randn(size, size) / math.sqrt(size)
