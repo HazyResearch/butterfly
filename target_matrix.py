@@ -41,6 +41,15 @@ def hartley_matrix(n):
     return np.cos(arg) + np.sin(arg)
 
 
+def hilbert_matrix(n):
+    """
+    https://en.wikipedia.org/wiki/Hilbert_matrix
+    """
+    range_ = np.arange(n) + 1
+    arg = range_[:, None] + range_ - 1
+    return 1.0 / arg
+
+
 def named_target_matrix(name, size):
     """
     Parameter:
@@ -71,6 +80,9 @@ def named_target_matrix(name, size):
     elif name == 'legendre':
         grid = np.linspace(-1, 1, size + 2)[1:-1]
         return legendre.legvander(grid, size - 1).T / math.sqrt(size)
+    elif name == 'hilbert':
+        H = hilbert_matrix(size)
+        return H / np.linalg.norm(H, 2)
     elif name == 'randn':
         np.random.seed(0)
         return np.random.randn(size, size) / math.sqrt(size)
