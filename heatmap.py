@@ -62,10 +62,10 @@ for rmse, ax, title in zip(rmses, axes.flat, titles):
     ax.set_yticks(range(8));
 
     # Labels for major ticks
-    ax.set_xticklabels(['N=8', '16', '32', '64', '128', '256', '512', '1024'], rotation=270);
+    ax.set_xticklabels(['N=8', '16', '32', '64', '128', '256', '512', '1024'], rotation=270, fontsize=9);
     if first:
         # ax.set_yticklabels(['DFT', 'DCT', 'DST', 'Conv', 'Hadamard', 'Hartley', 'Legendre', 'Hilbert', 'Randn']);
-        ax.set_yticklabels(['DFT', 'DCT', 'DST', 'Conv', 'Hadamard', 'Hartley', 'Legendre', 'Randn']);
+        ax.set_yticklabels(['DFT', 'DCT', 'DST', 'Conv', 'Hadamard', 'Hartley', 'Legendre', 'Randn'], fontsize=9);
         first = False
     else:
         ax.set_yticklabels([]);
@@ -100,9 +100,9 @@ for rmse, ax, title in zip(rmses, axes.flat, titles):
 # ax.grid(which='minor', color='w', linestyle='-', linewidth=2)
 
 # cbar = plt.colorbar(orientation='horizontal', ticks=[-4, -3, -2, -1, 0])
-fig.subplots_adjust(bottom=-0.2, wspace=0.6)
+fig.subplots_adjust(bottom=-0.2, wspace=0.5)
 cbar_ax = fig.add_axes([0.25, 0.11, 0.5, 0.02])
 cbar = fig.colorbar(im, cax=cbar_ax, orientation='horizontal', ticks=[-4, -3, -2, -1, 0])
-cbar.ax.set_xticklabels(['1e-4', '1e-3', '1e-2', '1e-1', '1e0'])
+cbar.ax.set_xticklabels(['1e-4', '1e-3', '1e-2', '1e-1', '1e0'], fontsize=9)
 
 plt.savefig('heatmap.png', bbox_inches='tight')
