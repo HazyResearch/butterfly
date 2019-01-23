@@ -2,7 +2,7 @@ import os
 from timeit import default_timer as timer
 
 import numpy as np
-from scipy.fftpack import dct, dst
+from scipy.fftpack import fft, dct, dst
 import torch
 from torch import nn
 
@@ -22,6 +22,7 @@ ntrials = [100000, 100000, 1000, 100, 100, 10, 10, 10]
 
 dense_times = np.zeros(exps.size)
 fft_times = np.zeros(exps.size)
+scipyfft_times = np.zeros(exps.size)
 dct_times = np.zeros(exps.size)
 dst_times = np.zeros(exps.size)
 bp_times = np.zeros(exps.size)
@@ -48,6 +49,12 @@ for idx_n, (n, ntrial) in enumerate(zip(sizes, ntrials)):
     end = timer()
     fft_times[idx_n] = (end-start) / ntrial
 
+    # Scipy's FFT, it's about 1.5x slower than Numpy's FFT
+    start = timer()
+    [fft(x) for _ in range(ntrial)]
+    end = timer()
+    scipyfft_times[idx_n] = (end-start) / ntrial
+
     # DCT
     start = timer()
     [dct(x) for _ in range(ntrial)]
@@ -68,6 +75,7 @@ for idx_n, (n, ntrial) in enumerate(zip(sizes, ntrials)):
 
 print(dense_times)
 print(fft_times)
+print(scipyfft_times)
 print(dct_times)
 print(dst_times)
 print(bp_times)
@@ -76,15 +84,27 @@ print(bp_times / fft_times)
 print(bp_times / dct_times)
 print(bp_times / dst_times)
 
-plt.figure()
-plt.semilogy(sizes, dense_times / fft_times, label='FFT')
-plt.semilogy(sizes, dense_times / dct_times, label='DCT')
-plt.semilogy(sizes, dense_times / dst_times, label='DST')
-plt.semilogy(sizes, dense_times / bp_times, label='BP')
-plt.xscale('log', basex=2)
-plt.xlabel("Dimension")
-plt.ylabel("Speedup over GEMV")
-plt.legend()
-# plt.show()
-plt.savefig('speed.pdf')
+# plt.figure()
+# plt.semilogy(sizes, dense_times / fft_times, label='FFT')
+# # plt.semilogy(sizes, dense_times / scipyfft_times, label='scipy FFT')
+# plt.semilogy(sizes, dense_times / dct_times, label='DCT')
+# plt.semilogy(sizes, dense_times / dst_times, label='DST')
+# plt.semilogy(sizes, dense_times / bp_times, label='BP')
+# plt.xscale('log', basex=2)
+# plt.xlabel("Dimension")
+# plt.ylabel("Speedup over GEMV")
+# plt.legend()
+# # plt.show()
+# plt.savefig('speed.pdf')
 
+data = {
+    'sizes': sizes,
+    'speedup_fft': dense_times / fft_times,
+    'speedup_dct': dense_times / dct_times,
+    'speedup_dst': dense_times / dst_times,
+    'speedup_bp': dense_times / bp_times,
+}
+
+import pickle
+with open('speed_data.pkl', 'wb') as f:
+    pickle.dump(data, f)
