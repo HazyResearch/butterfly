@@ -8,10 +8,20 @@ from matplotlib.colors import LinearSegmentedColormap
 with open('rmse.pkl', 'rb') as f:
     data = pickle.load(f)
 transform_names = data['names']
-rmse = np.array(data['rmse'])
+our_rmse = np.array(data['rmse'])
+our_rmse = np.delete(our_rmse, -2, axis=0)
+
+with open('sparse_rmse.pkl', 'rb') as f:
+    sparse_rmse = pickle.load(f)
+sparse_rmse = np.delete(sparse_rmse, -2, axis=0)
+with open('lr_rmse.pkl', 'rb') as f:
+    lr_rmse = pickle.load(f)
+lr_rmse = np.delete(lr_rmse, -2, axis=0)
+
+sparse_lr_rmse = np.minimum(sparse_rmse, lr_rmse)
 
 # For LaTeX
-print(" \\\\\n".join([" & ".join(map('{0:.1e}'.format, line)) for line in rmse]))
+print(" \\\\\n".join([" & ".join(map('{0:.1e}'.format, line)) for line in our_rmse]))
 
 # Red-green colormap
 cdict = {'red':  ((0.0, 0.0, 0.0),
@@ -35,29 +45,64 @@ cdict = {'red':  ((0.0, 0.0, 0.0),
         }
 cmap=LinearSegmentedColormap('rg',cdict, N=256)
 
-plt.figure()
-# im = plt.imshow(np.log10(rmse), interpolation='none', vmin=-4, vmax=0, aspect='equal');
-# im = plt.imshow(np.log10(rmse), interpolation='none', vmin=-4, vmax=0, cmap='Accent');
-im = plt.imshow(np.log10(rmse), interpolation='none', vmin=-4, vmax=0, cmap=cmap);
-ax = plt.gca();
-ax = plt.gca();
+rmses = [our_rmse, sparse_rmse, lr_rmse, sparse_lr_rmse]
+titles = ['Butterfly', 'Sparse', 'Low rank', 'Sparse + Low rank']
 
-# Major ticks
-ax.set_xticks(range(8));
-ax.set_yticks(range(9));
+first = True
+fig, axes = plt.subplots(nrows=1, ncols=4)
+for rmse, ax, title in zip(rmses, axes.flat, titles):
+    # im = ax.imshow(np.log10(rmse), interpolation='none', vmin=-4, vmax=0, cmap=cmap);
+    im = ax.imshow(np.log10(rmse), interpolation='none', vmin=-4, vmax=0, cmap='bwr');
+    ax.set_title(title)
+    # curr_ax = fig.gca();
+    # curr_ax = fig.gca();
 
-# Labels for major ticks
-ax.set_xticklabels(['N=8', '16', '32', '64', '128', '256', '512', '1024']);
-ax.set_yticklabels(['DFT', 'DCT', 'DST', 'Conv', 'Hadamard', 'Hartley', 'Legendre', 'Hilbert', 'Randn']);
+    # Major ticks
+    ax.set_xticks(range(8));
+    ax.set_yticks(range(8));
 
-# Minor ticks
-ax.set_xticks(np.arange(-.5, 8, 1), minor=True);
-ax.set_yticks(np.arange(-.5, 9, 1), minor=True);
+    # Labels for major ticks
+    ax.set_xticklabels(['N=8', '16', '32', '64', '128', '256', '512', '1024'], rotation=270);
+    if first:
+        # ax.set_yticklabels(['DFT', 'DCT', 'DST', 'Conv', 'Hadamard', 'Hartley', 'Legendre', 'Hilbert', 'Randn']);
+        ax.set_yticklabels(['DFT', 'DCT', 'DST', 'Conv', 'Hadamard', 'Hartley', 'Legendre', 'Randn']);
+        first = False
+    else:
+        ax.set_yticklabels([]);
 
-# Gridlines based on minor ticks
-ax.grid(which='minor', color='w', linestyle='-', linewidth=2)
+    # Minor ticks
+    ax.set_xticks(np.arange(-.5, 8, 1), minor=True);
+    ax.set_yticks(np.arange(-.5, 8, 1), minor=True);
 
-cbar = plt.colorbar(orientation='horizontal', ticks=[-4, -3, -2, -1, 0])
+    # Gridlines based on minor ticks
+    ax.grid(which='minor', color='w', linestyle='-', linewidth=2)
+
+# plt.figure()
+# # im = plt.imshow(np.log10(rmse), interpolation='none', vmin=-4, vmax=0, aspect='equal');
+# # im = plt.imshow(np.log10(rmse), interpolation='none', vmin=-4, vmax=0, cmap='Accent');
+# im = plt.imshow(np.log10(rmse), interpolation='none', vmin=-4, vmax=0, cmap=cmap);
+# ax = plt.gca();
+# ax = plt.gca();
+
+# # Major ticks
+# ax.set_xticks(range(8));
+# ax.set_yticks(range(9));
+
+# # Labels for major ticks
+# ax.set_xticklabels(['N=8', '16', '32', '64', '128', '256', '512', '1024']);
+# ax.set_yticklabels(['DFT', 'DCT', 'DST', 'Conv', 'Hadamard', 'Hartley', 'Legendre', 'Hilbert', 'Randn']);
+
+# # Minor ticks
+# ax.set_xticks(np.arange(-.5, 8, 1), minor=True);
+# ax.set_yticks(np.arange(-.5, 9, 1), minor=True);
+
+# # Gridlines based on minor ticks
+# ax.grid(which='minor', color='w', linestyle='-', linewidth=2)
+
+# cbar = plt.colorbar(orientation='horizontal', ticks=[-4, -3, -2, -1, 0])
+fig.subplots_adjust(bottom=-0.2, wspace=0.6)
+cbar_ax = fig.add_axes([0.25, 0.11, 0.5, 0.02])
+cbar = fig.colorbar(im, cax=cbar_ax, orientation='horizontal', ticks=[-4, -3, -2, -1, 0])
 cbar.ax.set_xticklabels(['1e-4', '1e-3', '1e-2', '1e-1', '1e0'])
 
 plt.savefig('heatmap.png', bbox_inches='tight')
