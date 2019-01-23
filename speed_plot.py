@@ -54,32 +54,7 @@ classes = [mpatches.Patch(color=colors[0], label='FFT'),
 rank_entries = []
 #marker_entries = {}
 
-# for idx_r, r in enumerate(rs):
-#     this_marker = plt.scatter([], [], marker=markers[idx_r], edgecolor='black', facecolor='black',label='Rank ' + str(r))
-#     rank_entries.append(this_marker)
-#     #marker_entries[idx_r] = this_marker
-
-"""
-fake_marker = plt.scatter([], [], marker=markers[idx_r], edgecolor='white', facecolor='white',label="       ")
-
-ranks_row1.append(marker_entries[0])
-ranks_row1.append(fake_marker)
-ranks_row1.append(marker_entries[1])
-ranks_row1.append(fake_marker)
-ranks_row1.append(marker_entries[2])
-
-ranks_row2 = [marker_entries[3],marker_entries[4]]
-"""
 
 plt.legend(handles=classes, ncol=4, bbox_to_anchor=(0.85, -0.15))#, loc='upper left')
-#plt.legend(handles=rank_entries, ncol=4, bbox_to_anchor=(1.02, -0.2))#, loc='upper left')
-#plt.legend(handles=ranks_row1, ncol=3, bbox_to_anchor=(0.85, -0.25))#, loc='upper left')
-#l2 = plt.legend(handles=ranks_row1, ncol=3, bbox_to_anchor=(0.85, -0.25))
-#plt.legend(handles=ranks_row2, ncol=2, bbox_to_anchor=(0.75, -0.25),frameon=False)#, loc='upper left')
-#fig.axes.add_artist(l1)
-#plt.gca().add_artist(l1)
-#plt.gca().add_artist(l2)
-# Legend: Show ranks
-# Legend: Show Toeplitz-like, LDR-SD
 
-plt.savefig('speed_plot.pdf',bbox_inches='tight')
+plt.savefig('speed_plot.pdf', bbox_inches='tight')
