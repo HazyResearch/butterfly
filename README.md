@@ -1,20 +1,14 @@
-Example commands:
-```
-python learning_dct.py with size=8 ntrials=40
-python learning_dct.py with size=16 ntrials=60
-python learning_dct.py with size=32 ntrials=80 nmaxepochs=400
-python learning_dct.py with size=64 ntrials=160 nmaxepochs=400
-python learning_dct.py with size=128 ntrials=320 nmaxepochs=400
+See `run_exp.sh` for examples of how to run the experiments.
+`run_exp.sh` also produces the numbers for recovering various transforms.
+Large dimensions might take a while.
+We use Hyperband to do hyperparameter tuning (e.g., learning rates) on 8 GPUs with early stopping, but I
+suppose hand-tuning the hyperparameters can make it faster and require less
+resource (at the cost of your time).
 
-python learning_dct.py with softmax_config size=8 ntrials=40
-python learning_dct.py with softmax_config size=16 ntrials=60
-python learning_dct.py with softmax_config size=32 ntrials=80 nmaxepochs=400
-python learning_dct.py with softmax_config size=64 ntrials=160 nmaxepochs=400
-python learning_dct.py with softmax_config size=128 ntrials=320 nmaxepochs=400
+`inference.py` shows how to implement the BP fast multiplication given the
+parameters of the BP model.
 
-python learning_dct.py with sparsemax_config size=8 ntrials=40
-python learning_dct.py with sparsemax_config size=16 ntrials=60
-python learning_dct.py with sparsemax_config size=32 ntrials=80 nmaxepochs=400
-python learning_dct.py with sparsemax_config size=64 ntrials=160 nmaxepochs=400
-python learning_dct.py with sparsemax_config size=128 ntrials=320 nmaxepochs=400
-```
+`speed_test.py` runs the speed comparison between BP, FFT,
+DCT, DST, and dense matrix-vector multiply, and `speed_plot.py` plots the results.
+
+To compile Cython extension: `python setup.py build_ext --inplace`

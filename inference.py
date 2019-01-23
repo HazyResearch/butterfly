@@ -1,4 +1,4 @@
-"""Convert BP model from Pytorch to Numpy for inference
+"""Convert BP model from Pytorch to Numpy for inference.
 To compile Cython extension: python setup.py build_ext --inplace
 """
 import numpy as np
@@ -8,6 +8,7 @@ from torch import nn
 from butterfly import Block2x2DiagProduct
 
 from ABCD_mult import ABCD_mult, ABCD_mult_inplace, ABCD_mult_inplace_complex, ABCD_mult_inplace_generic
+
 
 def butterfly_mul_np(ABCDs, input_):
     """Product of block 2x2 diagonal matrices, implemented in Numpy.
@@ -21,6 +22,7 @@ def butterfly_mul_np(ABCDs, input_):
         output = output.reshape(output.shape[:-1] + (-1, 1, 2, ABCD.shape[-1]))
         output = (ABCD * output).sum(axis=-2).reshape(input_.shape)
     return output
+
 
 def butterfly_mul_cy(ABCDs, input_):
     """Product of block 2x2 diagonal matrices, implemented in Numpy + Cython.
@@ -85,6 +87,7 @@ def butterfly_mul_cy_inplace_complex(ABCDs, input_):
         output = output.reshape((-1, 2, ABCD.shape[-1]))
         ABCD_mult_inplace_complex(ABCD, output)
     return output.reshape(input_.shape)
+
 
 def butterfly_mul_cy_inplace_generic(ABCDs, input_):
     """Product of block 2x2 diagonal matrices, implemented in Numpy + Cython.
