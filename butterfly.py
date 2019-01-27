@@ -8,6 +8,7 @@ from torch import nn
 from complex_utils import real_to_complex, complex_mul, complex_matmul
 from sparsemax import sparsemax
 from utils import bitreversal_permutation
+from butterfly_factor import butterfly_factor_mult
 
 
 def sinkhorn(logit, n_iters=5):
@@ -232,7 +233,8 @@ class Block2x2Diag(nn.Module):
             output: (..., size) if real or (..., size, 2) if complex
         """
         if not self.complex:
-            return ((self.ABCD * input.reshape(input.shape[:-1] + (1, 2, self.size // 2))).sum(dim=-2)).reshape(input.shape)
+            # return ((self.ABCD * input.reshape(input.shape[:-1] + (1, 2, self.size // 2))).sum(dim=-2)).reshape(input.shape)
+            return butterfly_factor_mult(self.ABCD, input.reshape(-1, 2, self.size // 2)).reshape(input.shape)
         else:
             return (self.mul_op(self.ABCD, input.reshape(input.shape[:-2] + (1, 2, self.size // 2, 2))).sum(dim=-3)).reshape(input.shape)
 

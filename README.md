@@ -12,3 +12,10 @@ parameters of the BP model.
 DCT, DST, and dense matrix-vector multiply, and `speed_plot.py` plots the results.
 
 To compile Cython extension: `python setup.py build_ext --inplace`
+
+To compile C++ extension for Pytorch:
+```
+cd butterfly_factor_multiply
+python setup.py build_ext --inplace
+ln -s butterfly_factor_multiply.*.so ../
+```
