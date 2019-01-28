@@ -9,6 +9,7 @@ from complex_utils import real_to_complex, complex_mul, complex_matmul
 from sparsemax import sparsemax
 from utils import bitreversal_permutation
 from butterfly_factor import butterfly_factor_mult
+from permutation_factor import permutation_factor_even_odd_mult, permutation_factor_reverse_mult
 
 
 def sinkhorn(logit, n_iters=5):
@@ -290,6 +291,7 @@ class BlockPerm(nn.Module):
             self.logit = nn.Parameter(torch.randn(3))
         else:
             self.logit = logit
+        self.reverse_perm = nn.Parameter(torch.arange(self.size // 2 - 1, -1, -1), requires_grad=False)
 
     def forward(self, input):
         """
@@ -303,13 +305,19 @@ class BlockPerm(nn.Module):
         if not self.complex:
             # There's a lot of complicated logic here buried under the reshape's and unsqueeze's and so on
             # First step: weighted mean of identity permutation and permutation that yields [even, odd]
-            output = (1 - prob[0]) * output.reshape(output.shape[:-1] + (2, self.size // 2)) + prob[0] * output.reshape(output.shape[:-1] + (self.size // 2, 2)).transpose(-1, -2)
+            # output = (1 - prob[0]) * output.reshape(output.shape[:-1] + (2, self.size // 2)) + prob[0] * output.reshape(output.shape[:-1] + (self.size // 2, 2)).transpose(-1, -2)
+            # output = ((1 - prob[0]) * output.reshape(output.shape[:-1] + (2, self.size // 2)) + prob[0] * output.reshape(output.shape[:-1] + (self.size // 2, 2)).transpose(-1, -2)).reshape(input.shape)
+            output = permutation_factor_even_odd_mult(prob[0], output.reshape(-1, self.size))
             # Second step: weighted mean of identity permutation and permutation that reverses the first and the second half
-            output = (((1 - prob[1:]).unsqueeze(-1) * output + prob[1:].unsqueeze(-1) * output.flip(-1))).reshape(output.shape[:-2] + (self.size, ))
+            # output  = output.reshape(output.shape[:-1] + (2, self.size // 2))
+            # output = (((1 - prob[1:]).unsqueeze(-1) * output + prob[1:].unsqueeze(-1) * output.flip(-1))).reshape(output.shape[:-2] + (self.size, ))
+            # output = (((1 - prob[1:]).unsqueeze(-1) * output + prob[1:].unsqueeze(-1) * output[..., self.reverse_perm])).reshape(output.shape[:-2] + (self.size, ))
+            output = permutation_factor_reverse_mult(prob[1:], output)
+            # output = output.reshape(input.shape)
         else:
             output = (1 - prob[0]) * output.reshape(output.shape[:-2] + (2, self.size // 2, 2)) + prob[0] * output.reshape(output.shape[:-2] + (self.size // 2, 2, 2)).transpose(-2, -3)
             output = (((1 - prob[1:]).unsqueeze(-1).unsqueeze(-1) * output + prob[1:].unsqueeze(-1).unsqueeze(-1) * output.flip(-2))).reshape(output.shape[:-3] + (self.size, 2))
-        return output
+        return output.reshape(input.shape)
 
     def argmax(self):
         """

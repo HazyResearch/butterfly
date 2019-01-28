@@ -2,7 +2,7 @@ from setuptools import setup
 from torch.utils.cpp_extension import CppExtension, BuildExtension
 
 ext_modules = []
-extension = CppExtension('butterfly_factor_multiply', ['butterfly_factor_multiply.cpp'])
+extension = CppExtension('factor_multiply', ['factor_multiply.cpp'])
 ext_modules.append(extension)
 
 setup(
