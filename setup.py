@@ -6,7 +6,7 @@ import numpy
 extensions = [
   Extension('ABCD_mult', ['ABCD_mult.pyx'],
             include_dirs = [numpy.get_include()],
-            extra_compile_args=['-O3']
+            extra_compile_args=['-O3', '-march=native']
   ),
 ]
 

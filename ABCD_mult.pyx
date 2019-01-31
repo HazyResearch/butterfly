@@ -54,6 +54,22 @@ def ABCD_mult_inplace(np.ndarray[DTYPE_t, ndim=3] ABCD, np.ndarray[DTYPE_t, ndim
             input[b, 0, i] = temp
 
 
+cpdef ABCD_mult_inplace_memview(DTYPE_t[:, :, ::1] ABCD, DTYPE_t[:, :, ::1] input):
+    """
+    Parameters:
+        ABCD: (2, 2, n)
+        input: (batch_size, 2, n)
+    """
+    cdef unsigned int batch_size = input.shape[0],  n = input.shape[2]
+    cdef unsigned int b, i
+    cdef DTYPE_t temp
+    for b in range(batch_size):
+        for i in range(n):
+            temp = ABCD[0, 0, i] * input[b, 0, i] + ABCD[0, 1, i] * input[b, 1, i]
+            input[b, 1, i] = ABCD[1, 0, i] * input[b, 0, i] + ABCD[1, 1, i] * input[b, 1, i]
+            input[b, 0, i] = temp
+
+
 def ABCD_mult_inplace_complex(np.ndarray[np.complex64_t, ndim=3] ABCD, np.ndarray[np.complex64_t, ndim=3] input):
     """
     Parameters:
