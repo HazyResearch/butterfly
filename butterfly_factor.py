@@ -44,11 +44,11 @@ def test_butterfly_factor_multiply():
     first = time.perf_counter()
     for size in sizes:
         bf = Block2x2Diag(size)
-        x = x.reshape(-1, 2 * bf.ABCD.shape[-1])
+        x = x.view(-1, 2 * bf.ABCD.shape[-1])
         result_slow = bf(x)
         start = time.perf_counter()
-        # result = butterfly_factor_mult(bf.ABCD, x.reshape(-1, 2, bf.ABCD.shape[-1])).reshape(x.shape)
-        [butterfly_factor_mult(bf.ABCD, x.reshape(-1, 2, bf.ABCD.shape[-1])).reshape(x.shape) for _ in range(10000)]
+        # result = butterfly_factor_mult(bf.ABCD, x.view(-1, 2, bf.ABCD.shape[-1])).view(x.shape)
+        [butterfly_factor_mult(bf.ABCD, x.view(-1, 2, bf.ABCD.shape[-1])).view(x.shape) for _ in range(10000)]
         end = time.perf_counter()
         print(end - start)
         # assert torch.allclose(result, result_slow)

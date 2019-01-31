@@ -234,10 +234,10 @@ class Block2x2Diag(nn.Module):
             output: (..., size) if real or (..., size, 2) if complex
         """
         if not self.complex:
-            # return ((self.ABCD * input.reshape(input.shape[:-1] + (1, 2, self.size // 2))).sum(dim=-2)).reshape(input.shape)
-            return butterfly_factor_mult(self.ABCD, input.reshape(-1, 2, self.size // 2)).reshape(input.shape)
+            # return ((self.ABCD * input.view(input.shape[:-1] + (1, 2, self.size // 2))).sum(dim=-2)).view(input.shape)
+            return butterfly_factor_mult(self.ABCD, input.view(-1, 2, self.size // 2)).view(input.shape)
         else:
-            return (self.mul_op(self.ABCD, input.reshape(input.shape[:-2] + (1, 2, self.size // 2, 2))).sum(dim=-3)).reshape(input.shape)
+            return (self.mul_op(self.ABCD, input.view(input.shape[:-2] + (1, 2, self.size // 2, 2))).sum(dim=-3)).view(input.shape)
 
 
 class Block2x2DiagProduct(nn.Module):
@@ -260,12 +260,12 @@ class Block2x2DiagProduct(nn.Module):
         Return:
             output: (..., size) if real or (..., size, 2) if complex
         """
-        output = input
+        output = input.contiguous()
         for factor in self.factors[::-1]:
             if not self.complex:
-                output = factor(output.reshape(output.shape[:-1] + (-1, factor.size))).reshape(output.shape)
+                output = factor(output.view(output.shape[:-1] + (-1, factor.size))).view(output.shape)
             else:
-                output = factor(output.reshape(output.shape[:-2] + (-1, factor.size, 2))).reshape(output.shape)
+                output = factor(output.view(output.shape[:-2] + (-1, factor.size, 2))).view(output.shape)
         return output
 
 
@@ -356,12 +356,12 @@ class BlockPermProduct(nn.Module):
         Return:
             output: (..., size) if real or (..., size, 2) if complex
         """
-        output = input
+        output = input.contiguous()
         for factor in self.factors[::-1]:
             if not self.complex:
-                output = factor(output.reshape(output.shape[:-1] + (-1, factor.size))).reshape(output.shape)
+                output = factor(output.view(output.shape[:-1] + (-1, factor.size))).view(output.shape)
             else:
-                output = factor(output.reshape(output.shape[:-2] + (-1, factor.size, 2))).reshape(output.shape)
+                output = factor(output.view(output.shape[:-2] + (-1, factor.size, 2))).view(output.shape)
         return output
 
     def argmax(self):
