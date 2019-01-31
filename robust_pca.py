@@ -15,7 +15,8 @@ from target_matrix import named_target_matrix
 
 ntrials = 1
 
-sizes = [8, 16, 32, 64, 128, 256, 512, 1024]
+# sizes = [8, 16, 32, 64, 128, 256, 512, 1024]
+sizes = [8, 16, 32, 64, 128]
 # sizes = [8, 16, 32]
 # transform_names = ['dft', 'dct', 'dst', 'convolution', 'hadamard', 'hartley', 'legendre', 'hilbert', 'randn']
 transform_names = ['dct', 'dst', 'convolution', 'hadamard', 'hartley', 'legendre', 'randn']
@@ -64,7 +65,7 @@ mse = pool.map(sparse_lowrank_mse, list(itertools.product(transform_names, sizes
 
 import pickle
 
-with open('mse_robust_pca.pkl', 'wb') as f:
+with open('mse_robust_pca_small.pkl', 'wb') as f:
     pickle.dump(mse, f)
 
 # with open('mse_robust_pca.pkl', 'rb') as f:
