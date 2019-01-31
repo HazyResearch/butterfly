@@ -18,6 +18,11 @@ with open('lr_rmse.pkl', 'rb') as f:
     lr_rmse = pickle.load(f)
 lr_rmse = np.delete(lr_rmse, -2, axis=0)
 
+# with open('mse_robust_pca.pkl', 'rb') as f:
+#     sparse_lr_rmse = pickle.load(f)
+# It's always an option (depending on parameter) to get just one sparse matrix, or just one low rank, so we take minimum here
+# sparse_lr_rmse = np.minimum(sparse_lr_rmse, sparse_rmse)
+# sparse_lr_rmse = np.minimum(sparse_lr_rmse, lr_rmse)
 sparse_lr_rmse = np.minimum(sparse_rmse, lr_rmse)
 
 # For LaTeX
@@ -53,7 +58,7 @@ fig, axes = plt.subplots(nrows=1, ncols=4)
 for rmse, ax, title in zip(rmses, axes.flat, titles):
     # im = ax.imshow(np.log10(rmse), interpolation='none', vmin=-4, vmax=0, cmap=cmap);
     im = ax.imshow(np.log10(rmse), interpolation='none', vmin=-4, vmax=0, cmap='bwr');
-    ax.set_title(title)
+    ax.set_title(title, fontsize=10)
     # curr_ax = fig.gca();
     # curr_ax = fig.gca();
 
@@ -62,10 +67,10 @@ for rmse, ax, title in zip(rmses, axes.flat, titles):
     ax.set_yticks(range(8));
 
     # Labels for major ticks
-    ax.set_xticklabels(['N=8', '16', '32', '64', '128', '256', '512', '1024'], rotation=270, fontsize=9);
+    ax.set_xticklabels(['N=8', '16', '32', '64', '128', '256', '512', '1024'], rotation=270, fontsize=8);
     if first:
         # ax.set_yticklabels(['DFT', 'DCT', 'DST', 'Conv', 'Hadamard', 'Hartley', 'Legendre', 'Hilbert', 'Randn']);
-        ax.set_yticklabels(['DFT', 'DCT', 'DST', 'Conv', 'Hadamard', 'Hartley', 'Legendre', 'Randn'], fontsize=9);
+        ax.set_yticklabels(['DFT', 'DCT', 'DST', 'Conv', 'Hadamard', 'Hartley', 'Legendre', 'Randn'], fontsize=8);
         first = False
     else:
         ax.set_yticklabels([]);
@@ -103,6 +108,6 @@ for rmse, ax, title in zip(rmses, axes.flat, titles):
 fig.subplots_adjust(bottom=-0.2, wspace=0.5)
 cbar_ax = fig.add_axes([0.25, 0.11, 0.5, 0.02])
 cbar = fig.colorbar(im, cax=cbar_ax, orientation='horizontal', ticks=[-4, -3, -2, -1, 0])
-cbar.ax.set_xticklabels(['1e-4', '1e-3', '1e-2', '1e-1', '1e0'], fontsize=9)
+cbar.ax.set_xticklabels(['1e-4', '1e-3', '1e-2', '1e-1', '1e0'], fontsize=8)
 
 plt.savefig('heatmap.png', bbox_inches='tight')
