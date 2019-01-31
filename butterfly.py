@@ -453,6 +453,41 @@ def test_butterfly_fft():
     assert torch.allclose(complex_matmul(M0.matrix(), M1.matrix()), D)
 
 
+def test_butterfly_dct():
+    from scipy.fftpack import dct
+    # DCT matrix for n = 4
+    size = 4
+    # Need to transpose as dct acts on rows of matrix np.eye, not columns
+    DCT = torch.tensor(dct(np.eye(size)).T, dtype=torch.float)
+    M0diag=torch.tensor([[1.0, 0.0], [1.0, 0.0], [-1.0, 0.0], [0.0, 1.0]], requires_grad=True)
+    M0subdiag=torch.tensor([[1.0, 0.0], [1.0, 0.0]], requires_grad=True)
+    M0superdiag=torch.tensor([[1.0, 0.0], [0.0, -1.0]], requires_grad=True)
+    M0 = Butterfly(size, diagonal=2, complex=True, diag=M0diag, subdiag=M0subdiag, superdiag=M0superdiag)
+    M1 = Butterfly(size,
+                   diagonal=1,
+                   complex=True,
+                   diag=torch.tensor([[1.0, 0.0], [-1.0, 0.0], [1.0, 0.0], [-1.0, 0.0]], requires_grad=True),
+                   subdiag=torch.tensor([[1.0, 0.0], [0.0, 0.0], [1.0, 0.0]], requires_grad=True),
+                   superdiag=torch.tensor([[1.0, 0.0], [0.0, 0.0], [1.0, 0.0]], requires_grad=True))
+    arange_ = np.arange(size)
+    dct_perm = np.concatenate((arange_[::2], arange_[::-2]))
+    br_perm = bitreversal_permutation(size)
+    perm = torch.arange(size)[dct_perm][br_perm]
+    arange_ = torch.arange(size, dtype=torch.float)
+    diag_real = 2 * torch.cos(-math.pi * arange_ / (2 * size))
+    diag_imag = 2 * torch.sin(-math.pi * arange_ / (2 * size))
+    diag = torch.stack((torch.diag(diag_real), torch.diag(diag_imag)), dim=-1)
+    assert torch.allclose(complex_matmul(diag, complex_matmul(M0.matrix(), M1.matrix()))[:, perm, 0], DCT)
+    D = torch.stack((diag_real, diag_imag), dim=-1)
+    DM0 = Butterfly(size,
+                    diagonal=2,
+                    complex=True,
+                    diag=complex_mul(D, M0diag),
+                    subdiag=complex_mul(D[2:], M0subdiag),
+                    superdiag=complex_mul(D[:2], M0superdiag))
+    assert torch.allclose(complex_matmul(DM0.matrix(), M1.matrix())[:, perm, 0], DCT)
+
+
 def test_block2x2diagproduct():
     # Factorization of the DFT matrix
     size = 4
