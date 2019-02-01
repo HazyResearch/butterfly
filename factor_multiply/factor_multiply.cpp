@@ -171,61 +171,69 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
   return {d_coefficients, d_input};
 }
 
-// at::Tensor permutation_factor_even_odd_multiply(at::Scalar p, at::Tensor x, at::Tensor y) {
-at::Tensor permutation_factor_even_odd_multiply(float p, at::Tensor input) {
+at::Tensor permutation_factor_even_odd_multiply(const at::Tensor& p, const at::Tensor& input) {
   // Parameters:
-  //     p: real number
+  //     p: (1, )
   //     input: (batch_size, n)
   // Output:
   //     p input + (1 - p) input_permuted
-  auto permuted_input = input.reshape({-1, input.size(1) / 2, 2}).transpose(-1, -2);
-  input = input.reshape({-1, 2, input.size(1) / 2});
-  auto output = torch::empty_like(input);
-  auto input_a = input.accessor<float, 3>();
-  auto permuted_input_a = permuted_input.accessor<float, 3>();
-  auto output_a = output.accessor<float, 3>();
-  for (int64_t b = 0; b < input_a.size(0); ++b) {
-    for (int64_t i = 0; i < input_a.size(2); ++i) {
-      output_a[b][0][i] = (1 - p) * input_a[b][0][i] + p * permuted_input_a[b][0][i];
-      output_a[b][1][i] = (1 - p) * input_a[b][1][i] + p * permuted_input_a[b][1][i];
+  auto batch_size = input.size(0);
+  auto n = input.size(1);
+  auto permuted_input = input.reshape({batch_size, n / 2, 2}).transpose(-1, -2);
+  auto input_folded = input.reshape({batch_size, 2, n / 2});
+  auto output = torch::empty_like(input_folded);
+  AT_DISPATCH_FLOATING_TYPES(input.type(), "permutation_factor_even_odd_multiply", [&] {
+    auto p_a = p.accessor<scalar_t, 1>()[0];
+    auto input_a = input_folded.accessor<scalar_t, 3>();
+    auto permuted_input_a = permuted_input.accessor<scalar_t, 3>();
+    auto output_a = output.accessor<scalar_t, 3>();
+    for (int64_t b = 0; b < batch_size; ++b) {
+      for (int64_t i = 0; i < n / 2; ++i) {
+        // Manually unrolling the loop seems to be faster
+        output_a[b][0][i] = (1 - p_a) * input_a[b][0][i] + p_a * permuted_input_a[b][0][i];
+        output_a[b][1][i] = (1 - p_a) * input_a[b][1][i] + p_a * permuted_input_a[b][1][i];
+      }
     }
-  }
-  return output.reshape({-1, 2 * input.size(2)});
+  });
+  return output.reshape({batch_size, n});
 }
 
-std::vector<at::Tensor> permutation_factor_even_odd_multiply_backward(at::Tensor grad, float p, at::Tensor input) {
+std::vector<at::Tensor> permutation_factor_even_odd_multiply_backward(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input) {
   // Parameters:
   //     grad: (batch_size, n)
-  //     p: real number
+  //     p: (1, )
   //     input: (batch_size, n)
   // Output:
   //     d_p, d_x
   auto batch_size = grad.size(0);
   auto n = grad.size(1);
-  auto permuted_input = input.reshape({-1, n / 2, 2}).transpose(-1, -2);
-  input = input.reshape({-1, 2, n / 2});
-  auto grad_reshaped = grad.reshape({-1, 2, n / 2});
-  auto d_p = torch::zeros(1);
-  auto permuted_grad = grad.reshape({-1, 2, n / 2}).transpose(-1, -2);
-  grad = grad.reshape({-1, n / 2, 2});
-  auto d_input = torch::empty_like(grad);
-  // Accessors
-  auto input_a = input.accessor<float, 3>();
-  auto permuted_input_a = permuted_input.accessor<float, 3>();
-  auto grad_reshaped_a = grad_reshaped.accessor<float, 3>();
-  auto d_p_a = d_p.accessor<float, 1>();
-  auto grad_a = grad.accessor<float, 3>();
-  auto permuted_grad_a = permuted_grad.accessor<float, 3>();
-  auto d_input_a = d_input.accessor<float, 3>();
-  for (int64_t b = 0; b < batch_size; ++b) {
-    for (int64_t i = 0; i < n / 2; ++i) {
-      d_p_a[0] += (permuted_input_a[b][0][i] - input_a[b][0][i]) * grad_reshaped_a[b][0][i]
-                  + (permuted_input_a[b][1][i] - input_a[b][1][i]) * grad_reshaped_a[b][1][i];
-      d_input_a[b][i][0] = (1 - p) * grad_a[b][i][0] + p * permuted_grad_a[b][i][0];
-      d_input_a[b][i][1] = (1 - p) * grad_a[b][i][1] + p * permuted_grad_a[b][i][1];
+  auto permuted_input = input.reshape({batch_size, n / 2, 2}).transpose(-1, -2);
+  auto input_folded = input.reshape({batch_size, 2, n / 2});
+  auto grad_reshaped = grad.reshape({batch_size, 2, n / 2});
+  auto d_p = torch::zeros_like(p);
+  auto permuted_grad = grad.reshape({batch_size, 2, n / 2}).transpose(-1, -2);
+  auto grad_folded = grad.reshape({batch_size, n / 2, 2});
+  auto d_input = torch::empty_like(grad_folded);
+  AT_DISPATCH_FLOATING_TYPES(input.type(), "permutation_factor_even_odd_multiply", [&] {
+    // Accessors
+    auto p_a = p.accessor<scalar_t, 1>()[0];
+    auto input_a = input_folded.accessor<scalar_t, 3>();
+    auto permuted_input_a = permuted_input.accessor<scalar_t, 3>();
+    auto grad_reshaped_a = grad_reshaped.accessor<scalar_t, 3>();
+    auto d_p_a = d_p.accessor<scalar_t, 1>();
+    auto grad_a = grad_folded.accessor<scalar_t, 3>();
+    auto permuted_grad_a = permuted_grad.accessor<scalar_t, 3>();
+    auto d_input_a = d_input.accessor<scalar_t, 3>();
+    for (int64_t b = 0; b < batch_size; ++b) {
+      for (int64_t i = 0; i < n / 2; ++i) {
+        d_p_a[0] += (permuted_input_a[b][0][i] - input_a[b][0][i]) * grad_reshaped_a[b][0][i]
+          + (permuted_input_a[b][1][i] - input_a[b][1][i]) * grad_reshaped_a[b][1][i];
+        d_input_a[b][i][0] = (1 - p_a) * grad_a[b][i][0] + p_a * permuted_grad_a[b][i][0];
+        d_input_a[b][i][1] = (1 - p_a) * grad_a[b][i][1] + p_a * permuted_grad_a[b][i][1];
+      }
     }
-  }
-  return {d_p, d_input.reshape({-1, n})};
+  });
+  return {d_p, d_input.reshape({batch_size, n})};
 }
 
 at::Tensor permutation_factor_reverse_multiply(at::Tensor p, at::Tensor input) {
