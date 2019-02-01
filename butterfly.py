@@ -306,7 +306,6 @@ class BlockPerm(nn.Module):
             # There's a lot of complicated logic here buried under the reshape's and unsqueeze's and so on
             # First step: weighted mean of identity permutation and permutation that yields [even, odd]
             # output = (1 - prob[0]) * output.reshape(output.shape[:-1] + (2, self.size // 2)) + prob[0] * output.reshape(output.shape[:-1] + (self.size // 2, 2)).transpose(-1, -2)
-            # output = ((1 - prob[0]) * output.reshape(output.shape[:-1] + (2, self.size // 2)) + prob[0] * output.reshape(output.shape[:-1] + (self.size // 2, 2)).transpose(-1, -2)).reshape(input.shape)
             output = permutation_factor_even_odd_mult(prob[0], output.reshape(-1, self.size))
             # Second step: weighted mean of identity permutation and permutation that reverses the first and the second half
             # output  = output.reshape(output.shape[:-1] + (2, self.size // 2))

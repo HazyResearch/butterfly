@@ -2,17 +2,18 @@
 #include <torch/extension.h>
 // #include <iostream>
 
-
 at::Tensor butterfly_factor_multiply(at::Tensor coefficients, at::Tensor input) {
   // Parameters:
   //     coefficients: (2, 2, n)
   //     input: (batch_size, 2, n)
+  auto batch_size = input.size(0);
+  auto n = input.size(2);
   auto output = torch::empty_like(input);
   auto coefficients_a = coefficients.accessor<float, 3>();
   auto input_a = input.accessor<float, 3>();
   auto output_a = output.accessor<float, 3>();
-  for (int b = 0; b < input_a.size(0); ++b) {
-    for (int i = 0; i < input_a.size(2); ++i) {
+  for (int64_t b = 0; b < batch_size; ++b) {
+    for (int64_t i = 0; i < n; ++i) {
       output_a[b][0][i] = coefficients_a[0][0][i] * input_a[b][0][i] + coefficients_a[0][1][i] * input_a[b][1][i];
       output_a[b][1][i] = coefficients_a[1][0][i] * input_a[b][0][i] + coefficients_a[1][1][i] * input_a[b][1][i];
     }
@@ -25,6 +26,8 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(at::Tensor grad, at::
   //     grad: (batch_size, 2, n)
   //     coefficients: (2, 2, n)
   //     input: (batch_size, 2, n)
+  auto batch_size = input.size(0);
+  auto n = input.size(2);
   auto d_coefficients = torch::zeros_like(coefficients);
   auto d_input = torch::empty_like(input);
   auto grad_a = grad.accessor<float, 3>();
@@ -32,8 +35,8 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(at::Tensor grad, at::
   auto input_a = input.accessor<float, 3>();
   auto d_coefficients_a = d_coefficients.accessor<float, 3>();
   auto d_input_a = d_input.accessor<float, 3>();
-  for (int b = 0; b < input_a.size(0); ++b) {
-    for (int i = 0; i < input_a.size(2); ++i) {
+  for (int64_t b = 0; b < batch_size; ++b) {
+    for (int64_t i = 0; i < n; ++i) {
       d_coefficients_a[0][0][i] += grad_a[b][0][i] * input_a[b][0][i];
       d_coefficients_a[0][1][i] += grad_a[b][0][i] * input_a[b][1][i];
       d_coefficients_a[1][0][i] += grad_a[b][1][i] * input_a[b][0][i];
@@ -58,8 +61,8 @@ at::Tensor permutation_factor_even_odd_multiply(float p, at::Tensor input) {
   auto input_a = input.accessor<float, 3>();
   auto permuted_input_a = permuted_input.accessor<float, 3>();
   auto output_a = output.accessor<float, 3>();
-  for (int b = 0; b < input_a.size(0); ++b) {
-    for (int i = 0; i < input_a.size(2); ++i) {
+  for (int64_t b = 0; b < input_a.size(0); ++b) {
+    for (int64_t i = 0; i < input_a.size(2); ++i) {
       output_a[b][0][i] = (1 - p) * input_a[b][0][i] + p * permuted_input_a[b][0][i];
       output_a[b][1][i] = (1 - p) * input_a[b][1][i] + p * permuted_input_a[b][1][i];
     }
@@ -91,8 +94,8 @@ std::vector<at::Tensor> permutation_factor_even_odd_multiply_backward(at::Tensor
   auto grad_a = grad.accessor<float, 3>();
   auto permuted_grad_a = permuted_grad.accessor<float, 3>();
   auto d_input_a = d_input.accessor<float, 3>();
-  for (int b = 0; b < batch_size; ++b) {
-    for (int i = 0; i < n / 2; ++i) {
+  for (int64_t b = 0; b < batch_size; ++b) {
+    for (int64_t i = 0; i < n / 2; ++i) {
       d_p_a[0] += (permuted_input_a[b][0][i] - input_a[b][0][i]) * grad_reshaped_a[b][0][i]
                   + (permuted_input_a[b][1][i] - input_a[b][1][i]) * grad_reshaped_a[b][1][i];
       d_input_a[b][i][0] = (1 - p) * grad_a[b][i][0] + p * permuted_grad_a[b][i][0];
@@ -113,8 +116,8 @@ at::Tensor permutation_factor_reverse_multiply(at::Tensor p, at::Tensor input) {
   auto input_a = input.accessor<float, 3>();
   auto p_a = p.accessor<float, 1>();
   auto output_a = output.accessor<float, 3>();
-  for (int b = 0; b < batch_size; ++b) {
-    for (int i = 0; i < n / 2; ++i) {
+  for (int64_t b = 0; b < batch_size; ++b) {
+    for (int64_t i = 0; i < n / 2; ++i) {
       output_a[b][0][i] = (1 - p_a[0]) * input_a[b][0][i] + p_a[0] * input_a[b][0][n / 2 - 1 - i];
       output_a[b][1][i] = (1 - p_a[1]) * input_a[b][1][i] + p_a[1] * input_a[b][1][n / 2 - 1 - i];
     }
@@ -141,8 +144,8 @@ std::vector<at::Tensor> permutation_factor_reverse_multiply_backward(at::Tensor 
   auto input_a = input.accessor<float, 3>();
   auto d_p_a = d_p.accessor<float, 1>();
   auto d_input_a = d_input.accessor<float, 3>();
-  for (int b = 0; b < batch_size; ++b) {
-    for (int i = 0; i < n / 2; ++i) {
+  for (int64_t b = 0; b < batch_size; ++b) {
+    for (int64_t i = 0; i < n / 2; ++i) {
       d_p_a[0] += (input_a[b][0][n / 2 - 1 - i] - input_a[b][0][i]) * grad_a[b][0][i];
       d_p_a[1] += (input_a[b][1][n / 2 - 1 - i] - input_a[b][1][i]) * grad_a[b][1][i];
       d_input_a[b][0][i] = (1 - p_a[0]) * grad_a[b][0][i] + p_a[0] * grad_a[b][0][n / 2 - 1 - i];
