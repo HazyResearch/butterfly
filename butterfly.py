@@ -237,7 +237,8 @@ class Block2x2Diag(nn.Module):
             # return ((self.ABCD * input.view(input.shape[:-1] + (1, 2, self.size // 2))).sum(dim=-2)).view(input.shape)
             return butterfly_factor_mult(self.ABCD, input.view(-1, 2, self.size // 2)).view(input.shape)
         else:
-            return (self.mul_op(self.ABCD, input.view(input.shape[:-2] + (1, 2, self.size // 2, 2))).sum(dim=-3)).view(input.shape)
+            # return (self.mul_op(self.ABCD, input.view(input.shape[:-2] + (1, 2, self.size // 2, 2))).sum(dim=-3)).view(input.shape)
+            return butterfly_factor_mult(self.ABCD, input.view(-1, 2, self.size // 2, 2)).view(input.shape)
 
 
 class Block2x2DiagProduct(nn.Module):

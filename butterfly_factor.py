@@ -59,3 +59,22 @@ def test_butterfly_factor_multiply():
         # assert torch.allclose(d_x, d_x_slow)
     last = time.perf_counter()
     print(last - first)
+
+
+def test_butterfly_factor_complex_multiply():
+    from complex_utils import complex_mul
+    n = 1024
+    m = int(math.log2(n))
+    x = torch.randn((n, 2), requires_grad=True)
+    sizes = [n >> i for i in range(m)]
+    for size in sizes:
+        bf = Block2x2Diag(size, complex=True)
+        x = x.view(-1, 2 * bf.ABCD.shape[-2], 2)
+        result_slow = (complex_mul(bf.ABCD, x.view(x.shape[:-2] + (1, 2, size // 2, 2))).sum(dim=-3)).view(x.shape)
+        result = butterfly_factor_mult(bf.ABCD, x.view(-1, 2, bf.ABCD.shape[-2], 2)).view(x.shape)
+        assert torch.allclose(result, result_slow, atol=1e-6)
+        grad = torch.randn_like(x)
+        d_coef_slow, d_x_slow = torch.autograd.grad(result_slow, (bf.ABCD, x), grad, retain_graph=True)
+        d_coef, d_x = torch.autograd.grad(result, (bf.ABCD, x), grad, retain_graph=True)
+        assert torch.allclose(d_coef, d_coef_slow, atol=1e-6)
+        assert torch.allclose(d_x, d_x_slow, atol=1e-6)
