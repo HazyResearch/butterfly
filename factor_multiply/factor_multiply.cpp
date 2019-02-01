@@ -1,3 +1,5 @@
+#include <immintrin.h>
+
 #include <vector>
 #include <torch/extension.h>
 // #include <iostream>
@@ -23,6 +25,59 @@ at::Tensor butterfly_factor_multiply(const at::Tensor& coefficients, const at::T
       }
     }
   });
+  return output;
+}
+
+at::Tensor butterfly_factor_multiply_256(const at::Tensor& coefficients, const at::Tensor& input) {
+  /* Parameters:
+        coefficients: (2, 2, n)
+        input: (batch_size, 2, n)
+     Return:
+        output: (batch_size, 2, n)
+  */
+  auto batch_size = input.size(0);
+  auto n = input.size(2);
+  auto output = torch::empty_like(input);
+  if (n % 8 != 0) {
+  AT_DISPATCH_FLOATING_TYPES(input.type(), "butterfly_factor_multiply", [&] {
+    auto coefficients_a = coefficients.accessor<scalar_t, 3>();
+    auto input_a = input.accessor<scalar_t, 3>();
+    auto output_a = output.accessor<scalar_t, 3>();
+    for (int64_t b = 0; b < batch_size; ++b) {
+      for (int64_t i = 0; i < n; ++i) {
+        output_a[b][0][i] = coefficients_a[0][0][i] * input_a[b][0][i] + coefficients_a[0][1][i] * input_a[b][1][i];
+        output_a[b][1][i] = coefficients_a[1][0][i] * input_a[b][0][i] + coefficients_a[1][1][i] * input_a[b][1][i];
+      }
+    }
+  });
+  } else {
+    float* coefficients_data = coefficients.data<float>();
+    float* input_data = input.data<float>();
+    float* output_data = output.data<float>();
+    auto coefficients_stride_0 = coefficients.stride(0);
+    auto coefficients_stride_1 = coefficients.stride(1);
+    auto coefficients_stride_2 = coefficients.stride(2);
+    auto input_stride_0 = input.stride(0);
+    auto input_stride_1 = input.stride(1);
+    auto input_stride_2 = input.stride(2);
+    auto output_stride_0 = output.stride(0);
+    auto output_stride_1 = output.stride(1);
+    auto output_stride_2 = output.stride(2);
+    for (int64_t b = 0; b < batch_size; ++b) {
+      for (int64_t i = 0; i < n; i += 8) {
+        __m256 coef00 = _mm256_load_ps(coefficients_data + i * coefficients_stride_2);
+        __m256 coef01 = _mm256_load_ps(coefficients_data + coefficients_stride_1 + i * coefficients_stride_2);
+        __m256 coef10 = _mm256_load_ps(coefficients_data + coefficients_stride_0 + i * coefficients_stride_2);
+        __m256 coef11 = _mm256_load_ps(coefficients_data + coefficients_stride_0 + coefficients_stride_1 + i * coefficients_stride_2);
+        __m256 input0 = _mm256_load_ps(input_data + b * input_stride_0 + i * input_stride_2);
+        __m256 input1 = _mm256_load_ps(input_data + b * input_stride_0 + input_stride_1 + i * input_stride_2);
+        __m256 output0 = _mm256_add_ps(_mm256_mul_ps(coef00, input0), _mm256_mul_ps(coef01, input1));
+        __m256 output1 = _mm256_add_ps(_mm256_mul_ps(coef10, input0), _mm256_mul_ps(coef11, input1));
+        _mm256_store_ps(output_data + b * output_stride_0 + i * output_stride_2, output0);
+        _mm256_store_ps(output_data + b * output_stride_0 + output_stride_1 + i * output_stride_2, output1);
+      }
+    }
+  }
   return output;
 }
 
