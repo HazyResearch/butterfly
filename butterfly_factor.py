@@ -1,6 +1,4 @@
 import math
-import operator
-import functools
 
 import torch
 from torch import nn
@@ -38,6 +36,8 @@ butterfly_factor_mult = ButterflyFactorMult.apply
 def test_butterfly_factor_multiply():
     import time
     n = 1024
+    batch_size = 1000
+    ntrials = 100
     m = int(math.log2(n))
     x = torch.randn(n, requires_grad=True)
     sizes = [n >> i for i in range(m)]
@@ -45,16 +45,45 @@ def test_butterfly_factor_multiply():
     for size in sizes:
         bf = Block2x2Diag(size)
         x = x.view(-1, 2 * bf.ABCD.shape[-1])
-        result_slow = bf(x)
+        # result_slow = bf(x)
         start = time.perf_counter()
-        # result = butterfly_factor_mult(bf.ABCD, x.view(-1, 2, bf.ABCD.shape[-1])).view(x.shape)
-        [butterfly_factor_mult(bf.ABCD, x.view(-1, 2, bf.ABCD.shape[-1])).view(x.shape) for _ in range(10000)]
-        end = time.perf_counter()
-        print(end - start)
+        result = butterfly_factor_mult(bf.ABCD, x.view(-1, 2, bf.ABCD.shape[-1])).view(x.shape)
+        [butterfly_factor_mult(bf.ABCD, x.view(-1, 2, bf.ABCD.shape[-1])).view(x.shape) for _ in range(ntrials)]
         # assert torch.allclose(result, result_slow)
-        # grad = torch.randn_like(x)
+        grad = torch.randn_like(x)
         # d_coef_slow, d_x_slow = torch.autograd.grad(result_slow, (bf.ABCD, x), grad, retain_graph=True)
         # d_coef, d_x = torch.autograd.grad(result, (bf.ABCD, x), grad, retain_graph=True)
+        [torch.autograd.grad(result, (bf.ABCD, x), grad, retain_graph=True) for _ in range(ntrials)]
+        end = time.perf_counter()
+        print(end - start)
+        # assert torch.allclose(d_coef, d_coef_slow)
+        # assert torch.allclose(d_x, d_x_slow)
+    last = time.perf_counter()
+    print(last - first)
+
+
+def test_butterfly_factor_multiply_bmm():
+    import time
+    n = 1024
+    batch_size = 1000
+    ntrials = 100
+    m = int(math.log2(n))
+    x = torch.randn(n, requires_grad=True)
+    sizes = [n >> i for i in range(m)]
+    first = time.perf_counter()
+    for size in sizes:
+        bf = Block2x2Diag(size)
+        ABCD = bf.ABCD.permute(2, 0, 1).clone()
+        x = x.view(ABCD.shape[0], 2, -1)
+        start = time.perf_counter()
+        result = ABCD @ x
+        [ABCD @ x for _ in range(ntrials)]
+        # assert torch.allclose(result, result_slow)
+        grad = torch.randn_like(x)
+        # d_coef, d_x = torch.autograd.grad(result, (ABCD, x), grad, retain_graph=True)
+        [torch.autograd.grad(result, (ABCD, x), grad, retain_graph=True) for _ in range(ntrials)]
+        end = time.perf_counter()
+        print(end - start)
         # assert torch.allclose(d_coef, d_coef_slow)
         # assert torch.allclose(d_x, d_x_slow)
     last = time.perf_counter()

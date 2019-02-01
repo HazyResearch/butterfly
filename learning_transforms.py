@@ -22,7 +22,7 @@ from ray.tune.schedulers import AsyncHyperBandScheduler
 
 from tune import run_experiments
 
-from butterfly import Block2x2DiagProduct, BlockPerm, BlockPermProduct, FixedPermutation
+from butterfly import Block2x2DiagProduct, BlockPerm, BlockPermProduct, FixedPermutation, Block2x2DiagProductBmm
 from semantic_loss import semantic_loss_exactly_one
 from training import PytorchTrainable, TrainableMatrixFactorization
 from utils import bitreversal_permutation
@@ -49,6 +49,7 @@ class TrainableButterfly(TrainableMatrixFactorization):
         complex = self.target_matrix.dim() == 3 or config['complex']
         torch.manual_seed(config['seed'])
         self.model = Block2x2DiagProduct(size=size, complex=complex).to(device)
+        # self.model = Block2x2DiagProductBmm(size=size, complex=complex).to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.n_epochs_per_validation = config['n_epochs_per_validation']
