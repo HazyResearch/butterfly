@@ -1,8 +1,19 @@
 from setuptools import setup
-from torch.utils.cpp_extension import CppExtension, BuildExtension
+import torch.cuda
+from torch.utils.cpp_extension import CppExtension, CUDAExtension, BuildExtension
+from torch.utils.cpp_extension import CUDA_HOME
 
 ext_modules = []
-extension = CppExtension('factor_multiply', ['factor_multiply.cpp'], extra_compile_args=['-march=native'])
+if torch.cuda.is_available() and CUDA_HOME is not None:
+    extension = CUDAExtension(
+        'factor_multiply', [
+            'factor_multiply.cpp',
+            'factor_multiply_cuda.cu'
+        ],
+        extra_compile_args={'cxx': ['-g', '-march=native'],
+                            'nvcc': ['-O2', '-lineinfo']})
+    ext_modules.append(extension)
+# extension = CUDAExtension('factor_multiply', ['factor_multiply.cpp'], extra_compile_args=['-march=native'])
 # extension = CppExtension('factor_multiply', ['factor_multiply.cpp'])
 ext_modules.append(extension)
 
