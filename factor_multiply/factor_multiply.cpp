@@ -13,15 +13,17 @@ at::Tensor butterfly_factor_multiply(const at::Tensor& twiddle, const at::Tensor
      Return:
         output: (batch_size, 2, n) if real or (batch_size, 2, n, 2) if complex
   */
-  const auto batch_size = input.size(0);
-  const auto n = input.size(2);
   auto output = torch::empty_like(input);
   if (input.is_cuda()) {
+    AT_CHECK(twiddle.is_cuda(), "butterfly_factor_multiply: Expected twiddle to be CUDA tensor");
     butterfly_factor_multiply_cuda(twiddle, input, output);
     return output;
   }
+  AT_CHECK(!twiddle.is_cuda(), "butterfly_factor_multiply: Expected twiddle to be CPU tensor");
+  const auto batch_size = input.size(0);
+  const auto n = input.size(2);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_factor_multiply", [&] {
-    switch (input.ndimension()) {
+    switch (input.dim()) {
       case 3:  // real
         {
           const auto twiddle_a = twiddle.accessor<scalar_t, 3>();
@@ -65,59 +67,6 @@ at::Tensor butterfly_factor_multiply(const at::Tensor& twiddle, const at::Tensor
   return output;
 }
 
-at::Tensor butterfly_factor_multiply_256(const at::Tensor& twiddle, const at::Tensor& input) {
-  /* Parameters:
-        twiddle: (2, 2, n)
-        input: (batch_size, 2, n)
-     Return:
-        output: (batch_size, 2, n)
-  */
-  auto batch_size = input.size(0);
-  auto n = input.size(2);
-  auto output = torch::empty_like(input);
-  if (n % 8 != 0) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_factor_multiply", [&] {
-    auto twiddle_a = twiddle.accessor<scalar_t, 3>();
-    auto input_a = input.accessor<scalar_t, 3>();
-    auto output_a = output.accessor<scalar_t, 3>();
-    for (int64_t b = 0; b < batch_size; ++b) {
-      for (int64_t i = 0; i < n; ++i) {
-        output_a[b][0][i] = twiddle_a[0][0][i] * input_a[b][0][i] + twiddle_a[0][1][i] * input_a[b][1][i];
-        output_a[b][1][i] = twiddle_a[1][0][i] * input_a[b][0][i] + twiddle_a[1][1][i] * input_a[b][1][i];
-      }
-    }
-  });
-  } else {
-    float* coefficients_data = twiddle.data<float>();
-    float* input_data = input.data<float>();
-    float* output_data = output.data<float>();
-    auto coefficients_stride_0 = twiddle.stride(0);
-    auto coefficients_stride_1 = twiddle.stride(1);
-    auto coefficients_stride_2 = twiddle.stride(2);
-    auto input_stride_0 = input.stride(0);
-    auto input_stride_1 = input.stride(1);
-    auto input_stride_2 = input.stride(2);
-    auto output_stride_0 = output.stride(0);
-    auto output_stride_1 = output.stride(1);
-    auto output_stride_2 = output.stride(2);
-    for (int64_t b = 0; b < batch_size; ++b) {
-      for (int64_t i = 0; i < n; i += 8) {
-        __m256 coef00 = _mm256_load_ps(coefficients_data + i * coefficients_stride_2);
-        __m256 coef01 = _mm256_load_ps(coefficients_data + coefficients_stride_1 + i * coefficients_stride_2);
-        __m256 coef10 = _mm256_load_ps(coefficients_data + coefficients_stride_0 + i * coefficients_stride_2);
-        __m256 coef11 = _mm256_load_ps(coefficients_data + coefficients_stride_0 + coefficients_stride_1 + i * coefficients_stride_2);
-        __m256 input0 = _mm256_load_ps(input_data + b * input_stride_0 + i * input_stride_2);
-        __m256 input1 = _mm256_load_ps(input_data + b * input_stride_0 + input_stride_1 + i * input_stride_2);
-        __m256 output0 = _mm256_add_ps(_mm256_mul_ps(coef00, input0), _mm256_mul_ps(coef01, input1));
-        __m256 output1 = _mm256_add_ps(_mm256_mul_ps(coef10, input0), _mm256_mul_ps(coef11, input1));
-        _mm256_store_ps(output_data + b * output_stride_0 + i * output_stride_2, output0);
-        _mm256_store_ps(output_data + b * output_stride_0 + output_stride_1 + i * output_stride_2, output1);
-      }
-    }
-  }
-  return output;
-}
-
 std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& input) {
   /* Parameters:
          grad: (batch_size, 2, n) if real or (batch_size, 2, n, 2) if complex
@@ -132,7 +81,7 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
   auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::empty_like(input);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_factor_multiply_backward", [&] {
-    switch (input.ndimension()) {
+    switch (input.dim()) {
       case 3:  // real
         {
           const auto grad_a = grad.accessor<scalar_t, 3>();
@@ -308,4 +257,58 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("permutation_factor_even_odd_multiply_backward", &permutation_factor_even_odd_multiply_backward, "Permutation factor (even odd) multiply backward");
   m.def("permutation_factor_reverse_multiply", &permutation_factor_reverse_multiply, "Permutation factor (reverse) multiply forward");
   m.def("permutation_factor_reverse_multiply_backward", &permutation_factor_reverse_multiply_backward, "Permutation factor (even odd) multiply backward");
+}
+
+// Gives segfault right now
+at::Tensor butterfly_factor_multiply_256(const at::Tensor& twiddle, const at::Tensor& input) {
+  /* Parameters:
+        twiddle: (2, 2, n)
+        input: (batch_size, 2, n)
+     Return:
+        output: (batch_size, 2, n)
+  */
+  auto batch_size = input.size(0);
+  auto n = input.size(2);
+  auto output = torch::empty_like(input);
+  if (n % 8 != 0) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_factor_multiply", [&] {
+    auto twiddle_a = twiddle.accessor<scalar_t, 3>();
+    auto input_a = input.accessor<scalar_t, 3>();
+    auto output_a = output.accessor<scalar_t, 3>();
+    for (int64_t b = 0; b < batch_size; ++b) {
+      for (int64_t i = 0; i < n; ++i) {
+        output_a[b][0][i] = twiddle_a[0][0][i] * input_a[b][0][i] + twiddle_a[0][1][i] * input_a[b][1][i];
+        output_a[b][1][i] = twiddle_a[1][0][i] * input_a[b][0][i] + twiddle_a[1][1][i] * input_a[b][1][i];
+      }
+    }
+  });
+  } else {
+    float* coefficients_data = twiddle.data<float>();
+    float* input_data = input.data<float>();
+    float* output_data = output.data<float>();
+    auto coefficients_stride_0 = twiddle.stride(0);
+    auto coefficients_stride_1 = twiddle.stride(1);
+    auto coefficients_stride_2 = twiddle.stride(2);
+    auto input_stride_0 = input.stride(0);
+    auto input_stride_1 = input.stride(1);
+    auto input_stride_2 = input.stride(2);
+    auto output_stride_0 = output.stride(0);
+    auto output_stride_1 = output.stride(1);
+    auto output_stride_2 = output.stride(2);
+    for (int64_t b = 0; b < batch_size; ++b) {
+      for (int64_t i = 0; i < n; i += 8) {
+        __m256 coef00 = _mm256_load_ps(coefficients_data + i * coefficients_stride_2);
+        __m256 coef01 = _mm256_load_ps(coefficients_data + coefficients_stride_1 + i * coefficients_stride_2);
+        __m256 coef10 = _mm256_load_ps(coefficients_data + coefficients_stride_0 + i * coefficients_stride_2);
+        __m256 coef11 = _mm256_load_ps(coefficients_data + coefficients_stride_0 + coefficients_stride_1 + i * coefficients_stride_2);
+        __m256 input0 = _mm256_load_ps(input_data + b * input_stride_0 + i * input_stride_2);
+        __m256 input1 = _mm256_load_ps(input_data + b * input_stride_0 + input_stride_1 + i * input_stride_2);
+        __m256 output0 = _mm256_add_ps(_mm256_mul_ps(coef00, input0), _mm256_mul_ps(coef01, input1));
+        __m256 output1 = _mm256_add_ps(_mm256_mul_ps(coef10, input0), _mm256_mul_ps(coef11, input1));
+        _mm256_store_ps(output_data + b * output_stride_0 + i * output_stride_2, output0);
+        _mm256_store_ps(output_data + b * output_stride_0 + output_stride_1 + i * output_stride_2, output1);
+      }
+    }
+  }
+  return output;
 }
