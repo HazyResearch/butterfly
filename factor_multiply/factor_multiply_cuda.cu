@@ -15,10 +15,10 @@ __global__ void butterfly_factor_multiply_cuda_kernel(const at::PackedTensorAcce
                                                       at::PackedTensorAccessor<scalar_t, 3> output_a) {
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
-  for (int64_t b = blockIdx.y * blockDim.y + threadIdx.y; b < batch_size; b += blockDim.y * gridDim.y) {
-    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
-      const scalar_t twiddle_val[2][2] = {{twiddle_a[0][0][i], twiddle_a[0][1][i]},
-                                          {twiddle_a[1][0][i], twiddle_a[1][1][i]}};
+  for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
+    const scalar_t twiddle_val[2][2] = {{twiddle_a[0][0][i], twiddle_a[0][1][i]},
+                                        {twiddle_a[1][0][i], twiddle_a[1][1][i]}};
+    for (int64_t b = blockIdx.y * blockDim.y + threadIdx.y; b < batch_size; b += blockDim.y * gridDim.y) {
       const scalar_t input_val[2] = {input_a[b][0][i], input_a[b][1][i]};
       #pragma unroll
       for (int j = 0; j <= 1; ++j) {
@@ -34,12 +34,12 @@ __global__ void butterfly_factor_multiply_complex_cuda_kernel(const at::PackedTe
                                                               at::PackedTensorAccessor<scalar_t, 4> output_a) {
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
-  for (int64_t b = blockIdx.y * blockDim.y + threadIdx.y; b < batch_size; b += blockDim.y * gridDim.y) {
-    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
-      const scalar_t twiddle_val[2][2][2] = {{{twiddle_a[0][0][i][0], twiddle_a[0][0][i][1]},
-                                              {twiddle_a[0][1][i][0], twiddle_a[0][1][i][1]}},
-                                             {{twiddle_a[1][0][i][0], twiddle_a[1][0][i][1]},
-                                              {twiddle_a[1][1][i][0], twiddle_a[1][1][i][1]}}};
+  for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
+    const scalar_t twiddle_val[2][2][2] = {{{twiddle_a[0][0][i][0], twiddle_a[0][0][i][1]},
+                                            {twiddle_a[0][1][i][0], twiddle_a[0][1][i][1]}},
+                                            {{twiddle_a[1][0][i][0], twiddle_a[1][0][i][1]},
+                                            {twiddle_a[1][1][i][0], twiddle_a[1][1][i][1]}}};
+    for (int64_t b = blockIdx.y * blockDim.y + threadIdx.y; b < batch_size; b += blockDim.y * gridDim.y) {
       const scalar_t input_val[2][2] = {{input_a[b][0][i][0], input_a[b][0][i][1]},
                                         {input_a[b][1][i][0], input_a[b][1][i][1]}};
       #pragma unroll
@@ -97,10 +97,10 @@ __global__ void butterfly_factor_multiply_backward_cuda_kernel(const at::PackedT
                                                                at::PackedTensorAccessor<scalar_t, 3> d_input_a) {
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
-  for (int64_t b = blockIdx.y * blockDim.y + threadIdx.y; b < batch_size; b += blockDim.y * gridDim.y) {
-    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
-      const scalar_t twiddle_val[2][2] = {{twiddle_a[0][0][i], twiddle_a[0][1][i]},
-                                          {twiddle_a[1][0][i], twiddle_a[1][1][i]}};
+  for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
+    const scalar_t twiddle_val[2][2] = {{twiddle_a[0][0][i], twiddle_a[0][1][i]},
+                                        {twiddle_a[1][0][i], twiddle_a[1][1][i]}};
+    for (int64_t b = blockIdx.y * blockDim.y + threadIdx.y; b < batch_size; b += blockDim.y * gridDim.y) {
       const scalar_t input_val[2] = {input_a[b][0][i], input_a[b][1][i]};
       const scalar_t grad_val[2] = {grad_a[b][0][i], grad_a[b][1][i]};
       #pragma unroll
@@ -121,12 +121,12 @@ __global__ void butterfly_factor_multiply_complex_backward_cuda_kernel(const at:
                                                                        at::PackedTensorAccessor<scalar_t, 4> d_input_a) {
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
-  for (int64_t b = blockIdx.y * blockDim.y + threadIdx.y; b < batch_size; b += blockDim.y * gridDim.y) {
-    for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
-      const scalar_t twiddle_val[2][2][2] = {{{twiddle_a[0][0][i][0], twiddle_a[0][0][i][1]},
-                                              {twiddle_a[0][1][i][0], twiddle_a[0][1][i][1]}},
-                                             {{twiddle_a[1][0][i][0], twiddle_a[1][0][i][1]},
-                                              {twiddle_a[1][1][i][0], twiddle_a[1][1][i][1]}}};
+  for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
+    const scalar_t twiddle_val[2][2][2] = {{{twiddle_a[0][0][i][0], twiddle_a[0][0][i][1]},
+                                            {twiddle_a[0][1][i][0], twiddle_a[0][1][i][1]}},
+                                            {{twiddle_a[1][0][i][0], twiddle_a[1][0][i][1]},
+                                            {twiddle_a[1][1][i][0], twiddle_a[1][1][i][1]}}};
+    for (int64_t b = blockIdx.y * blockDim.y + threadIdx.y; b < batch_size; b += blockDim.y * gridDim.y) {
       const scalar_t input_val[2][2] = {{input_a[b][0][i][0], input_a[b][0][i][1]},
                                         {input_a[b][1][i][0], input_a[b][1][i][1]}};
       const scalar_t grad_val[2][2] = {{grad_a[b][0][i][0], grad_a[b][0][i][1]},
