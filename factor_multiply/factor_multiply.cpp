@@ -45,18 +45,22 @@ at::Tensor butterfly_factor_multiply(const at::Tensor& twiddle, const at::Tensor
         }
       case 4:  // complex
         {
-          auto twiddle_a = twiddle.accessor<scalar_t, 4>();
-          auto input_a = input.accessor<scalar_t, 4>();
+          const auto twiddle_a = twiddle.accessor<scalar_t, 4>();
+          const auto input_a = input.accessor<scalar_t, 4>();
           auto output_a = output.accessor<scalar_t, 4>();
           for (int64_t b = 0; b < batch_size; ++b) {
             for (int64_t i = 0; i < n; ++i) {
-              scalar_t input_val[2][2] = {{input_a[b][0][i][0], input_a[b][0][i][0]},
-                                          {input_a[b][1][i][0], input_a[b][1][i][1]}};
+              const scalar_t twiddle_val[2][2][2] = {{{twiddle_a[0][0][i][0], twiddle_a[0][0][i][1]},
+                                                      {twiddle_a[0][1][i][0], twiddle_a[0][1][i][1]}},
+                                                     {{twiddle_a[1][0][i][0], twiddle_a[1][0][i][1]},
+                                                      {twiddle_a[1][1][i][0], twiddle_a[1][1][i][1]}}};
+              const scalar_t input_val[2][2] = {{input_a[b][0][i][0], input_a[b][0][i][1]},
+                                                {input_a[b][1][i][0], input_a[b][1][i][1]}};
               for (int64_t j = 0; j <= 1; ++j) {
-                output_a[b][j][i][0] = twiddle_a[j][0][i][0] * input_val[0][0] - twiddle_a[j][0][i][1] * input_val[0][1]
-                  + twiddle_a[j][1][i][0] * input_val[1][0] - twiddle_a[j][1][i][1] * input_val[1][1];
-                output_a[b][j][i][1] = twiddle_a[j][0][i][0] * input_val[0][1] + twiddle_a[j][0][i][1] * input_val[0][0]
-                  + twiddle_a[j][1][i][0] * input_val[1][1] + twiddle_a[j][1][i][1] * input_val[1][0];
+                output_a[b][j][i][0] = twiddle_val[j][0][0] * input_val[0][0] - twiddle_val[j][0][1] * input_val[0][1]
+                  + twiddle_val[j][1][0] * input_val[1][0] - twiddle_val[j][1][1] * input_val[1][1];
+                output_a[b][j][i][1] = twiddle_val[j][0][0] * input_val[0][1] + twiddle_val[j][0][1] * input_val[0][0]
+                  + twiddle_val[j][1][0] * input_val[1][1] + twiddle_val[j][1][1] * input_val[1][0];
               }
             }
           }
@@ -85,7 +89,9 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
     AT_CHECK(twiddle.is_cuda() && grad.is_cuda(), "butterfly_factor_multiply_backward: Expected grad and twiddle to be CUDA tensor");
     // CUDA kernel will compute the expanded gradient of @twiddle, then we'll call sum over the batch dimension.
     // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
-    auto d_twiddle_expanded = torch::empty({batch_size, 2, 2, n}, torch::dtype(twiddle.dtype()).device(twiddle.device()));
+    auto d_twiddle_expanded = input.dim() == 3 ?
+      torch::empty({batch_size, 2, 2, n}, torch::dtype(twiddle.dtype()).device(twiddle.device())) :
+      torch::empty({batch_size, 2, 2, n, 2}, torch::dtype(twiddle.dtype()).device(twiddle.device()));
     butterfly_factor_multiply_backward_cuda(grad, twiddle, input, d_twiddle_expanded, d_input);
     return {d_twiddle_expanded.sum(0), d_input};
   }
@@ -103,7 +109,7 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
           for (int64_t b = 0; b < batch_size; ++b) {
             for (int64_t i = 0; i < n; ++i) {
               const scalar_t twiddle_val[2][2] = {{twiddle_a[0][0][i], twiddle_a[0][1][i]},
-                                            {twiddle_a[1][0][i], twiddle_a[1][1][i]}};
+                                                  {twiddle_a[1][0][i], twiddle_a[1][1][i]}};
               const scalar_t input_val[2] = {input_a[b][0][i], input_a[b][1][i]};
               const scalar_t grad_val[2] = {grad_a[b][0][i], grad_a[b][1][i]};
               for (int64_t j = 0; j <= 1; ++j) {
@@ -117,23 +123,31 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
         }
       case 4:  // complex
         {
-          auto grad_a = grad.accessor<scalar_t, 4>();
-          auto twiddle_a = twiddle.accessor<scalar_t, 4>();
-          auto input_a = input.accessor<scalar_t, 4>();
+          const auto grad_a = grad.accessor<scalar_t, 4>();
+          const auto twiddle_a = twiddle.accessor<scalar_t, 4>();
+          const auto input_a = input.accessor<scalar_t, 4>();
           auto d_twiddle_a = d_twiddle.accessor<scalar_t, 4>();
           auto d_input_a = d_input.accessor<scalar_t, 4>();
           for (int64_t b = 0; b < batch_size; ++b) {
             for (int64_t i = 0; i < n; ++i) {
+              const scalar_t twiddle_val[2][2][2] = {{{twiddle_a[0][0][i][0], twiddle_a[0][0][i][1]},
+                                                      {twiddle_a[0][1][i][0], twiddle_a[0][1][i][1]}},
+                                                     {{twiddle_a[1][0][i][0], twiddle_a[1][0][i][1]},
+                                                      {twiddle_a[1][1][i][0], twiddle_a[1][1][i][1]}}};
+              const scalar_t input_val[2][2] = {{input_a[b][0][i][0], input_a[b][0][i][1]},
+                                                {input_a[b][1][i][0], input_a[b][1][i][1]}};
+              const scalar_t grad_val[2][2] = {{grad_a[b][0][i][0], grad_a[b][0][i][1]},
+                                               {grad_a[b][1][i][0], grad_a[b][1][i][1]}};
               for (int64_t j = 0; j <= 1; ++j) {
                 // Multiply by complex conjugate
-                d_twiddle_a[j][0][i][0] += grad_a[b][j][i][0] * input_a[b][0][i][0] + grad_a[b][j][i][1] * input_a[b][0][i][1];
-                d_twiddle_a[j][0][i][1] += -grad_a[b][j][i][0] * input_a[b][0][i][1] + grad_a[b][j][i][1] * input_a[b][0][i][0];
-                d_twiddle_a[j][1][i][0] += grad_a[b][j][i][0] * input_a[b][1][i][0] + grad_a[b][j][i][1] * input_a[b][1][i][1];
-                d_twiddle_a[j][1][i][1] += -grad_a[b][j][i][0] * input_a[b][1][i][1] + grad_a[b][j][i][1] * input_a[b][1][i][0];
-                d_input_a[b][j][i][0] = twiddle_a[0][j][i][0] * grad_a[b][0][i][0] + twiddle_a[0][j][i][1] * grad_a[b][0][i][1]
-                  + twiddle_a[1][j][i][0] * grad_a[b][1][i][0] + twiddle_a[1][j][i][1] * grad_a[b][1][i][1];
-                d_input_a[b][j][i][1] = twiddle_a[0][j][i][0] * grad_a[b][0][i][1] - twiddle_a[0][j][i][1] * grad_a[b][0][i][0]
-                  + twiddle_a[1][j][i][0] * grad_a[b][1][i][1] - twiddle_a[1][j][i][1] * grad_a[b][1][i][0];
+                d_twiddle_a[j][0][i][0] += grad_val[j][0] * input_val[0][0] + grad_val[j][1] * input_val[0][1];
+                d_twiddle_a[j][0][i][1] += -grad_val[j][0] * input_val[0][1] + grad_val[j][1] * input_val[0][0];
+                d_twiddle_a[j][1][i][0] += grad_val[j][0] * input_val[1][0] + grad_val[j][1] * input_val[1][1];
+                d_twiddle_a[j][1][i][1] += -grad_val[j][0] * input_val[1][1] + grad_val[j][1] * input_val[1][0];
+                d_input_a[b][j][i][0] = twiddle_val[0][j][0] * grad_val[0][0] + twiddle_val[0][j][1] * grad_val[0][1]
+                  + twiddle_val[1][j][0] * grad_val[1][0] + twiddle_val[1][j][1] * grad_val[1][1];
+                d_input_a[b][j][i][1] = twiddle_val[0][j][0] * grad_val[0][1] - twiddle_val[0][j][1] * grad_val[0][0]
+                  + twiddle_val[1][j][0] * grad_val[1][1] - twiddle_val[1][j][1] * grad_val[1][0];
               }
             }
           }
