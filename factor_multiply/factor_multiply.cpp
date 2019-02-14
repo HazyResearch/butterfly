@@ -5,6 +5,8 @@
 // #include <iostream>
 
 void butterfly_factor_multiply_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output);
+void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& input,
+                                             at::Tensor& d_twiddle_expanded, at::Tensor& d_input);
 
 at::Tensor butterfly_factor_multiply(const at::Tensor& twiddle, const at::Tensor& input) {
   /* Parameters:
@@ -78,8 +80,17 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
   */
   const auto batch_size = input.size(0);
   const auto n = input.size(2);
-  auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::empty_like(input);
+  if (input.is_cuda()) {
+    AT_CHECK(twiddle.is_cuda() && grad.is_cuda(), "butterfly_factor_multiply_backward: Expected grad and twiddle to be CUDA tensor");
+    // CUDA kernel will compute the expanded gradient of @twiddle, then we'll call sum over the batch dimension.
+    // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
+    auto d_twiddle_expanded = torch::empty({batch_size, 2, 2, n}, torch::dtype(twiddle.dtype()).device(twiddle.device()));
+    butterfly_factor_multiply_backward_cuda(grad, twiddle, input, d_twiddle_expanded, d_input);
+    return {d_twiddle_expanded.sum(0), d_input};
+  }
+  AT_CHECK((!twiddle.is_cuda()) && (!grad.is_cuda()) , "butterfly_factor_multiply_backward: Expected grad and twiddle to be CPU tensor");
+  auto d_twiddle = torch::zeros_like(twiddle);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_factor_multiply_backward", [&] {
     switch (input.dim()) {
       case 3:  // real

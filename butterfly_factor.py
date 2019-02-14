@@ -28,6 +28,10 @@ class ButterflyFactorMult(torch.autograd.Function):
         # d_input = ButterflyFactorMult.apply(coefficients.transpose(0, 1), grad)
         # return d_coefficients, d_input
         d_coefficients, d_input = butterfly_factor_multiply_backward(grad, coefficients, input)
+        # d_coefficients = torch.zeros_like(coefficients)
+        # d_input = torch.zeros_like(input)
+        # d_coefficients = (grad.permute(2, 1, 0) @ input.permute(2, 0, 1)).permute(1, 2, 0)  # Extremely slow on CUDA
+        # d_input = butterfly_factor_multiply(coefficients.transpose(0, 1), grad)
         return d_coefficients, d_input
 
 butterfly_factor_mult = ButterflyFactorMult.apply
