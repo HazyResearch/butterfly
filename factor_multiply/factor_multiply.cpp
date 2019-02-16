@@ -239,7 +239,7 @@ std::vector<at::Tensor> permutation_factor_even_odd_multiply_backward(const at::
   auto d_input = torch::empty_like(input);
   auto d_p = torch::zeros_like(p);
   if (input.is_cuda()) {
-    AT_CHECK(grad.is_cuda(), "butterfly_factor_multiply: Expected grad to be CUDA tensor");
+    AT_CHECK(grad.is_cuda(), "permutation_factor_even_odd_multiply_backward: Expected grad to be CUDA tensor");
     // CUDA kernel will compute the expanded gradient of @p, then we'll call sum.
     // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
     auto d_p_expanded = torch::empty({batch_size, n / 2}, torch::dtype(input.dtype()).device(input.device()));
@@ -317,54 +317,173 @@ std::vector<at::Tensor> permutation_factor_even_odd_multiply_backward(const at::
   return {d_p, d_input};
 }
 
-at::Tensor permutation_factor_reverse_multiply(at::Tensor p, at::Tensor input) {
-  // Parameters:
-  //     p: (2, )
-  //     input: (batch_size, n)
-  auto batch_size = input.size(0);
-  auto n = input.size(1);
-  input = input.reshape({-1, 2, n / 2});
+at::Tensor permutation_factor_reverse_multiply(const at::Tensor& p, const at::Tensor& input) {
+  /* Parameters:
+         p: (2, )
+         input: (batch_size, n) if real or (batch_size, n, 2) if complex
+     Output:
+         p input + (1 - p) input_reversed: (batch_size, n) if real or (batch_size, n, 2) if complex
+  */
   auto output = torch::empty_like(input);
-  auto input_a = input.accessor<float, 3>();
-  float p_a[2] = {p.accessor<float, 1>()[0], p.accessor<float, 1>()[1]};
-  auto output_a = output.accessor<float, 3>();
-  for (int64_t b = 0; b < batch_size; ++b) {
-    for (int64_t i = 0; i < n / 2; ++i) {
-      output_a[b][0][i] = (1 - p_a[0]) * input_a[b][0][i] + p_a[0] * input_a[b][0][n / 2 - 1 - i];
-      output_a[b][1][i] = (1 - p_a[1]) * input_a[b][1][i] + p_a[1] * input_a[b][1][n / 2 - 1 - i];
+  // if (input.is_cuda()) {
+  //   permutation_factor_even_odd_multiply_cuda(p, input, output);
+  //   return output;
+  // }
+  const auto batch_size = input.size(0);
+  const auto n = input.size(1);
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_reverse_multiply", [&] {
+    const scalar_t p_a[2] = {p.accessor<float, 1>()[0], p.accessor<float, 1>()[1]};
+    switch (input.dim()) {
+      case 2: // real
+        {
+          const auto input_folded = input.reshape({batch_size, 2, n / 2});
+          output = output.view({batch_size, 2, n / 2});
+          const auto input_a = input_folded.accessor<scalar_t, 3>();
+          auto output_a = output.accessor<scalar_t, 3>();
+          for (int64_t b = 0; b < batch_size; ++b) {
+            for (int64_t i = 0; i < n / 4; ++i) {
+              // output_a[b][0][i] = (1 - p_a[0]) * input_a[b][0][i] + p_a[0] * input_a[b][0][n / 2 - 1 - i];
+              const scalar_t in0[2] = {input_a[b][0][i], input_a[b][0][n / 2 - 1 - i]};
+              output_a[b][0][i] = (1 - p_a[0]) * in0[0] + p_a[0] * in0[1];
+              output_a[b][0][n / 2 - 1 - i] = p_a[0] * in0[0] + (1 - p_a[0]) * in0[1];
+              // output_a[b][1][i] = (1 - p_a[1]) * input_a[b][1][i] + p_a[1] * input_a[b][1][n / 2 - 1 - i];
+              const scalar_t in1[2] = {input_a[b][1][i], input_a[b][1][n / 2 - 1 - i]};
+              output_a[b][1][i] = (1 - p_a[1]) * in1[0] + p_a[1] * in1[1];
+              output_a[b][1][n / 2 - 1 - i] = p_a[1] * in1[0] + (1 - p_a[1]) * in1[1];
+            }
+          }
+          output = output.view({batch_size, n});
+          break;
+        }
+      case 3: // complex
+        {
+          const auto input_folded = input.reshape({batch_size, 2, n / 2, 2});
+          output = output.view({batch_size, 2, n / 2, 2});
+          const auto input_a = input_folded.accessor<scalar_t, 4>();
+          auto output_a = output.accessor<scalar_t, 4>();
+          for (int64_t b = 0; b < batch_size; ++b) {
+            for (int64_t i = 0; i < n / 4; ++i) {
+              const scalar_t in00[2] = {input_a[b][0][i][0], input_a[b][0][n / 2 - 1 - i][0]};
+              output_a[b][0][i][0] = (1 - p_a[0]) * in00[0] + p_a[0] * in00[1];
+              output_a[b][0][n / 2 - 1 - i][0] = p_a[0] * in00[0] + (1 - p_a[0]) * in00[1];
+              const scalar_t in01[2] = {input_a[b][0][i][1], input_a[b][0][n / 2 - 1 - i][1]};
+              output_a[b][0][i][1] = (1 - p_a[0]) * in01[0] + p_a[0] * in01[1];
+              output_a[b][0][n / 2 - 1 - i][1] = p_a[0] * in01[0] + (1 - p_a[0]) * in01[1];
+              const scalar_t in10[2] = {input_a[b][1][i][0], input_a[b][1][n / 2 - 1 - i][0]};
+              output_a[b][1][i][0] = (1 - p_a[1]) * in10[0] + p_a[1] * in10[1];
+              output_a[b][1][n / 2 - 1 - i][0] = p_a[1] * in10[0] + (1 - p_a[1]) * in10[1];
+              const scalar_t in11[2] = {input_a[b][1][i][1], input_a[b][1][n / 2 - 1 - i][1]};
+              output_a[b][1][i][1] = (1 - p_a[1]) * in11[0] + p_a[1] * in11[1];
+              output_a[b][1][n / 2 - 1 - i][1] = p_a[1] * in11[0] + (1 - p_a[1]) * in11[1];
+            }
+          }
+          output = output.view({batch_size, n, 2});
+          break;
+        }
+      default:
+        AT_ERROR("permutation_factor_reverse_multiply requires input dimension 2 or 3");
     }
-  }
-  return output.reshape({-1, n});
+  });
+  return output;
 }
 
-std::vector<at::Tensor> permutation_factor_reverse_multiply_backward(at::Tensor grad, at::Tensor p, at::Tensor input) {
-  // Parameters:
-  //     grad: (batch_size, n)
-  //     p: (2, )
-  //     input: (batch_size, n)
-  // Output:
-  //     d_p, d_x
-  auto batch_size = grad.size(0);
-  auto n = grad.size(1);
-  input = input.reshape({-1, 2, n / 2});
-  grad = grad.reshape({-1, 2, n / 2});
-  auto d_p = torch::zeros(2);
+std::vector<at::Tensor> permutation_factor_reverse_multiply_backward(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input) {
+  /* Parameters:
+        grad: (batch_size, n) if real or (batch_size, n, 2) if complex
+        p: (2, )
+        input: (batch_size, n) if real or (batch_size, n, 2) if complex
+     Output:
+        d_p: (2, )
+        d_input: (batch_size, n) if real or (batch_size, n, 2) if complex
+  */
+  const auto batch_size = grad.size(0);
+  const auto n = grad.size(1);
   auto d_input = torch::empty_like(input);
-  // Accessors
-  auto grad_a = grad.accessor<float, 3>();
-  float p_a[2] = {p.accessor<float, 1>()[0], p.accessor<float, 1>()[1]};
-  auto input_a = input.accessor<float, 3>();
-  auto d_p_a = d_p.accessor<float, 1>();
-  auto d_input_a = d_input.accessor<float, 3>();
-  for (int64_t b = 0; b < batch_size; ++b) {
-    for (int64_t i = 0; i < n / 2; ++i) {
-      d_p_a[0] += (input_a[b][0][n / 2 - 1 - i] - input_a[b][0][i]) * grad_a[b][0][i];
-      d_p_a[1] += (input_a[b][1][n / 2 - 1 - i] - input_a[b][1][i]) * grad_a[b][1][i];
-      d_input_a[b][0][i] = (1 - p_a[0]) * grad_a[b][0][i] + p_a[0] * grad_a[b][0][n / 2 - 1 - i];
-      d_input_a[b][1][i] = (1 - p_a[1]) * grad_a[b][1][i] + p_a[1] * grad_a[b][1][n / 2 - 1 - i];
+  auto d_p = torch::zeros_like(p);
+  // if (input.is_cuda()) {
+  //   AT_CHECK(grad.is_cuda(), "permutation_factor_reverse_multiply_backward: Expected grad to be CUDA tensor");
+  //   // CUDA kernel will compute the expanded gradient of @p, then we'll call sum.
+  //   // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
+  //   auto d_p_expanded = torch::empty({batch_size, n / 2}, torch::dtype(input.dtype()).device(input.device()));
+  //   permutation_factor_even_odd_multiply_backward_cuda(grad, p, input, d_p_expanded, d_input);
+  //   d_p[0] = d_p_expanded.sum();
+  //   return {d_p, d_input};
+  // }
+  // AT_CHECK(!grad.is_cuda(), "butterfly_factor_multiply: Expected grad to be CPU tensor");
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_even_odd_multiply_backward", [&] {
+    const scalar_t p_a[2] = {p.accessor<scalar_t, 1>()[0], p.accessor<scalar_t, 1>()[1]};
+    auto d_p_a = d_p.accessor<scalar_t, 1>();
+    scalar_t d_p_temp[2] = {0, 0};
+    switch (input.dim()) {
+      case 2: // real
+        {
+          const auto input_folded = input.reshape({batch_size, 2, n / 2});
+          const auto grad_folded = grad.reshape({batch_size, 2, n / 2});
+          d_input = d_input.view({batch_size, 2, n / 2});
+          // Accessors
+          const auto input_a = input_folded.accessor<scalar_t, 3>();
+          const auto grad_a = grad_folded.accessor<scalar_t, 3>();
+          auto d_input_a = d_input.accessor<scalar_t, 3>();
+          for (int64_t b = 0; b < batch_size; ++b) {
+            for (int64_t i = 0; i < n / 4; ++i) {
+              const scalar_t in0[2] = {input_a[b][0][i], input_a[b][0][n / 2 - 1 - i]};
+              const scalar_t g0[2] = {grad_a[b][0][i], grad_a[b][0][n / 2 - 1 - i]};
+              d_p_temp[0] += (in0[1] - in0[0]) * (g0[0] - g0[1]);
+              d_input_a[b][0][i] = (1 - p_a[0]) * g0[0] + p_a[0] * g0[1];
+              d_input_a[b][0][n / 2 - 1 - i] = p_a[0] * g0[0] + (1 - p_a[0]) * g0[1];
+              const scalar_t in1[2] = {input_a[b][1][i], input_a[b][1][n / 2 - 1 - i]};
+              const scalar_t g1[2] = {grad_a[b][1][i], grad_a[b][1][n / 2 - 1 - i]};
+              d_p_temp[1] += (in1[1] - in1[0]) * (g1[0] - g1[1]);
+              d_input_a[b][1][i] = (1 - p_a[1]) * g1[0] + p_a[1] * g1[1];
+              d_input_a[b][1][n / 2 - 1 - i] = p_a[1] * g1[0] + (1 - p_a[1]) * g1[1];
+            }
+          }
+          d_input = d_input.view({batch_size, n});
+          break;
+        }
+      case 3: // complex
+        {
+          const auto input_folded = input.reshape({batch_size, 2, n / 2, 2});
+          const auto grad_folded = grad.reshape({batch_size, n / 2, 2, 2});
+          d_input = d_input.view({batch_size, n/ 2, 2, 2});
+          // Accessors
+          const auto input_a = input_folded.accessor<scalar_t, 4>();
+          const auto grad_a = grad_folded.accessor<scalar_t, 4>();
+          auto d_input_a = d_input.accessor<scalar_t, 4>();
+          for (int64_t b = 0; b < batch_size; ++b) {
+            for (int64_t i = 0; i < n / 4; ++i) {
+              const scalar_t in00[2] = {input_a[b][0][i][0], input_a[b][0][n / 2 - 1 - i][0]};
+              const scalar_t g00[2] = {grad_a[b][0][i][0], grad_a[b][0][n / 2 - 1 - i][0]};
+              d_p_temp[0] += (in00[1] - in00[0]) * (g00[0] - g00[1]);
+              d_input_a[b][0][i][0] = (1 - p_a[0]) * g00[0] + p_a[0] * g00[1];
+              d_input_a[b][0][n / 2 - 1 - i][0] = p_a[0] * g00[0] + (1 - p_a[0]) * g00[1];
+              const scalar_t in01[2] = {input_a[b][0][i][1], input_a[b][0][n / 2 - 1 - i][1]};
+              const scalar_t g01[2] = {grad_a[b][0][i][1], grad_a[b][0][n / 2 - 1 - i][1]};
+              d_p_temp[0] += (in01[1] - in01[0]) * (g01[0] - g01[1]);
+              d_input_a[b][0][i][1] = (1 - p_a[0]) * g01[0] + p_a[0] * g01[1];
+              d_input_a[b][0][n / 2 - 1 - i][1] = p_a[0] * g01[0] + (1 - p_a[0]) * g01[1];
+              const scalar_t in10[2] = {input_a[b][1][i][0], input_a[b][1][n / 2 - 1 - i][0]};
+              const scalar_t g10[2] = {grad_a[b][1][i][0], grad_a[b][1][n / 2 - 1 - i][0]};
+              d_p_temp[1] += (in10[1] - in10[0]) * (g10[0] - g10[1]);
+              d_input_a[b][1][i][0] = (1 - p_a[1]) * g10[0] + p_a[1] * g10[1];
+              d_input_a[b][1][n / 2 - 1 - i][0] = p_a[1] * g10[0] + (1 - p_a[1]) * g10[1];
+              const scalar_t in11[2] = {input_a[b][1][i][1], input_a[b][1][n / 2 - 1 - i][1]};
+              const scalar_t g11[2] = {grad_a[b][1][i][1], grad_a[b][1][n / 2 - 1 - i][1]};
+              d_p_temp[1] += (in11[1] - in11[0]) * (g11[0] - g11[1]);
+              d_input_a[b][1][i][1] = (1 - p_a[1]) * g11[0] + p_a[1] * g11[1];
+              d_input_a[b][1][n / 2 - 1 - i][1] = p_a[1] * g11[0] + (1 - p_a[1]) * g11[1];
+            }
+          }
+          d_input = d_input.view({batch_size, n, 2});
+          break;
+        }
+      default:
+        AT_ERROR("permutation_factor_reverse_multiply_backward requires input dimension 2 or 3");
     }
-  }
-  return {d_p, d_input.reshape({-1, n})};
+    d_p_a[0] = d_p_temp[0];
+    d_p_a[1] = d_p_temp[1];
+  });
+  return {d_p, d_input};
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
