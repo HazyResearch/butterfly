@@ -10,6 +10,9 @@ void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::T
 void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Tensor& input, at::Tensor& output);
 void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input,
                                                         at::Tensor& d_p_expanded, at::Tensor& d_input);
+void permutation_factor_reverse_multiply_cuda(const at::Tensor& p, const at::Tensor& input, at::Tensor& output);
+void permutation_factor_reverse_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input,
+                                                       at::Tensor& d_p_expanded, at::Tensor& d_input);
 
 at::Tensor butterfly_factor_multiply(const at::Tensor& twiddle, const at::Tensor& input) {
   /* Parameters:
@@ -173,9 +176,11 @@ at::Tensor permutation_factor_even_odd_multiply(const at::Tensor& p, const at::T
   */
   auto output = torch::empty_like(input);
   if (input.is_cuda()) {
+    AT_CHECK(p.is_cuda(), "permutation_factor_even_odd_multiply: Expected p to be CUDA tensor");
     permutation_factor_even_odd_multiply_cuda(p, input, output);
     return output;
   }
+  AT_CHECK(!p.is_cuda(), "permutation_factor_even_odd_multiply: Expected p to be CPU tensor");
   const auto batch_size = input.size(0);
   const auto n = input.size(1);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_even_odd_multiply", [&] {
@@ -239,7 +244,7 @@ std::vector<at::Tensor> permutation_factor_even_odd_multiply_backward(const at::
   auto d_input = torch::empty_like(input);
   auto d_p = torch::zeros_like(p);
   if (input.is_cuda()) {
-    AT_CHECK(grad.is_cuda(), "permutation_factor_even_odd_multiply_backward: Expected grad to be CUDA tensor");
+    AT_CHECK(grad.is_cuda() && p.is_cuda(), "permutation_factor_even_odd_multiply_backward: Expected grad and p to be CUDA tensor");
     // CUDA kernel will compute the expanded gradient of @p, then we'll call sum.
     // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
     auto d_p_expanded = torch::empty({batch_size, n / 2}, torch::dtype(input.dtype()).device(input.device()));
@@ -247,8 +252,8 @@ std::vector<at::Tensor> permutation_factor_even_odd_multiply_backward(const at::
     d_p[0] = d_p_expanded.sum();
     return {d_p, d_input};
   }
-  AT_CHECK(!grad.is_cuda(), "butterfly_factor_multiply: Expected grad to be CPU tensor");
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_even_odd_multiply", [&] {
+  AT_CHECK((!grad.is_cuda()) && (!p.is_cuda()), "permutation_factor_even_odd_multiply_backward: Expected grad and p to be CPU tensor");
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_even_odd_multiply_backward", [&] {
     const scalar_t p_a = p.accessor<scalar_t, 1>()[0];
     auto d_p_a = d_p.accessor<scalar_t, 1>();
     scalar_t d_p_temp = 0;
@@ -325,10 +330,12 @@ at::Tensor permutation_factor_reverse_multiply(const at::Tensor& p, const at::Te
          p input + (1 - p) input_reversed: (batch_size, n) if real or (batch_size, n, 2) if complex
   */
   auto output = torch::empty_like(input);
-  // if (input.is_cuda()) {
-  //   permutation_factor_even_odd_multiply_cuda(p, input, output);
-  //   return output;
-  // }
+  if (input.is_cuda()) {
+    AT_CHECK(p.is_cuda(), "permutation_factor_reverse_multiply: Expected p to be CUDA tensor");
+    permutation_factor_reverse_multiply_cuda(p, input, output);
+    return output;
+  }
+  AT_CHECK(!p.is_cuda(), "permutation_factor_reverse_multiply: Expected p to be CPU tensor");
   const auto batch_size = input.size(0);
   const auto n = input.size(1);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_reverse_multiply", [&] {
@@ -399,18 +406,17 @@ std::vector<at::Tensor> permutation_factor_reverse_multiply_backward(const at::T
   const auto batch_size = grad.size(0);
   const auto n = grad.size(1);
   auto d_input = torch::empty_like(input);
+  if (input.is_cuda()) {
+    AT_CHECK(grad.is_cuda() && p.is_cuda(), "permutation_factor_reverse_multiply_backward: Expected grad and p to be CUDA tensor");
+    // CUDA kernel will compute the expanded gradient of @p, then we'll call sum.
+    // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
+    auto d_p_expanded = torch::empty({2, batch_size, n / 4}, torch::dtype(input.dtype()).device(input.device()));
+    permutation_factor_reverse_multiply_backward_cuda(grad, p, input, d_p_expanded, d_input);
+    return {d_p_expanded.sum(/*dim=*/{1, 2}), d_input};
+  }
+  AT_CHECK((!grad.is_cuda()) && (!p.is_cuda()), "permutation_factor_reverse_multiply_backward: Expected grad and p to be CPU tensor");
   auto d_p = torch::zeros_like(p);
-  // if (input.is_cuda()) {
-  //   AT_CHECK(grad.is_cuda(), "permutation_factor_reverse_multiply_backward: Expected grad to be CUDA tensor");
-  //   // CUDA kernel will compute the expanded gradient of @p, then we'll call sum.
-  //   // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
-  //   auto d_p_expanded = torch::empty({batch_size, n / 2}, torch::dtype(input.dtype()).device(input.device()));
-  //   permutation_factor_even_odd_multiply_backward_cuda(grad, p, input, d_p_expanded, d_input);
-  //   d_p[0] = d_p_expanded.sum();
-  //   return {d_p, d_input};
-  // }
-  // AT_CHECK(!grad.is_cuda(), "butterfly_factor_multiply: Expected grad to be CPU tensor");
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_even_odd_multiply_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_reverse_multiply_backward", [&] {
     const scalar_t p_a[2] = {p.accessor<scalar_t, 1>()[0], p.accessor<scalar_t, 1>()[1]};
     auto d_p_a = d_p.accessor<scalar_t, 1>();
     scalar_t d_p_temp[2] = {0, 0};

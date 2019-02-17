@@ -379,8 +379,9 @@ class BlockPerm(nn.Module):
         if not self.complex:
             # There's a lot of complicated logic here buried under the reshape's and unsqueeze's and so on
             # First step: weighted mean of identity permutation and permutation that yields [even, odd]
-            # output = (1 - prob[0]) * output.reshape(output.shape[:-1] + (2, self.size // 2)) + prob[0] * output.reshape(output.shape[:-1] + (self.size // 2, 2)).transpose(-1, -2)
+            # output = ((1 - prob[0]) * output.view(-1, 2, self.size // 2) + prob[0] * output.view(-1, self.size // 2, 2).transpose(-1, -2)).view(-1, self.size)
             output = permutation_factor_even_odd_mult(prob[:1], output.view(-1, self.size))
+            # output = output.view(-1, 2, self.size // 2)
             # Second step: weighted mean of identity permutation and permutation that reverses the first and the second half
             # output  = output.reshape(output.shape[:-1] + (2, self.size // 2))
             # output = (((1 - prob[1:]).unsqueeze(-1) * output + prob[1:].unsqueeze(-1) * output.flip(-1))).reshape(output.shape[:-2] + (self.size, ))
@@ -388,8 +389,10 @@ class BlockPerm(nn.Module):
             output = permutation_factor_reverse_mult(prob[1:], output)
             # output = output.reshape(input.shape)
         else:
-            output = (1 - prob[0]) * output.reshape(output.shape[:-2] + (2, self.size // 2, 2)) + prob[0] * output.reshape(output.shape[:-2] + (self.size // 2, 2, 2)).transpose(-2, -3)
-            output = (((1 - prob[1:]).unsqueeze(-1).unsqueeze(-1) * output + prob[1:].unsqueeze(-1).unsqueeze(-1) * output.flip(-2))).reshape(output.shape[:-3] + (self.size, 2))
+            # output = (1 - prob[0]) * output.reshape(output.shape[:-2] + (2, self.size // 2, 2)) + prob[0] * output.reshape(output.shape[:-2] + (self.size // 2, 2, 2)).transpose(-2, -3)
+            output = permutation_factor_even_odd_mult(prob[:1], output.view(-1, self.size))
+            # output = (((1 - prob[1:]).unsqueeze(-1).unsqueeze(-1) * output + prob[1:].unsqueeze(-1).unsqueeze(-1) * output.flip(-2))).reshape(output.shape[:-3] + (self.size, 2))
+            output = permutation_factor_reverse_mult(prob[1:], output)
         return output.view(input.shape)
 
     def argmax(self):
