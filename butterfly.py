@@ -270,6 +270,87 @@ class Block2x2DiagProduct(nn.Module):
         return output
 
 
+class Block2x2DiagRectangular(nn.Module):
+    """Block matrix of size k n x k n of the form [[A, B], [C, D]] where each of A, B,
+    C, D are diagonal. This means that only the diagonal and the n//2-th
+    subdiagonal and superdiagonal are nonzero.
+    """
+
+    def __init__(self, size, stack=1, complex=False, ABCD=None):
+        """
+        Parameters:
+            size: input has shape (stack, ..., size)
+            stack: number of stacked components, output has shape (stack, ..., size)
+            complex: real or complex matrix
+            ABCD: block of [[A, B], [C, D]], of shape (stack, 2, 2, size//2) if real or (stack, 2, 2, size//2, 2) if complex
+        """
+        super().__init__()
+        assert size % 2 == 0, 'size must be even'
+        self.size = size
+        self.stack = stack
+        self.complex = complex
+        ABCD_shape = (stack, 2, 2, size // 2) if not complex else (stack, 2, 2, size // 2, 2)
+        scaling = 1.0 / 2 if complex else 1.0 / math.sqrt(2)
+        if ABCD is None:
+            self.ABCD = nn.Parameter(torch.randn(ABCD_shape) * scaling)
+        else:
+            assert ABCD.shape == ABCD_shape, f'ABCD must have shape {ABCD_shape}'
+            self.ABCD = ABCD
+
+    def forward(self, input):
+        """
+        Parameters:
+            input: (stack, ..., size) if real or (stack, ..., size, 2) if complex
+        Return:
+            output: (stack, ..., size) if real or (stack, ..., size, 2) if complex
+        """
+        if not self.complex:
+            return ((self.ABCD.unsqueeze(1) * input.view(stack, -1, 1, 2, self.size // 2)).sum(dim=-2)).view(input.shape)
+        else:
+            return (complex_mul(self.ABCD.unsqueeze(1), input.view(stack, -1, 1, 2, self.size // 2, 2)).sum(dim=-3)).view(input.shape)
+
+
+class Block2x2DiagProductRectangular(nn.Module):
+    """Product of block 2x2 diagonal matrices.
+    """
+
+    def __init__(self, in_size, out_size, complex=False, decreasing_size=True):
+        super().__init__()
+        self.in_size = in_size
+        m = int(math.ceil(math.log2(in_size)))
+        self.in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
+        self.out_size = out_size
+        self.stack = int(math.ceil(out_size / self.in_size_extended))
+        self.complex = complex
+        in_sizes = [self.in_size_extended >> i for i in range(m)] if decreasing_size else [self.in_size_extended >> i for i in range(m)[::-1]]
+        self.factors = nn.ModuleList([Block2x2DiagRectangular(in_size_, stack=self.stack, complex=complex) for in_size_ in in_sizes])
+
+    def forward(self, input):
+        """
+        Parameters:
+            input: (..., in_size) if real or (..., in_size, 2) if complex
+        Return:
+            output: (..., out_size) if real or (..., out_size, 2) if complex
+        """
+        output = input.contiguous()
+        if self.in_size != self.in_size_extended:  # Zero-pad
+            if not self.complex:
+                output = torch.cat((output, torch.zeros(output.shape[:-1] + (self.in_size_extended - self.in_size, ), dtype=output.dtype, device=output.device)), dim=-1)
+            else:
+                output = torch.cat((output, torch.zeros(output.shape[:-2] + (self.in_size_extended - self.in_size, 2), dtype=output.dtype, device=output.device)), dim=-2)
+        output = output.unsqueeze(0).expand((self.stack, ) + output.shape)
+        for factor in self.factors[::-1]:
+            if not self.complex:
+                output = factor(output.view(output.shape[:-1] + (-1, factor.size))).view(output.shape)
+            else:
+                output = factor(output.view(output.shape[:-2] + (-1, factor.size, 2))).view(output.shape)
+        if not self.complex:
+            output = output.permute(tuple(range(1, output.dim() - 1)) + (0, -1)).reshape(input.shape[:-1] + (self.stack * self.in_size_extended, ))[..., :self.out_size]
+        else:
+            output = output.permute(tuple(range(1, output.dim() - 2)) + (0, -2, -1)).reshape(input.shape[:-2] + (self.stack * self.in_size_extended, 2))[..., :self.out_size, :]
+        return output
+
+
 class Block2x2DiagBmm(nn.Module):
     """Block matrix of size n x n of the form [[A, B], [C, D]] where each of A, B,
     C, D are diagonal. This means that only the diagonal and the n//2-th
@@ -579,6 +660,34 @@ def test_block2x2diagproduct():
                                                          [0.0, 1.0]]]]))
     input = torch.stack((torch.eye(size), torch.zeros(size, size)), dim=-1)
     assert torch.allclose(model(input[:, [0, 2, 1, 3]]), torch.fft(input, 1))
+
+
+def test_block2x2diagrectangular():
+    batch_size = 3
+    size = 8
+    stack = 2
+    model = Block2x2DiagRectangular(size, stack=stack)
+    input = torch.randn((stack, batch_size, size))
+    output = model(input)
+    assert output.shape == (stack, batch_size, size)
+    model = Block2x2DiagRectangular(size, stack=stack, complex=True)
+    input = torch.randn((stack, batch_size, size, 2))
+    output = model(input)
+    assert output.shape == (stack, batch_size, size, 2)
+
+
+def test_block2x2diagproductrectangular():
+    batch_size = 3
+    in_size = 7
+    out_size = 15
+    model = Block2x2DiagProductRectangular(in_size, out_size)
+    input = torch.randn((batch_size, in_size))
+    output = model(input)
+    assert output.shape == (batch_size, out_size)
+    model = Block2x2DiagProductRectangular(in_size, out_size, complex=True)
+    input = torch.randn((batch_size, in_size, 2))
+    output = model(input)
+    assert output.shape == (batch_size, out_size, 2)
 
 
 def test_blockpermproduct():
