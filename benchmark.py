@@ -7,7 +7,8 @@ batch_size = 100
 n = 1024
 # B = Block2x2DiagProduct(n).to('cuda')
 B = Block2x2DiagProductRectangular(n, n).to('cuda')
-W = torch.randn(n, n, requires_grad=True).to('cuda')
+# W = torch.randn(n, n, requires_grad=False).to('cuda')
+L = torch.nn.Linear(n, n, bias=False).to('cuda')
 x = torch.randn(batch_size, n, requires_grad=True).to('cuda')
 
 
@@ -35,20 +36,22 @@ torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
     output = B(x)
-    output.backward(gradient=grad, retain_graph=True)
+    output.backward(gradient=grad)
 torch.cuda.synchronize()
 end = time.perf_counter()
 print(f'Butterfly together: {end - start}s')
 
-output = x @ W  # Do it once so that cuBlas handles are initialized, etc.
+# output = x @ W.t()  # Do it once so that cuBlas handles are initialized, etc.
+output = L(x)
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
-    output = x @ W
+    # output = x @ W.t()
+    output = L(x)
 torch.cuda.synchronize()
 end = time.perf_counter()
 print(f'Gemm forward: {end - start}s')
-output.backward(gradient=grad, retain_graph=True)
+output.backward(gradient=grad, retain_graph=True)  # Do it once just to be safe
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
@@ -59,8 +62,9 @@ print(f'Gemm backward: {end - start}s')
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
-    output = x @ W
-    output.backward(gradient=grad, retain_graph=True)
+    # output = x @ W.t()
+    output = L(x)
+    output.backward(gradient=grad)
 torch.cuda.synchronize()
 end = time.perf_counter()
 print(f'Gemm together: {end - start}s')
@@ -73,7 +77,7 @@ for _ in range(nsteps):
 torch.cuda.synchronize()
 end = time.perf_counter()
 print(f'CuFFT forward: {end - start}s')
-grad = torch.randn_like(output)
+grad = torch.randn_like(output)  # Do it once just to be safe
 output.backward(gradient=grad, retain_graph=True)
 torch.cuda.synchronize()
 start = time.perf_counter()
@@ -86,7 +90,7 @@ torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
     output = torch.rfft(x, 1)
-    output.backward(gradient=grad, retain_graph=True)
+    output.backward(gradient=grad)
 torch.cuda.synchronize()
 end = time.perf_counter()
 print(f'CuFFT together: {end - start}s')
