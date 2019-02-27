@@ -305,9 +305,9 @@ class Block2x2DiagRectangular(nn.Module):
             output: (stack, ..., size) if real or (stack, ..., size, 2) if complex
         """
         if not self.complex:
-            return ((self.ABCD.unsqueeze(1) * input.view(stack, -1, 1, 2, self.size // 2)).sum(dim=-2)).view(input.shape)
+            return ((self.ABCD.unsqueeze(1) * input.view(self.stack, -1, 1, 2, self.size // 2)).sum(dim=-2)).view(input.shape)
         else:
-            return (complex_mul(self.ABCD.unsqueeze(1), input.view(stack, -1, 1, 2, self.size // 2, 2)).sum(dim=-3)).view(input.shape)
+            return (complex_mul(self.ABCD.unsqueeze(1), input.view(self.stack, -1, 1, 2, self.size // 2, 2)).sum(dim=-3)).view(input.shape)
 
 
 class Block2x2DiagProductRectangular(nn.Module):
