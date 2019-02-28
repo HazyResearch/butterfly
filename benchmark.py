@@ -6,7 +6,7 @@ from butterfly import Block2x2DiagProduct, Block2x2DiagProductRectangular
 batch_size = 100
 n = 1024
 # B = Block2x2DiagProduct(n).to('cuda')
-B = Block2x2DiagProductRectangular(n, n).to('cuda')
+B = Block2x2DiagProductRectangular(n, n, bias=False).to('cuda')
 # W = torch.randn(n, n, requires_grad=False).to('cuda')
 L = torch.nn.Linear(n, n, bias=False).to('cuda')
 x = torch.randn(batch_size, n, requires_grad=True).to('cuda')

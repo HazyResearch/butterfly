@@ -305,16 +305,16 @@ class Block2x2DiagRectangular(nn.Module):
             output: (stack, ..., size) if real or (stack, ..., size, 2) if complex
         """
         if not self.complex:
-            return ((self.ABCD.unsqueeze(1) * input.view(self.stack, -1, 1, 2, self.size // 2)).sum(dim=-2)).view(input.shape)
+            return (self.ABCD.unsqueeze(1) * input.view(self.stack, -1, 1, 2, self.size // 2)).sum(dim=-2).view(input.shape)
         else:
-            return (complex_mul(self.ABCD.unsqueeze(1), input.view(self.stack, -1, 1, 2, self.size // 2, 2)).sum(dim=-3)).view(input.shape)
+            return complex_mul(self.ABCD.unsqueeze(1), input.view(self.stack, -1, 1, 2, self.size // 2, 2)).sum(dim=-3).view(input.shape)
 
 
 class Block2x2DiagProductRectangular(nn.Module):
     """Product of block 2x2 diagonal matrices.
     """
 
-    def __init__(self, in_size, out_size, complex=False, decreasing_size=True):
+    def __init__(self, in_size, out_size, complex=False, decreasing_size=True, bias=True):
         super().__init__()
         self.in_size = in_size
         m = int(math.ceil(math.log2(in_size)))
@@ -324,6 +324,8 @@ class Block2x2DiagProductRectangular(nn.Module):
         self.complex = complex
         in_sizes = [self.in_size_extended >> i for i in range(m)] if decreasing_size else [self.in_size_extended >> i for i in range(m)[::-1]]
         self.factors = nn.ModuleList([Block2x2DiagRectangular(in_size_, stack=self.stack, complex=complex) for in_size_ in in_sizes])
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(out_size))
 
     def forward(self, input):
         """
@@ -348,6 +350,8 @@ class Block2x2DiagProductRectangular(nn.Module):
             output = output.permute(tuple(range(1, output.dim() - 1)) + (0, -1)).reshape(input.shape[:-1] + (self.stack * self.in_size_extended, ))[..., :self.out_size]
         else:
             output = output.permute(tuple(range(1, output.dim() - 2)) + (0, -2, -1)).reshape(input.shape[:-2] + (self.stack * self.in_size_extended, 2))[..., :self.out_size, :]
+        if hasattr(self, 'bias'):
+            output += self.bias
         return output
 
 
