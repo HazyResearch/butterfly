@@ -326,6 +326,13 @@ class Block2x2DiagProductRectangular(nn.Module):
         self.factors = nn.ModuleList([Block2x2DiagRectangular(in_size_, stack=self.stack, complex=complex) for in_size_ in in_sizes])
         if bias:
             self.bias = nn.Parameter(torch.Tensor(out_size))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        """Initialize bias the same way as torch.nn.Linear."""
+        if hasattr(self, 'bias'):
+            bound = 1 / math.sqrt(self.in_size)
+            init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input):
         """
