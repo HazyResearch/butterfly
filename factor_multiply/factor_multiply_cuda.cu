@@ -151,25 +151,68 @@ __global__ void butterfly_factor_multiply_backward_cuda_kernel(const at::PackedT
       }
     }
 
-    int tid = threadIdx.x + threadIdx.y * blockDim.x;
-    int nthreads = blockDim.x * blockDim.y;
-    __shared__ scalar_t temp_storage[MAX_BLOCK_SIZE];
-    if (n < nthreads) {
-      int lane = tid % warpSize;
-      int wid = tid / warpSize;
+    // int tid = threadIdx.x + threadIdx.y * blockDim.x;
+    // int nthreads = blockDim.x * blockDim.y;
+    // __shared__ scalar_t temp_storage[MAX_BLOCK_SIZE];
+    // if (n < nthreads) {
+    //   int lane = tid % warpSize;
+    //   int wid = tid / warpSize;
+    //   #pragma unroll
+    //   for (int j = 0; j <= 1; ++j) {
+    //     d_twiddle_temp[j][0] = sum_strided(d_twiddle_temp[j][0], temp_storage, n, nthreads, tid);
+    //     d_twiddle_temp[j][1] = sum_strided(d_twiddle_temp[j][1], temp_storage, n, nthreads, tid);
+    //   }
+    //   int reduction_stride = max(warpSize, n);
+    //   int n_block_reductions = div_up(nthreads, reduction_stride);
+    //   if ((lane % n_block_reductions == 0) && (wid < n)) {
+    //     #pragma unroll
+    //     for (int j = 0; j <= 1; ++j) {
+    //       atomicAdd(&d_twiddle_expanded_a[j][0][tid / n_block_reductions], d_twiddle_temp[j][0]);
+    //       atomicAdd(&d_twiddle_expanded_a[j][1][tid / n_block_reductions], d_twiddle_temp[j][1]);
+    //     }
+    //   }
+    // } else {
+    //   #pragma unroll
+    //   for (int j = 0; j <= 1; ++j) {
+    //     atomicAdd(&d_twiddle_expanded_a[j][0][i], d_twiddle_temp[j][0]);
+    //     atomicAdd(&d_twiddle_expanded_a[j][1][i], d_twiddle_temp[j][1]);
+    //   }
+    // }
+
+    // Warp reduction
+    for (int offset = warpSize / 2; offset >= n; offset /= 2) {
       #pragma unroll
       for (int j = 0; j <= 1; ++j) {
-        d_twiddle_temp[j][0] = sum_strided(d_twiddle_temp[j][0], temp_storage, n, nthreads, tid);
-        d_twiddle_temp[j][1] = sum_strided(d_twiddle_temp[j][1], temp_storage, n, nthreads, tid);
+        d_twiddle_temp[j][0] += __shfl_down_sync(FULL_MASK, d_twiddle_temp[j][0], offset);
+        d_twiddle_temp[j][1] += __shfl_down_sync(FULL_MASK, d_twiddle_temp[j][1], offset);
       }
-      int reduction_stride = max(warpSize, n);
-      int n_block_reductions = div_up(nthreads, reduction_stride);
-      if ((lane % n_block_reductions == 0) && (wid < n)) {
-        #pragma unroll
-        for (int j = 0; j <= 1; ++j) {
-          atomicAdd(&d_twiddle_expanded_a[j][0][tid / n_block_reductions], d_twiddle_temp[j][0]);
-          atomicAdd(&d_twiddle_expanded_a[j][1][tid / n_block_reductions], d_twiddle_temp[j][1]);
-        }
+    }
+    __shared__ scalar_t s_d_twiddle[MAX_BLOCK_SIZE * 4];
+    // // const scalar_t (*temp)[n] = (scalar_t (*)[n])(&s_d_twiddle[0]);
+    int tid = threadIdx.x + threadIdx.y * blockDim.x;
+    int nthreads = blockDim.x * blockDim.y;
+    int lane = tid % warpSize;
+    int wid = tid / warpSize;
+
+    if (n < nthreads) {
+      __syncthreads();
+      s_d_twiddle[tid] = 0;
+      s_d_twiddle[tid + MAX_BLOCK_SIZE] = 0;
+      s_d_twiddle[tid + 2 * MAX_BLOCK_SIZE] = 0;
+      s_d_twiddle[tid + 3 * MAX_BLOCK_SIZE] = 0;
+      __syncthreads();
+      if (lane < n) {
+        atomicAdd(&s_d_twiddle[i], d_twiddle_temp[0][0]);
+        atomicAdd(&s_d_twiddle[i + MAX_BLOCK_SIZE], d_twiddle_temp[0][1]);
+        atomicAdd(&s_d_twiddle[i + 2 * MAX_BLOCK_SIZE], d_twiddle_temp[1][0]);
+        atomicAdd(&s_d_twiddle[i + 3 * MAX_BLOCK_SIZE], d_twiddle_temp[1][1]);
+      }
+      __syncthreads();
+      if (tid < n) {
+        atomicAdd(&d_twiddle_expanded_a[0][0][i], s_d_twiddle[i]);
+        atomicAdd(&d_twiddle_expanded_a[0][1][i], s_d_twiddle[i + MAX_BLOCK_SIZE]);
+        atomicAdd(&d_twiddle_expanded_a[1][0][i], s_d_twiddle[i + 2 * MAX_BLOCK_SIZE]);
+        atomicAdd(&d_twiddle_expanded_a[1][1][i], s_d_twiddle[i + 3 * MAX_BLOCK_SIZE]);
       }
     } else {
       #pragma unroll
@@ -179,20 +222,7 @@ __global__ void butterfly_factor_multiply_backward_cuda_kernel(const at::PackedT
       }
     }
 
-    // // Warp reduction
-    // for (int offset = warpSize / 2; offset >= n; offset /= 2) {
-    //   #pragma unroll
-    //   for (int j = 0; j <= 1; ++j) {
-    //     d_twiddle_temp[j][0] += __shfl_down_sync(FULL_MASK, d_twiddle_temp[j][0], offset);
-    //     d_twiddle_temp[j][1] += __shfl_down_sync(FULL_MASK, d_twiddle_temp[j][1], offset);
-    //   }
-    // }
-    // __shared__ scalar_t s_d_twiddle[MAX_BLOCK_SIZE * 4];
-    // // const scalar_t (*temp)[n] = (scalar_t (*)[n])(&s_d_twiddle[0]);
-    // int tid = threadIdx.x + threadIdx.y * blockDim.x;
-    // int nthreads = blockDim.x * blockDim.y;
-    // int lane = tid % warpSize;
-    // int wid = tid / warpSize;
+
     // // Block reduction
     // if (n < nthreads) {
     // // if (n < 0) {
