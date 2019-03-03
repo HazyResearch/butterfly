@@ -51,7 +51,7 @@ class ButterflyFactorTest(unittest.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "need CUDA")
     def test_butterfly_factor_cuda(self):
         batch_size = 1000
-        n = 1024  # To test n > MAX_BLOCK_SIZE
+        n = 4096  # To test n > MAX_BLOCK_SIZE
         B = Block2x2DiagProduct(n).to('cuda')
         input_ = torch.randn(batch_size, n, device='cuda', requires_grad=True)
         output = input_
