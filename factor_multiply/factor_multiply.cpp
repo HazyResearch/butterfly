@@ -2,6 +2,8 @@
 
 #include <vector>
 #include <torch/extension.h>
+// #include <ATen/cpu/vml.h>
+// #include <ATen/cpu/vec256/vec256.h>
 // #include <iostream>
 
 void butterfly_factor_multiply_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output);
@@ -97,10 +99,13 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
     // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
     auto d_twiddle_expanded = input.dim() == 3 ?
       // torch::empty({(batch_size + 3) / 4, 2, 2, n}, torch::dtype(twiddle.dtype()).device(twiddle.device())) :
-      torch::empty({batch_size, 2, 2, n}, torch::dtype(twiddle.dtype()).device(twiddle.device())) :
+      // torch::empty({batch_size, 2, 2, n}, torch::dtype(twiddle.dtype()).device(twiddle.device())) :
+      torch::zeros({2, 2, n}, torch::dtype(twiddle.dtype()).device(twiddle.device())) :
       torch::empty({batch_size, 2, 2, n, 2}, torch::dtype(twiddle.dtype()).device(twiddle.device()));
     butterfly_factor_multiply_backward_cuda(grad, twiddle, input, d_twiddle_expanded, d_input);
-    return {d_twiddle_expanded.sum(0), d_input};
+    // return {d_twiddle_expanded.sum(0), d_input};
+    // return {d_twiddle_expanded[0], d_input};
+    return {d_twiddle_expanded, d_input};
   }
   AT_CHECK((!twiddle.is_cuda()) && (!grad.is_cuda()) , "butterfly_factor_multiply_backward: Expected grad and twiddle to be CPU tensor");
   auto d_twiddle = torch::zeros_like(twiddle);
