@@ -96,6 +96,17 @@ class ButterflyFactorTest(unittest.TestCase):
         output = B(input_)
         self.assertTrue(torch.allclose(output_all, output, rtol=self.rtol, atol=self.atol), (output_all - output).abs().max().item())
 
+    def test_butterfly_factor_all_cuda(self):
+        batch_size = 10
+        n = 1024
+        B = Block2x2DiagProduct(n).to('cuda')
+        input_ = torch.randn(batch_size, n, device='cuda', requires_grad=True)
+        output_all = input_.clone()
+        twiddle = twiddle_list_concat(B)
+        butterfly_factor_multiply_inplace(twiddle, output_all)
+        output = B(input_)
+        self.assertTrue(torch.allclose(output_all, output, rtol=self.rtol, atol=self.atol), (output_all - output).abs().max().item())
+
 
 
 

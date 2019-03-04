@@ -95,6 +95,75 @@ void butterfly_factor_multiply_cuda(const at::Tensor& twiddle, const at::Tensor&
      cudaGetLastError());
 }
 
+template <typename scalar_t>
+__global__ void butterfly_factor_multiply_inplace_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
+                                                              at::PackedTensorAccessor<scalar_t, 2> input_a) {
+  const auto batch_size = input_a.size(0);
+  const auto n = input_a.size(1);
+  __shared__ scalar_t s_input[1024];
+  int64_t b = blockIdx.y * blockDim.y + threadIdx.y;
+  if (b < batch_size) {
+    for (int i = threadIdx.x; i < n; i += blockDim.x) {
+      s_input[i] = input_a[b][i];
+    }
+    int i = threadIdx.x;
+    int twiddle_start_idx = 0;
+    for (int stride = 1; stride <= n / 2; stride *= 2) {
+      int low_order_bit = i % stride;
+      int twiddle_idx = twiddle_start_idx + low_order_bit;
+      int pos = 2 * (i - low_order_bit) + low_order_bit;
+      const scalar_t twiddle_val[2][2] = {{twiddle_a[twiddle_idx][0][0], twiddle_a[twiddle_idx][0][1]},
+                                          {twiddle_a[twiddle_idx][1][0], twiddle_a[twiddle_idx][1][1]}};
+      __syncthreads();
+      const scalar_t input_val[2] = {s_input[pos], s_input[pos + stride]};
+      s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
+      s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
+      twiddle_start_idx += stride;
+    }
+    __syncthreads();
+    for (int i = threadIdx.x; i < n; i += blockDim.x) {
+      input_a[b][i] = s_input[i];
+    }
+  }
+}
+
+void butterfly_factor_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tensor& input) {
+  const auto batch_size = input.size(0);
+  const auto n = input.size(1);
+  AT_CHECK(n <= 1024, "inplace cuda forward only implemented for n up to 1024 for now");
+  dim3 block;
+  block.x = std::min<int64_t>(512, n / 2);
+  // block.y = div_up(512, block.x);
+  block.y = 1;
+  dim3 grid(1, div_up(batch_size, block.y));
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_factor_multiply_inplace_cuda", [&] {
+    switch (input.dim()) {
+      case 2:  // real
+        {
+          const auto twiddle_a = twiddle.packed_accessor<scalar_t, 3>();
+          auto input_a = input.packed_accessor<scalar_t, 2>();
+          butterfly_factor_multiply_inplace_cuda_kernel<scalar_t>
+            <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a);
+          break;
+        }
+      case 3:  // complex
+        {
+          // AT_ERROR("Not implemented");
+          const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4>();
+          auto input_a = input.packed_accessor<scalar_t, 3>();
+          // butterfly_factor_multiply_inplace_complex_cuda_kernel<scalar_t>
+          //   <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, output_a);
+          break;
+        }
+      default:
+        AT_ERROR("butterfly_factor_multiply_inplace requires input dimension 2 or 3");
+    }
+  });
+  AT_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_factor_multiply_inplace_cuda failed with error code ",
+     cudaGetLastError());
+}
+
 template <typename T>
 __device__ __forceinline__ T sum_strided(T val, T *temp, int stride, int len, int thread_id) {
   if (stride >= len) {

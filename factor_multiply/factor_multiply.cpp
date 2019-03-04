@@ -9,6 +9,7 @@
 void butterfly_factor_multiply_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output);
 void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& input,
                                              at::Tensor& d_twiddle_expanded, at::Tensor& d_input);
+void butterfly_factor_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tensor& input);
 void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Tensor& input, at::Tensor& output);
 void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input,
                                                         at::Tensor& d_p_expanded, at::Tensor& d_input);
@@ -177,12 +178,12 @@ void butterfly_factor_multiply_inplace(const at::Tensor& twiddle, at::Tensor& in
         twiddle: (2n - 1, 2, 2) if real or (2n - 1, 2, 2, 2) if complex
         input: (batch_size, n) if real or (batch_size, n, 2) if complex
   */
-  // if (input.is_cuda()) {
-  //   AT_CHECK(twiddle.is_cuda(), "butterfly_factor_multiply_inplace: Expected twiddle to be CUDA tensor");
-  //   butterfly_factor_multiply_inplace_cuda(twiddle, input);
-  //   return input;
-  // }
-  // AT_CHECK(!twiddle.is_cuda(), "butterfly_factor_multiply_inplace: Expected twiddle to be CPU tensor");
+  if (input.is_cuda()) {
+    AT_CHECK(twiddle.is_cuda(), "butterfly_factor_multiply_inplace: Expected twiddle to be CUDA tensor");
+    butterfly_factor_multiply_inplace_cuda(twiddle, input);
+    return;
+  }
+  AT_CHECK(!twiddle.is_cuda(), "butterfly_factor_multiply_inplace: Expected twiddle to be CPU tensor");
   const auto batch_size = input.size(0);
   const auto n = input.size(1);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_factor_multiply_inplace", [&] {
