@@ -6,6 +6,16 @@ from butterfly_factor import butterfly_factor_mult
 from butterfly import Block2x2DiagProduct
 from complex_utils import complex_mul
 
+from factor_multiply import butterfly_factor_multiply_inplace
+
+def twiddle_list_concat(B: Block2x2DiagProduct):
+    # Assume ordering from largest size to smallest size
+    if not B.complex:
+        return torch.cat([factor.ABCD.permute(2, 0, 1) for factor in B.factors[::-1]])
+    else:
+        return torch.cat([factor.ABCD.permute(2, 0, 1, 3) for factor in B.factors[::-1]])
+
+
 class ButterflyFactorTest(unittest.TestCase):
 
     def setUp(self):
@@ -65,6 +75,28 @@ class ButterflyFactorTest(unittest.TestCase):
             d_twiddle_slow, d_input_slow = torch.autograd.grad(output_slow, (factor.ABCD, prev), grad, retain_graph=True)
             self.assertTrue(torch.allclose(d_twiddle, d_twiddle_slow, rtol=self.rtol, atol=self.atol), (factor.size, (d_twiddle - d_twiddle_slow).abs().max().item()))
             self.assertTrue(torch.allclose(d_input, d_input_slow, rtol=self.rtol, atol=self.atol), (d_input - d_input_slow).abs().max().item())
+
+    def test_butterfly_factor_all_cpu(self):
+        batch_size = 10
+        n = 1024
+        B = Block2x2DiagProduct(n)
+        input_ = torch.randn(batch_size, n, requires_grad=True)
+        output_all = input_.clone()
+        butterfly_factor_multiply_inplace(twiddle_list_concat(B), output_all)
+        output = B(input_)
+        self.assertTrue(torch.allclose(output_all, output, rtol=self.rtol, atol=self.atol), (output_all - output).abs().max().item())
+
+    def test_butterfly_factor_complex_all_cpu(self):
+        batch_size = 10
+        n = 1024
+        B = Block2x2DiagProduct(n, complex=True)
+        input_ = torch.randn(batch_size, n, 2, requires_grad=True)
+        output_all = input_.clone()
+        butterfly_factor_multiply_inplace(twiddle_list_concat(B), output_all)
+        output = B(input_)
+        self.assertTrue(torch.allclose(output_all, output, rtol=self.rtol, atol=self.atol), (output_all - output).abs().max().item())
+
+
 
 
 
