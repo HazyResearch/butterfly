@@ -175,7 +175,7 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
 
 void butterfly_factor_multiply_inplace(const at::Tensor& twiddle, at::Tensor& input) {
   /* Parameters:
-        twiddle: (2n - 1, 2, 2) if real or (2n - 1, 2, 2, 2) if complex
+        twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
         input: (batch_size, n) if real or (batch_size, n, 2) if complex
   */
   if (input.is_cuda()) {
@@ -193,8 +193,8 @@ void butterfly_factor_multiply_inplace(const at::Tensor& twiddle, at::Tensor& in
           const auto twiddle_a = twiddle.accessor<scalar_t, 3>();
           auto input_a = input.accessor<scalar_t, 2>();
           for (int64_t b = 0; b < batch_size; ++b) {
-            int64_t twiddle_start_idx = 0;
             for (int64_t stride = 1; stride <= n / 2; stride *= 2) {
+              int64_t twiddle_start_idx = stride - 1;
               for (int64_t i = 0; i < n / 2; ++i) {
                 int64_t low_order_bit = i % stride;
                 int64_t twiddle_idx = twiddle_start_idx + low_order_bit;
@@ -205,7 +205,6 @@ void butterfly_factor_multiply_inplace(const at::Tensor& twiddle, at::Tensor& in
                 input_a[b][pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
                 input_a[b][pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
               }
-              twiddle_start_idx += stride;
             }
           }
           break;
@@ -215,8 +214,8 @@ void butterfly_factor_multiply_inplace(const at::Tensor& twiddle, at::Tensor& in
           const auto twiddle_a = twiddle.accessor<scalar_t, 4>();
           auto input_a = input.accessor<scalar_t, 3>();
           for (int64_t b = 0; b < batch_size; ++b) {
-            int64_t twiddle_start_idx = 0;
             for (int64_t stride = 1; stride <= n / 2; stride *= 2) {
+              int64_t twiddle_start_idx = stride - 1;
               for (int64_t i = 0; i < n / 2; ++i) {
                 int64_t low_order_bit = i % stride;
                 int64_t twiddle_idx = twiddle_start_idx + low_order_bit;

@@ -101,24 +101,31 @@ __global__ void butterfly_factor_multiply_inplace_cuda_kernel(const at::PackedTe
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(1);
   __shared__ scalar_t s_input[1024];
+  __shared__ scalar_t s_twiddle[512][2][2];
   int64_t b = blockIdx.y * blockDim.y + threadIdx.y;
-  if (b < batch_size) {
+  if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
     for (int i = threadIdx.x; i < n; i += blockDim.x) {
       s_input[i] = input_a[b][i];
     }
     int i = threadIdx.x;
-    int twiddle_start_idx = 0;
     for (int stride = 1; stride <= n / 2; stride *= 2) {
-      int low_order_bit = i % stride;
-      int twiddle_idx = twiddle_start_idx + low_order_bit;
-      int pos = 2 * (i - low_order_bit) + low_order_bit;
-      const scalar_t twiddle_val[2][2] = {{twiddle_a[twiddle_idx][0][0], twiddle_a[twiddle_idx][0][1]},
-                                          {twiddle_a[twiddle_idx][1][0], twiddle_a[twiddle_idx][1][1]}};
+      int twiddle_start_idx = stride - 1;
+      if (i < stride) {
+        s_twiddle[i][0][0] = twiddle_a[twiddle_start_idx + i][0][0];
+        s_twiddle[i][0][1] = twiddle_a[twiddle_start_idx + i][0][1];
+        s_twiddle[i][1][0] = twiddle_a[twiddle_start_idx + i][1][0];
+        s_twiddle[i][1][1] = twiddle_a[twiddle_start_idx + i][1][1];
+      }
+      int low_order_bits = i % stride;
+      // int twiddle_idx = twiddle_start_idx + low_order_bits;
+      int twiddle_idx = low_order_bits;
+      int pos = 2 * (i - low_order_bits) + low_order_bits;
       __syncthreads();
+      const scalar_t twiddle_val[2][2] = {{s_twiddle[twiddle_idx][0][0], s_twiddle[twiddle_idx][0][1]},
+                                          {s_twiddle[twiddle_idx][1][0], s_twiddle[twiddle_idx][1][1]}};
       const scalar_t input_val[2] = {s_input[pos], s_input[pos + stride]};
       s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
       s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
-      twiddle_start_idx += stride;
     }
     __syncthreads();
     for (int i = threadIdx.x; i < n; i += blockDim.x) {
