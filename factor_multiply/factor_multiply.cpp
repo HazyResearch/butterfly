@@ -173,25 +173,28 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
   return {d_twiddle, d_input};
 }
 
-void butterfly_factor_multiply_inplace(const at::Tensor& twiddle, at::Tensor& input) {
+at::Tensor butterfly_factor_multiply_inplace(const at::Tensor& twiddle, const at::Tensor& input) {
   /* Parameters:
-        twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
-        input: (batch_size, n) if real or (batch_size, n, 2) if complex
+         twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
+         input: (batch_size, n) if real or (batch_size, n, 2) if complex
+     Returns:
+         output: (batch_size, n) if real or (batch_size, n, 2) if complex
   */
-  if (input.is_cuda()) {
+  auto output = input.clone();
+  if (output.is_cuda()) {
     AT_CHECK(twiddle.is_cuda(), "butterfly_factor_multiply_inplace: Expected twiddle to be CUDA tensor");
-    butterfly_factor_multiply_inplace_cuda(twiddle, input);
-    return;
+    butterfly_factor_multiply_inplace_cuda(twiddle, output);
+    return output;
   }
   AT_CHECK(!twiddle.is_cuda(), "butterfly_factor_multiply_inplace: Expected twiddle to be CPU tensor");
-  const auto batch_size = input.size(0);
-  const auto n = input.size(1);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_factor_multiply_inplace", [&] {
-    switch (input.dim()) {
+  const auto batch_size = output.size(0);
+  const auto n = output.size(1);
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.type(), "butterfly_factor_multiply_inplace", [&] {
+    switch (output.dim()) {
       case 2:  // real
         {
           const auto twiddle_a = twiddle.accessor<scalar_t, 3>();
-          auto input_a = input.accessor<scalar_t, 2>();
+          auto output_a = output.accessor<scalar_t, 2>();
           for (int64_t b = 0; b < batch_size; ++b) {
             for (int64_t stride = 1; stride <= n / 2; stride *= 2) {
               int64_t twiddle_start_idx = stride - 1;
@@ -201,9 +204,9 @@ void butterfly_factor_multiply_inplace(const at::Tensor& twiddle, at::Tensor& in
                 int64_t pos = 2 * (i - low_order_bit) + low_order_bit;
                 const scalar_t twiddle_val[2][2] = {{twiddle_a[twiddle_idx][0][0], twiddle_a[twiddle_idx][0][1]},
                                                     {twiddle_a[twiddle_idx][1][0], twiddle_a[twiddle_idx][1][1]}};
-                const scalar_t input_val[2] = {input_a[b][pos], input_a[b][pos + stride]};
-                input_a[b][pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
-                input_a[b][pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
+                const scalar_t input_val[2] = {output_a[b][pos], output_a[b][pos + stride]};
+                output_a[b][pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
+                output_a[b][pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
               }
             }
           }
@@ -212,7 +215,7 @@ void butterfly_factor_multiply_inplace(const at::Tensor& twiddle, at::Tensor& in
       case 3:  // complex
         {
           const auto twiddle_a = twiddle.accessor<scalar_t, 4>();
-          auto input_a = input.accessor<scalar_t, 3>();
+          auto output_a = output.accessor<scalar_t, 3>();
           for (int64_t b = 0; b < batch_size; ++b) {
             for (int64_t stride = 1; stride <= n / 2; stride *= 2) {
               int64_t twiddle_start_idx = stride - 1;
@@ -224,15 +227,15 @@ void butterfly_factor_multiply_inplace(const at::Tensor& twiddle, at::Tensor& in
                                                         {twiddle_a[twiddle_idx][0][1][0], twiddle_a[twiddle_idx][0][1][1]}},
                                                        {{twiddle_a[twiddle_idx][1][0][0], twiddle_a[twiddle_idx][1][0][1]},
                                                         {twiddle_a[twiddle_idx][1][1][0], twiddle_a[twiddle_idx][1][1][1]}}};
-                const scalar_t input_val[2][2] = {{input_a[b][pos][0], input_a[b][pos][1]},
-                                                  {input_a[b][pos + stride][0], input_a[b][pos + stride][1]}};
-                input_a[b][pos][0] = twiddle_val[0][0][0] * input_val[0][0] - twiddle_val[0][0][1] * input_val[0][1]
+                const scalar_t input_val[2][2] = {{output_a[b][pos][0], output_a[b][pos][1]},
+                                                  {output_a[b][pos + stride][0], output_a[b][pos + stride][1]}};
+                output_a[b][pos][0] = twiddle_val[0][0][0] * input_val[0][0] - twiddle_val[0][0][1] * input_val[0][1]
                   + twiddle_val[0][1][0] * input_val[1][0] - twiddle_val[0][1][1] * input_val[1][1];
-                input_a[b][pos][1] = twiddle_val[0][0][0] * input_val[0][1] + twiddle_val[0][0][1] * input_val[0][0]
+                output_a[b][pos][1] = twiddle_val[0][0][0] * input_val[0][1] + twiddle_val[0][0][1] * input_val[0][0]
                   + twiddle_val[0][1][0] * input_val[1][1] + twiddle_val[0][1][1] * input_val[1][0];
-                input_a[b][pos + stride][0] = twiddle_val[1][0][0] * input_val[0][0] - twiddle_val[1][0][1] * input_val[0][1]
+                output_a[b][pos + stride][0] = twiddle_val[1][0][0] * input_val[0][0] - twiddle_val[1][0][1] * input_val[0][1]
                   + twiddle_val[1][1][0] * input_val[1][0] - twiddle_val[1][1][1] * input_val[1][1];
-                input_a[b][pos + stride][1] = twiddle_val[1][0][0] * input_val[0][1] + twiddle_val[1][0][1] * input_val[0][0]
+                output_a[b][pos + stride][1] = twiddle_val[1][0][0] * input_val[0][1] + twiddle_val[1][0][1] * input_val[0][0]
                   + twiddle_val[1][1][0] * input_val[1][1] + twiddle_val[1][1][1] * input_val[1][0];
               }
               twiddle_start_idx += stride;
@@ -244,6 +247,7 @@ void butterfly_factor_multiply_inplace(const at::Tensor& twiddle, at::Tensor& in
         AT_ERROR("butterfly_factor_multiply_inplace requires input dimension 2 or 3");
     }
   });
+  return output;
 }
 
 at::Tensor permutation_factor_even_odd_multiply(const at::Tensor& p, const at::Tensor& input) {

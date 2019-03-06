@@ -81,8 +81,7 @@ class ButterflyFactorTest(unittest.TestCase):
         n = 4096
         B = Block2x2DiagProduct(n)
         input_ = torch.randn(batch_size, n, requires_grad=True)
-        output_inplace = input_.clone()
-        butterfly_factor_multiply_inplace(twiddle_list_concat(B), output_inplace)
+        output_inplace = butterfly_factor_multiply_inplace(twiddle_list_concat(B), input_)
         output = B(input_)
         self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
 
@@ -91,8 +90,7 @@ class ButterflyFactorTest(unittest.TestCase):
         n = 4096
         B = Block2x2DiagProduct(n, complex=True)
         input_ = torch.randn(batch_size, n, 2, requires_grad=True)
-        output_inplace = input_.clone()
-        butterfly_factor_multiply_inplace(twiddle_list_concat(B), output_inplace)
+        output_inplace = butterfly_factor_multiply_inplace(twiddle_list_concat(B), input_)
         output = B(input_)
         self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
 
@@ -101,15 +99,9 @@ class ButterflyFactorTest(unittest.TestCase):
         n = 4096
         B = Block2x2DiagProduct(n).to('cuda')
         input_ = torch.randn(batch_size, n, device='cuda', requires_grad=True)
-        output_inplace = input_.clone()
         twiddle = twiddle_list_concat(B)
-        butterfly_factor_multiply_inplace(twiddle, output_inplace)
+        output_inplace = butterfly_factor_multiply_inplace(twiddle, input_)
         output = B(input_)
-        # self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
-        output = input_
-        for factor in B.factors[::-1]:
-            prev = output
-            output = butterfly_factor_mult(factor.ABCD, output.view(-1, 2, factor.size // 2)).view(prev.shape)
         self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
 
 
