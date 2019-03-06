@@ -20,11 +20,11 @@ class ButterflyFactorTest(unittest.TestCase):
 
     def setUp(self):
         self.rtol = 1e-3
-        self.atol = 1e-6
+        self.atol = 1e-5
 
     def test_butterfly_factor_cpu(self):
         batch_size = 10
-        n = 1024
+        n = 4096
         B = Block2x2DiagProduct(n)
         input_ = torch.randn(batch_size, n, requires_grad=True)
         output = input_
@@ -42,7 +42,7 @@ class ButterflyFactorTest(unittest.TestCase):
 
     def test_butterfly_factor_complex_cpu(self):
         batch_size = 10
-        n = 1024
+        n = 4096
         B = Block2x2DiagProduct(n, complex=True)
         input_ = torch.randn(batch_size, n, 2, requires_grad=True)
         output = input_
@@ -60,7 +60,7 @@ class ButterflyFactorTest(unittest.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "need CUDA")
     def test_butterfly_factor_cuda(self):
-        batch_size = 1000
+        batch_size = 100
         n = 4096  # To test n > MAX_BLOCK_SIZE
         B = Block2x2DiagProduct(n).to('cuda')
         input_ = torch.randn(batch_size, n, device='cuda', requires_grad=True)
@@ -78,34 +78,39 @@ class ButterflyFactorTest(unittest.TestCase):
 
     def test_butterfly_factor_all_cpu(self):
         batch_size = 10
-        n = 1024
+        n = 4096
         B = Block2x2DiagProduct(n)
         input_ = torch.randn(batch_size, n, requires_grad=True)
-        output_all = input_.clone()
-        butterfly_factor_multiply_inplace(twiddle_list_concat(B), output_all)
+        output_inplace = input_.clone()
+        butterfly_factor_multiply_inplace(twiddle_list_concat(B), output_inplace)
         output = B(input_)
-        self.assertTrue(torch.allclose(output_all, output, rtol=self.rtol, atol=self.atol), (output_all - output).abs().max().item())
+        self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
 
     def test_butterfly_factor_complex_all_cpu(self):
         batch_size = 10
-        n = 1024
+        n = 4096
         B = Block2x2DiagProduct(n, complex=True)
         input_ = torch.randn(batch_size, n, 2, requires_grad=True)
-        output_all = input_.clone()
-        butterfly_factor_multiply_inplace(twiddle_list_concat(B), output_all)
+        output_inplace = input_.clone()
+        butterfly_factor_multiply_inplace(twiddle_list_concat(B), output_inplace)
         output = B(input_)
-        self.assertTrue(torch.allclose(output_all, output, rtol=self.rtol, atol=self.atol), (output_all - output).abs().max().item())
+        self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
 
-    def test_butterfly_factor_all_cuda(self):
+    def test_butterfly_factor_inplace_cuda(self):
         batch_size = 10
-        n = 1024
+        n = 4096
         B = Block2x2DiagProduct(n).to('cuda')
         input_ = torch.randn(batch_size, n, device='cuda', requires_grad=True)
-        output_all = input_.clone()
+        output_inplace = input_.clone()
         twiddle = twiddle_list_concat(B)
-        butterfly_factor_multiply_inplace(twiddle, output_all)
+        butterfly_factor_multiply_inplace(twiddle, output_inplace)
         output = B(input_)
-        self.assertTrue(torch.allclose(output_all, output, rtol=self.rtol, atol=self.atol), (output_all - output).abs().max().item())
+        # self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
+        output = input_
+        for factor in B.factors[::-1]:
+            prev = output
+            output = butterfly_factor_mult(factor.ABCD, output.view(-1, 2, factor.size // 2)).view(prev.shape)
+        self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
 
 
 
