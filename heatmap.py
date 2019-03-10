@@ -110,4 +110,4 @@ cbar_ax = fig.add_axes([0.25, 0.11, 0.5, 0.02])
 cbar = fig.colorbar(im, cax=cbar_ax, orientation='horizontal', ticks=[-4, -3, -2, -1, 0])
 cbar.ax.set_xticklabels(['1e-4', '1e-3', '1e-2', '1e-1', '1e0'], fontsize=8)
 
-plt.savefig('heatmap.png', bbox_inches='tight')
+plt.savefig('heatmap.pdf', bbox_inches='tight')
