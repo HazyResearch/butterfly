@@ -6,7 +6,7 @@ from butterfly_factor import butterfly_factor_mult
 from butterfly import Block2x2DiagProduct
 from complex_utils import complex_mul
 
-from factor_multiply import butterfly_factor_multiply_inplace
+from factor_multiply import butterfly_factor_multiply_inplace, butterfly_factor_multiply_inplace_backward
 
 def twiddle_list_concat(B: Block2x2DiagProduct):
     # Assume ordering from largest size to smallest size
@@ -76,16 +76,31 @@ class ButterflyFactorTest(unittest.TestCase):
             self.assertTrue(torch.allclose(d_twiddle, d_twiddle_slow, rtol=self.rtol, atol=self.atol), (factor.size, (d_twiddle - d_twiddle_slow).abs().max().item()))
             self.assertTrue(torch.allclose(d_input, d_input_slow, rtol=self.rtol, atol=self.atol), (d_input - d_input_slow).abs().max().item())
 
-    def test_butterfly_factor_all_cpu(self):
+    def test_butterfly_factor_inplace_cpu(self):
         batch_size = 10
         n = 4096
         B = Block2x2DiagProduct(n)
         input_ = torch.randn(batch_size, n, requires_grad=True)
-        output_inplace = butterfly_factor_multiply_inplace(twiddle_list_concat(B), input_)
+        twiddle = twiddle_list_concat(B)
+        output_inplace = butterfly_factor_multiply_inplace(twiddle, input_)
         output = B(input_)
         self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
+        grad = torch.randn_like(output)
+        d_twiddle_inplace, d_input_inplace = butterfly_factor_multiply_inplace_backward(grad, twiddle, output)
+        output.backward(grad, retain_graph=True)
+        d_input = input_.grad
+        d_twiddle = torch.cat([factor.ABCD.grad.permute(2, 0, 1) for factor in B.factors[::-1]])
+        self.assertTrue(torch.allclose(d_input_inplace, d_input, rtol=self.rtol, atol=self.atol), (d_input_inplace - d_input).abs().max().item())
+        # self.assertTrue(torch.allclose(d_twiddle_inplace, d_twiddle, rtol=self.rtol, atol=self.atol), (d_twiddle_inplace - d_twiddle).abs().max().item())
+        print((d_twiddle_inplace - d_twiddle) / d_twiddle)
+        # output = input_
+        # for factor in B.factors[::-1]:
+        #     prev = output
+        #     output = butterfly_factor_mult(factor.ABCD, output.view(-1, 2, factor.size // 2)).view(prev.shape)
+        #     d_twiddle, d_input = torch.autograd.grad(output, (factor.ABCD, prev), grad, retain_graph=True)
+        # self.assertTrue(torch.allclose(d_twiddle_inplace, d_twiddle, rtol=self.rtol, atol=self.atol), (factor.size, (d_twiddle - d_twiddle_slow).abs().max().item()))
 
-    def test_butterfly_factor_complex_all_cpu(self):
+    def test_butterfly_factor_complex_inplace_cpu(self):
         batch_size = 10
         n = 4096
         B = Block2x2DiagProduct(n, complex=True)
@@ -103,6 +118,14 @@ class ButterflyFactorTest(unittest.TestCase):
         output_inplace = butterfly_factor_multiply_inplace(twiddle, input_)
         output = B(input_)
         self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
+        grad = torch.randn_like(output)
+        d_twiddle_inplace, d_input_inplace = butterfly_factor_multiply_inplace_backward(grad, twiddle, output)
+        output.backward(grad, retain_graph=True)
+        d_input = input_.grad
+        d_twiddle = torch.cat([factor.ABCD.grad.permute(2, 0, 1) for factor in B.factors[::-1]])
+        self.assertTrue(torch.allclose(d_input_inplace, d_input, rtol=self.rtol, atol=self.atol), (d_input_inplace - d_input).abs().max().item())
+        # self.assertTrue(torch.allclose(d_twiddle_inplace, d_twiddle, rtol=self.rtol, atol=self.atol), (d_twiddle_inplace - d_twiddle).abs().max().item())
+        print((d_twiddle_inplace - d_twiddle) / d_twiddle)
 
 
 

@@ -3,7 +3,7 @@ import torch
 from butterfly import Block2x2DiagProduct, Block2x2DiagProductRectangular
 
 from test_factor_multiply import twiddle_list_concat
-from factor_multiply import butterfly_factor_multiply_inplace
+from factor_multiply import butterfly_factor_multiply_inplace, butterfly_factor_multiply_inplace_backward
 
 
 batch_size = 100
@@ -114,6 +114,7 @@ output = L(x)
 output.backward(gradient=grad)
 output = torch.rfft(x, 1)
 output = butterfly_factor_multiply_inplace(twiddle, x)
+d_twiddle_inplace, d_grad_inplace = butterfly_factor_multiply_inplace_backward(grad, twiddle, output)
 
 
 # x = torch.randn(3)
