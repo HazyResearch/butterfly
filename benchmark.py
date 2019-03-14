@@ -3,7 +3,7 @@ import torch
 from butterfly import Block2x2DiagProduct, Block2x2DiagProductRectangular
 
 from test_factor_multiply import twiddle_list_concat
-from factor_multiply import butterfly_factor_multiply_inplace, butterfly_factor_multiply_inplace_backward
+from butterfly_factor import butterfly_factor_mult_inplace
 
 
 batch_size = 100
@@ -48,11 +48,25 @@ grad = torch.randn_like(x)
 # torch.cuda.synchronize()
 # start = time.perf_counter()
 # for _ in range(nsteps):
-#     output = butterfly_factor_multiply_inplace(twiddle, input)
+#     output = butterfly_factor_mult_inplace(twiddle, x)
 # torch.cuda.synchronize()
 # end = time.perf_counter()
-# print(f'Butterfly all forward: {end - start}s')
-
+# print(f'Butterfly in-place forward: {end - start}s')
+# torch.cuda.synchronize()
+# start = time.perf_counter()
+# for _ in range(nsteps):
+#     torch.autograd.grad(output, (twiddle, x), grad, retain_graph=True)
+# torch.cuda.synchronize()
+# end = time.perf_counter()
+# print(f'Butterfly in-place backward: {end - start}s')
+# torch.cuda.synchronize()
+# start = time.perf_counter()
+# for _ in range(nsteps):
+#     output = butterfly_factor_mult_inplace(twiddle, x)
+#     torch.autograd.grad(output, (twiddle, x), grad, retain_graph=True)
+# torch.cuda.synchronize()
+# end = time.perf_counter()
+# print(f'Butterfly in-place together: {end - start}s')
 
 # # output = x @ W.t()  # Do it once so that cuBlas handles are initialized, etc.
 # output = L(x)
@@ -113,8 +127,9 @@ output.backward(gradient=grad)
 output = L(x)
 output.backward(gradient=grad)
 output = torch.rfft(x, 1)
-output = butterfly_factor_multiply_inplace(twiddle, x)
-d_twiddle_inplace, d_grad_inplace = butterfly_factor_multiply_inplace_backward(grad, twiddle, output)
+output = butterfly_factor_mult_inplace(twiddle, x)
+# output.backward(gradient=grad)
+torch.autograd.grad(output, (twiddle, x), grad, retain_graph=True)
 
 
 # x = torch.randn(3)

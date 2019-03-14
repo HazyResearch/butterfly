@@ -7,6 +7,7 @@ from complex_utils import real_to_complex, complex_mul, complex_matmul
 # from butterfly import Block2x2Diag, Block2x2DiagProduct
 
 from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
+from factor_multiply import butterfly_factor_multiply_inplace, butterfly_factor_multiply_inplace_backward
 from ABCD_mult import ABCD_mult
 
 
@@ -35,6 +36,23 @@ class ButterflyFactorMult(torch.autograd.Function):
         return d_coefficients, d_input
 
 butterfly_factor_mult = ButterflyFactorMult.apply
+
+
+class ButterflyFactorMultInplace(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, twiddle, input):
+        output = butterfly_factor_multiply_inplace(twiddle, input)
+        ctx.save_for_backward(twiddle, output)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad):
+        twiddle, output = ctx.saved_tensors
+        d_coefficients, d_input = butterfly_factor_multiply_inplace_backward(grad, twiddle, output)
+        return d_coefficients, d_input
+
+butterfly_factor_mult_inplace = ButterflyFactorMultInplace.apply
 
 
 def test_butterfly_factor_multiply():
