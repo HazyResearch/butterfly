@@ -35,7 +35,8 @@ plt.axhline(y=1.0, color='black',linewidth=3)
 plt.xscale('log', basex=2)
 plt.yscale('log')
 plt.xlabel(r'$N$',fontsize=14)
-plt.ylabel("Speedup over GEMM", fontsize=14)
+# plt.ylabel("Speedup over GEMM", fontsize=14)
+plt.ylabel("Speedup over dense multiply", fontsize=18)
 
 classes = [mpatches.Patch(color=colors[0], label='FFT'),
            mpatches.Patch(color=colors[3], label='Butterfly')]
