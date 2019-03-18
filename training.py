@@ -83,6 +83,7 @@ class TrainableMatrixFactorization(TrainableFixedData):
             loss.backward()
             return loss
         for i in range(nsteps):
+            # TODO: Bug here when using multiprocessing, is my C++ code not thread safe?
             loss = optimizer.step(closure)
         if not save_to_self_model:
             self.model = model_bak
