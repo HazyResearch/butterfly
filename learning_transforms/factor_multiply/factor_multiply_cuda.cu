@@ -755,7 +755,8 @@ __global__ void butterfly_factor_multiply_intermediate_backward_cuda_kernel(cons
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
   __shared__ scalar_t s_grad[ELEMENTARY_SIZE * 2];
   __shared__ scalar_t s_twiddle[ELEMENTARY_SIZE][2][2];
-  __shared__ scalar_t s_d_twiddle[ELEMENTARY_SIZE * 4];
+  // __shared__ scalar_t s_d_twiddle[ELEMENTARY_SIZE * 4];
+  scalar_t* s_d_twiddle = &s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
   int64_t b = blockIdx.y * blockDim.y + threadIdx.y;
   if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
