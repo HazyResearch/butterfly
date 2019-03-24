@@ -440,6 +440,102 @@ at::Tensor butterfly_factor_multiply_intermediate(const at::Tensor& twiddle, con
   return output;
 }
 
+std::vector<at::Tensor> butterfly_factor_multiply_intermediate_backward(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& output) {
+  /* Parameters:
+         grad: (batch_size, n) if real or (batch_size, n, 2) if complex
+         twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
+         output + intermediate values for backward: (log n + 1, batch_size, n) if real or (log n + 1, batch_size, n, 2) if complex
+     Return:
+         d_twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
+         d_input: (batch_size, n) if real or (batch_size, n, 2) if complex
+  */
+  const auto batch_size = grad.size(0);
+  const auto n = grad.size(1);
+  const int log_n = int(log2((double) n));
+  auto d_input = grad.clone();
+  auto d_twiddle = torch::zeros_like(twiddle);
+  // if (output.is_cuda()) {
+  //   AT_CHECK(twiddle.is_cuda() && grad.is_cuda(), "butterfly_factor_multiply_intermediate_backward: Expected grad and twiddle to be CUDA tensor");
+  //   butterfly_factor_multiply_intermediate_backward_cuda(grad, twiddle, output, d_twiddle, d_input);
+  //   return {d_twiddle, d_input};
+  // }
+  AT_CHECK((!twiddle.is_cuda()) && (!grad.is_cuda()) , "butterfly_factor_multiply_intermediate_backward: Expected grad and twiddle to be CPU tensor");
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "butterfly_factor_multiply_intermediate_backward", [&] {
+    switch (grad.dim()) {
+      case 2:  // real
+        {
+          const auto twiddle_a = twiddle.accessor<scalar_t, 3>();
+          auto output_a = output.accessor<scalar_t, 3>();
+          auto d_twiddle_a = d_twiddle.accessor<scalar_t, 3>();
+          auto d_input_a = d_input.accessor<scalar_t, 2>();
+          for (int64_t log_stride = log_n - 1; log_stride >= 0; --log_stride) {
+            int64_t stride = 1 << log_stride;
+            int64_t twiddle_start_idx = stride - 1;
+            for (int64_t b = 0; b < batch_size; ++b) {
+              for (int64_t i = 0; i < n / 2; ++i) {
+                int64_t low_order_bit = i % stride;
+                int64_t twiddle_idx = twiddle_start_idx + low_order_bit;
+                int64_t pos = 2 * (i - low_order_bit) + low_order_bit;
+                const scalar_t twiddle_val[2][2] = {{twiddle_a[twiddle_idx][0][0], twiddle_a[twiddle_idx][0][1]},
+                                                    {twiddle_a[twiddle_idx][1][0], twiddle_a[twiddle_idx][1][1]}};
+                const scalar_t grad_val[2] = {d_input_a[b][pos], d_input_a[b][pos + stride]};
+                d_input_a[b][pos] = twiddle_val[0][0] * grad_val[0] + twiddle_val[1][0] * grad_val[1];
+                d_input_a[b][pos + stride] = twiddle_val[0][1] * grad_val[0] + twiddle_val[1][1] * grad_val[1];
+                const scalar_t input_val[2] = {output_a[log_stride][b][pos], output_a[log_stride][b][pos + stride]};
+                d_twiddle_a[twiddle_idx][0][0] += grad_val[0] * input_val[0];
+                d_twiddle_a[twiddle_idx][0][1] += grad_val[0] * input_val[1];
+                d_twiddle_a[twiddle_idx][1][0] += grad_val[1] * input_val[0];
+                d_twiddle_a[twiddle_idx][1][1] += grad_val[1] * input_val[1];
+              }
+            }
+          }
+          break;
+        }
+      case 3:  // complex
+        {
+          const auto twiddle_a = twiddle.accessor<scalar_t, 4>();
+          const auto output_a = output.accessor<scalar_t, 4>();
+          auto d_twiddle_a = d_twiddle.accessor<scalar_t, 4>();
+          auto d_input_a = d_input.accessor<scalar_t, 3>();
+          for (int64_t log_stride = log_n - 1; log_stride >= 0; --log_stride) {
+            int64_t stride = 1 << log_stride;
+            int64_t twiddle_start_idx = stride - 1;
+            for (int64_t b = 0; b < batch_size; ++b) {
+              for (int64_t i = 0; i < n / 2; ++i) {
+                int64_t low_order_bit = i % stride;
+                int64_t twiddle_idx = twiddle_start_idx + low_order_bit;
+                int64_t pos = 2 * (i - low_order_bit) + low_order_bit;
+                const scalar_t twiddle_val[2][2][2] = {{{twiddle_a[twiddle_idx][0][0][0], twiddle_a[twiddle_idx][0][0][1]},
+                                                        {twiddle_a[twiddle_idx][0][1][0], twiddle_a[twiddle_idx][0][1][1]}},
+                                                       {{twiddle_a[twiddle_idx][1][0][0], twiddle_a[twiddle_idx][1][0][1]},
+                                                        {twiddle_a[twiddle_idx][1][1][0], twiddle_a[twiddle_idx][1][1][1]}}};
+                const scalar_t grad_val[2][2] = {{d_input_a[b][pos][0], d_input_a[b][pos][1]},
+                                                 {d_input_a[b][pos + stride][0], d_input_a[b][pos + stride][1]}};
+                const scalar_t input_val[2][2] = {{output_a[log_stride][b][pos][0], output_a[log_stride][b][pos][1]},
+                                                  {output_a[log_stride][b][pos + stride][0], output_a[log_stride][b][pos + stride][1]}};
+                for (int64_t j = 0; j <= 1; ++j) {
+                  // Multiply by complex conjugate
+                  d_twiddle_a[twiddle_idx][j][0][0] += grad_val[j][0] * input_val[0][0] + grad_val[j][1] * input_val[0][1];
+                  d_twiddle_a[twiddle_idx][j][0][1] += -grad_val[j][0] * input_val[0][1] + grad_val[j][1] * input_val[0][0];
+                  d_twiddle_a[twiddle_idx][j][1][0] += grad_val[j][0] * input_val[1][0] + grad_val[j][1] * input_val[1][1];
+                  d_twiddle_a[twiddle_idx][j][1][1] += -grad_val[j][0] * input_val[1][1] + grad_val[j][1] * input_val[1][0];
+                  d_input_a[b][pos + j * stride][0] = twiddle_val[0][j][0] * grad_val[0][0] + twiddle_val[0][j][1] * grad_val[0][1]
+                    + twiddle_val[1][j][0] * grad_val[1][0] + twiddle_val[1][j][1] * grad_val[1][1];
+                  d_input_a[b][pos + j * stride][1] = twiddle_val[0][j][0] * grad_val[0][1] - twiddle_val[0][j][1] * grad_val[0][0]
+                    + twiddle_val[1][j][0] * grad_val[1][1] - twiddle_val[1][j][1] * grad_val[1][0];
+                }
+              }
+            }
+          }
+          break;
+        }
+      default:
+        AT_ERROR("butterfly_factor_multiply_intermediate_backward requires input dimension 2 or 3");
+    }
+  });
+  return {d_twiddle, d_input};
+}
+
 at::Tensor permutation_factor_even_odd_multiply(const at::Tensor& p, const at::Tensor& input) {
   /* Parameters:
          p: (1, )
@@ -771,6 +867,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_factor_multiply_inplace", &butterfly_factor_multiply_inplace, "Butterfly factor multiply inplace forward");
   m.def("butterfly_factor_multiply_inplace_backward", &butterfly_factor_multiply_inplace_backward, "Butterfly factor multiply inplace backward");
   m.def("butterfly_factor_multiply_intermediate", &butterfly_factor_multiply_intermediate, "Butterfly factor multiply intermediate forward");
+  m.def("butterfly_factor_multiply_intermediate_backward", &butterfly_factor_multiply_intermediate_backward, "Butterfly factor multiply intermediate backward");
   m.def("permutation_factor_even_odd_multiply", &permutation_factor_even_odd_multiply, "Permutation factor (even odd) multiply forward");
   m.def("permutation_factor_even_odd_multiply_backward", &permutation_factor_even_odd_multiply_backward, "Permutation factor (even odd) multiply backward");
   m.def("permutation_factor_reverse_multiply", &permutation_factor_reverse_multiply, "Permutation factor (reverse) multiply forward");
