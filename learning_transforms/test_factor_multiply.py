@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from butterfly_factor import butterfly_factor_mult, butterfly_factor_mult_inplace
+from butterfly_factor import butterfly_factor_mult, butterfly_factor_mult_inplace, butterfly_factor_mult_intermediate
 from butterfly import Block2x2DiagProduct
 from complex_utils import complex_mul
 
@@ -113,6 +113,7 @@ class ButterflyFactorTest(unittest.TestCase):
         self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
 
     @unittest.skip('Not numerically stable')
+    @unittest.skipIf(not torch.cuda.is_available(), "need CUDA")
     def test_butterfly_factor_inplace_cuda(self):
         batch_size = 10
         n = 4096
@@ -173,6 +174,7 @@ class ButterflyFactorTest(unittest.TestCase):
         self.assertTrue(torch.allclose(d_input_intermediate, d_input, rtol=self.rtol, atol=self.atol), (d_input_intermediate - d_input).abs().max().item())
         self.assertTrue(torch.allclose(d_twiddle_intermediate, d_twiddle, rtol=self.rtol, atol=self.atol), (d_twiddle_intermediate - d_twiddle).abs().max().item())
 
+    @unittest.skipIf(not torch.cuda.is_available(), "need CUDA")
     def test_butterfly_factor_intermediate_cuda(self):
         batch_size = 10
         n = 4096
@@ -185,7 +187,13 @@ class ButterflyFactorTest(unittest.TestCase):
             output.append(butterfly_factor_mult(factor.ABCD, output[-1].view(-1, 2, factor.size // 2)).view(output[-1].shape))
         output = torch.stack(output)
         self.assertTrue(torch.allclose(output_intermediate, output, rtol=self.rtol, atol=self.atol), (output_intermediate - output).abs().max().item())
-
+        grad = torch.randn_like(output[-1])
+        d_twiddle_intermediate, d_input_intermediate = butterfly_factor_multiply_intermediate_backward(grad, twiddle, output_intermediate)
+        output[-1].backward(grad, retain_graph=True)
+        d_input = input_.grad
+        d_twiddle = torch.cat([factor.ABCD.grad.permute(2, 0, 1) for factor in B.factors[::-1]])
+        self.assertTrue(torch.allclose(d_input_intermediate, d_input, rtol=self.rtol, atol=self.atol), (d_input_intermediate - d_input).abs().max().item())
+        self.assertTrue(torch.allclose(d_twiddle_intermediate, d_twiddle, rtol=self.rtol, atol=self.atol), (d_twiddle_intermediate - d_twiddle).abs().max().item())
 
 
 if __name__ == "__main__":

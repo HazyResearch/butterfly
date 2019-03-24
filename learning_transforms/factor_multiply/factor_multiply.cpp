@@ -13,6 +13,8 @@ void butterfly_factor_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tenso
 void butterfly_factor_multiply_inplace_backward_cuda(const at::Tensor& grad, const at::Tensor& twiddle, at::Tensor& output,
                                                      at::Tensor& d_twiddle, at::Tensor& d_input);
 void butterfly_factor_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor& input);
+void butterfly_factor_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, const at::Tensor& output,
+                                                          at::Tensor& d_twiddle, at::Tensor& d_input);
 void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Tensor& input, at::Tensor& output);
 void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input,
                                                         at::Tensor& d_p_expanded, at::Tensor& d_input);
@@ -454,11 +456,11 @@ std::vector<at::Tensor> butterfly_factor_multiply_intermediate_backward(const at
   const int log_n = int(log2((double) n));
   auto d_input = grad.clone();
   auto d_twiddle = torch::zeros_like(twiddle);
-  // if (output.is_cuda()) {
-  //   AT_CHECK(twiddle.is_cuda() && grad.is_cuda(), "butterfly_factor_multiply_intermediate_backward: Expected grad and twiddle to be CUDA tensor");
-  //   butterfly_factor_multiply_intermediate_backward_cuda(grad, twiddle, output, d_twiddle, d_input);
-  //   return {d_twiddle, d_input};
-  // }
+  if (output.is_cuda()) {
+    AT_CHECK(twiddle.is_cuda() && grad.is_cuda(), "butterfly_factor_multiply_intermediate_backward: Expected grad and twiddle to be CUDA tensor");
+    butterfly_factor_multiply_intermediate_backward_cuda(twiddle, output, d_twiddle, d_input);
+    return {d_twiddle, d_input};
+  }
   AT_CHECK((!twiddle.is_cuda()) && (!grad.is_cuda()) , "butterfly_factor_multiply_intermediate_backward: Expected grad and twiddle to be CPU tensor");
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "butterfly_factor_multiply_intermediate_backward", [&] {
     switch (grad.dim()) {
