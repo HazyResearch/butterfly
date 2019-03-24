@@ -12,6 +12,7 @@ void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::T
 void butterfly_factor_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tensor& input);
 void butterfly_factor_multiply_inplace_backward_cuda(const at::Tensor& grad, const at::Tensor& twiddle, at::Tensor& output,
                                                      at::Tensor& d_twiddle, at::Tensor& d_input);
+void butterfly_factor_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor& input);
 void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Tensor& input, at::Tensor& output);
 void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input,
                                                         at::Tensor& d_p_expanded, at::Tensor& d_input);
@@ -370,15 +371,11 @@ at::Tensor butterfly_factor_multiply_intermediate(const at::Tensor& twiddle, con
     torch::empty({log_n + 1, batch_size, n}, torch::dtype(input.dtype()).device(input.device())) :
     torch::empty({log_n + 1, batch_size, n, 2}, torch::dtype(input.dtype()).device(input.device()));
   output[0] = input;
-  // if (output.is_cuda()) {
-  //   AT_CHECK(twiddle.is_cuda(), "butterfly_factor_multiply_intermediate: Expected twiddle to be CUDA tensor");
-  //   // butterfly_factor_multiply_intermediate_cuda(twiddle, output);
-  //   auto input_temp = input.dim() == 3 ?
-  //     torch::empty({batch_size, n, 2}, torch::dtype(twiddle.dtype()).device(twiddle.device())) :
-  //     torch::empty({batch_size, n}, torch::dtype(twiddle.dtype()).device(twiddle.device()));
-  //   butterfly_factor_multiply_intermediate_cuda(twiddle, output);
-  //   return output;
-  // }
+  if (input.is_cuda()) {
+    AT_CHECK(twiddle.is_cuda(), "butterfly_factor_multiply_intermediate: Expected twiddle to be CUDA tensor");
+    butterfly_factor_multiply_intermediate_cuda(twiddle, output);
+    return output;
+  }
   AT_CHECK(!twiddle.is_cuda(), "butterfly_factor_multiply_intermediate: Expected twiddle to be CPU tensor");
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.type(), "butterfly_factor_multiply_intermediate", [&] {
     switch (input.dim()) {
@@ -773,6 +770,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_factor_multiply_backward", &butterfly_factor_multiply_backward, "Butterfly factor multiply backward");
   m.def("butterfly_factor_multiply_inplace", &butterfly_factor_multiply_inplace, "Butterfly factor multiply inplace forward");
   m.def("butterfly_factor_multiply_inplace_backward", &butterfly_factor_multiply_inplace_backward, "Butterfly factor multiply inplace backward");
+  m.def("butterfly_factor_multiply_intermediate", &butterfly_factor_multiply_intermediate, "Butterfly factor multiply intermediate forward");
   m.def("permutation_factor_even_odd_multiply", &permutation_factor_even_odd_multiply, "Permutation factor (even odd) multiply forward");
   m.def("permutation_factor_even_odd_multiply_backward", &permutation_factor_even_odd_multiply_backward, "Permutation factor (even odd) multiply backward");
   m.def("permutation_factor_reverse_multiply", &permutation_factor_reverse_multiply, "Permutation factor (reverse) multiply forward");
