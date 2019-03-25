@@ -8,7 +8,7 @@ import math
 import numpy as np
 from numpy.polynomial import legendre
 import scipy.linalg as LA
-from scipy.fftpack import dct, dst
+from scipy.fftpack import dct, dst, fft2
 
 # Copied from https://stackoverflow.com/questions/23869694/create-nxn-haar-matrix
 def haar_matrix(n, normalized=False):
@@ -61,6 +61,17 @@ def named_target_matrix(name, size):
         return LA.dft(size, scale='sqrtn')[:, :, None].view('float64')
     elif name == 'idft':
         return np.ascontiguousarray(LA.dft(size, scale='sqrtn').conj().T)[:, :, None].view('float64')
+    elif name == 'dft2':
+        size_sr = int(math.sqrt(size))
+        matrix = np.fft.fft2(np.eye(size_sr**2).reshape(-1, size_sr, size_sr), norm='ortho').reshape(-1, size_sr**2)
+        # matrix1d = LA.dft(size_sr, scale='sqrtn')
+        # assert np.allclose(np.kron(m1d, m1d), matrix)
+        # return matrix[:, :, None].view('float64')
+        from utils import bitreversal_permutation
+        br_perm = bitreversal_permutation(size_sr)
+        br_perm2 = np.arange(size_sr**2).reshape(size_sr, size_sr)[br_perm][:, br_perm].reshape(-1)
+        matrix = np.ascontiguousarray(matrix[:, br_perm2])
+        return matrix[:, :, None].view('float64')
     elif name == 'dct':
         # Need to transpose as dct acts on rows of matrix np.eye, not columns
         # return dct(np.eye(size), norm='ortho').T
@@ -69,6 +80,17 @@ def named_target_matrix(name, size):
         return dst(np.eye(size)).T / math.sqrt(size)
     elif name == 'hadamard':
         return LA.hadamard(size) / math.sqrt(size)
+    elif name == 'hadamard2':
+        size_sr = int(math.sqrt(size))
+        matrix1d = LA.hadamard(size_sr) / math.sqrt(size_sr)
+        return np.kron(matrix1d, matrix1d)
+    elif name == 'b2':
+        size_sr = int(math.sqrt(size))
+        import torch
+        from butterfly import Block2x2DiagProduct
+        b = Block2x2DiagProduct(size_sr)
+        matrix1d = b(torch.eye(size_sr)).t().detach().numpy()
+        return np.kron(matrix1d, matrix1d)
     elif name == 'convolution':
         np.random.seed(0)
         x = np.random.randn(size)
