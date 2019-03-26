@@ -212,7 +212,7 @@ class Block2x2Diag(nn.Module):
             size: size of butterfly matrix
             complex: real or complex matrix
             ABCD: block of [[A, B], [C, D]], of shape (2, 2, size//2) if real or (2, 2, size//2, 2) if complex
-            ortho_init: whether the twiddle factors are initialized to be orthogonal (right now only applies to real)
+            ortho_init: whether the twiddle factors are initialized to be orthogonal (real) or unitary (complex)
         """
         super().__init__()
         assert size % 2 == 0, 'size must be even'
@@ -222,14 +222,28 @@ class Block2x2Diag(nn.Module):
         ABCD_shape = (2, 2, size // 2) if not complex else (2, 2, size // 2, 2)
         scaling = 1.0 / 2 if complex else 1.0 / math.sqrt(2)
         if ABCD is None:
-            if ortho_init and not complex:
-                theta = torch.rand(size // 2) * math.pi * 2
-                c, s = torch.cos(theta), torch.sin(theta)
-                det = torch.randint(0, 2, (size // 2, ), dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
-                self.ABCD = nn.Parameter(torch.stack((torch.stack((det * c, -det * s)),
-                                                      torch.stack((s, c)))))
-            else:
+            if not ortho_init:
                 self.ABCD = nn.Parameter(torch.randn(ABCD_shape) * scaling)
+            else:
+                if not complex:
+                    theta = torch.rand(size // 2) * math.pi * 2
+                    c, s = torch.cos(theta), torch.sin(theta)
+                    det = torch.randint(0, 2, (size // 2, ), dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
+                    self.ABCD = nn.Parameter(torch.stack((torch.stack((det * c, -det * s)),
+                                                          torch.stack((s, c)))))
+                else:
+                    # Sampling from the Haar measure on U(2) is a bit subtle.
+                    # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
+                    phi = torch.asin(torch.sqrt(torch.rand(size // 2)))
+                    c, s = torch.cos(phi), torch.sin(phi)
+                    alpha, psi, chi = torch.randn(3, size // 2) * math.pi * 2
+                    phi = torch.randn(3, size // 2) * math.pi * 2
+                    A = torch.stack((c * torch.cos(alpha + psi), c * torch.sin(alpha + psi)), dim=-1)
+                    B = torch.stack((s * torch.cos(alpha + chi), s * torch.sin(alpha + chi)), dim=-1)
+                    C = torch.stack((-s * torch.cos(alpha - chi), -s * torch.sin(alpha - chi)), dim=-1)
+                    D = torch.stack((c * torch.cos(alpha - psi), c * torch.sin(alpha - psi)), dim=-1)
+                    self.ABCD = nn.Parameter(torch.stack((torch.stack((A, B)),
+                                                          torch.stack((C, D)))))
         else:
             assert ABCD.shape == ABCD_shape, f'ABCD must have shape {ABCD_shape}'
             self.ABCD = ABCD
