@@ -8,7 +8,7 @@ from torch import nn
 from complex_utils import real_to_complex, complex_mul, complex_matmul
 from sparsemax import sparsemax
 from utils import bitreversal_permutation
-from butterfly_factor import butterfly_factor_mult
+from butterfly_factor import butterfly_factor_mult, butterfly_factor_mult_intermediate
 from permutation_factor import permutation_factor_even_odd_mult, permutation_factor_reverse_mult
 
 
@@ -237,7 +237,6 @@ class Block2x2Diag(nn.Module):
                     phi = torch.asin(torch.sqrt(torch.rand(size // 2)))
                     c, s = torch.cos(phi), torch.sin(phi)
                     alpha, psi, chi = torch.randn(3, size // 2) * math.pi * 2
-                    phi = torch.randn(3, size // 2) * math.pi * 2
                     A = torch.stack((c * torch.cos(alpha + psi), c * torch.sin(alpha + psi)), dim=-1)
                     B = torch.stack((s * torch.cos(alpha + chi), s * torch.sin(alpha + chi)), dim=-1)
                     C = torch.stack((-s * torch.cos(alpha - chi), -s * torch.sin(alpha - chi)), dim=-1)
@@ -290,6 +289,54 @@ class Block2x2DiagProduct(nn.Module):
             else:
                 output = factor(output.view(output.shape[:-2] + (-1, factor.size, 2))).view(output.shape)
         return output
+
+
+class Block2x2DiagProductAllinOne(nn.Module):
+    """Product of block 2x2 diagonal matrices.
+    """
+
+    def __init__(self, size, complex=False, twiddle=None, ortho_init=False):
+        super().__init__()
+        m = int(math.log2(size))
+        assert size == 1 << m, "size must be a power of 2"
+        self.size = size
+        self.complex = complex
+        twiddle_shape = (size - 1, 2, 2) if not complex else (size - 1, 2, 2, 2)
+        scaling = 1.0 / 2 if complex else 1.0 / math.sqrt(2)
+        if twiddle is None:
+            if not ortho_init:
+                self.twiddle = nn.Parameter(torch.randn(twiddle_shape) * scaling)
+            else:
+                if not complex:
+                    theta = torch.rand(size - 1) * math.pi * 2
+                    c, s = torch.cos(theta), torch.sin(theta)
+                    det = torch.randint(0, 2, (size - 1, ), dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
+                    self.twiddle = nn.Parameter(torch.stack((torch.stack((det * c, -det * s), dim=-1),
+                                                             torch.stack((s, c), dim=-1))), dim=-1)
+                else:
+                    # Sampling from the Haar measure on U(2) is a bit subtle.
+                    # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
+                    phi = torch.asin(torch.sqrt(torch.rand(size - 1)))
+                    c, s = torch.cos(phi), torch.sin(phi)
+                    alpha, psi, chi = torch.randn(3, size - 1) * math.pi * 2
+                    A = torch.stack((c * torch.cos(alpha + psi), c * torch.sin(alpha + psi)), dim=-1)
+                    B = torch.stack((s * torch.cos(alpha + chi), s * torch.sin(alpha + chi)), dim=-1)
+                    C = torch.stack((-s * torch.cos(alpha - chi), -s * torch.sin(alpha - chi)), dim=-1)
+                    D = torch.stack((c * torch.cos(alpha - psi), c * torch.sin(alpha - psi)), dim=-1)
+                    self.twiddle = nn.Parameter(torch.stack((torch.stack((A, B), dim=-1),
+                                                             torch.stack((C, D), dim=-1)), dim=-1))
+        else:
+            assert twiddle.shape == twiddle_shape, f'twiddle must have shape {twiddle_shape}'
+            self.twiddle = twiddle
+
+    def forward(self, input):
+        """
+        Parameters:
+            input: (..., size) if real or (..., size, 2) if complex
+        Return:
+            output: (..., size) if real or (..., size, 2) if complex
+        """
+        return butterfly_factor_mult_intermediate(self.twiddle, input)
 
 
 class Block2x2DiagRectangular(nn.Module):
@@ -759,6 +806,19 @@ def test_block2x2diagproductrectangular_tied_weight():
     input = torch.randn((batch_size, in_size, 2))
     output = model(input)
     assert output.shape == (batch_size, out_size, 2)
+
+
+def test_block2x2diagproductallinone():
+    batch_size = 3
+    in_size = 8
+    model = Block2x2DiagProductAllinOne(in_size)
+    input = torch.randn((batch_size, in_size))
+    output = model(input)
+    assert output.shape == (batch_size, in_size)
+    model = Block2x2DiagProductAllinOne(in_size, complex=True)
+    input = torch.randn((batch_size, in_size, 2))
+    output = model(input)
+    assert output.shape == (batch_size, in_size, 2)
 
 
 def test_blockpermproduct():
