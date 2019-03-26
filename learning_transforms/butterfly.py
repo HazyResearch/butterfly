@@ -224,8 +224,7 @@ class Block2x2Diag(nn.Module):
         if ABCD is None:
             if ortho_init and not complex:
                 theta = torch.rand(size // 2) * math.pi * 2
-                c = torch.cos(theta)
-                s = torch.sin(theta)
+                c, s = torch.cos(theta), torch.sin(theta)
                 det = torch.randint(0, 2, (size // 2, ), dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
                 self.ABCD = nn.Parameter(torch.stack((torch.stack((det * c, -det * s)),
                                                       torch.stack((s, c)))))
@@ -254,14 +253,14 @@ class Block2x2DiagProduct(nn.Module):
     """Product of block 2x2 diagonal matrices.
     """
 
-    def __init__(self, size, complex=False, decreasing_size=True):
+    def __init__(self, size, complex=False, decreasing_size=True, ortho_init=False):
         super().__init__()
         m = int(math.log2(size))
         assert size == 1 << m, "size must be a power of 2"
         self.size = size
         self.complex = complex
         sizes = [size >> i for i in range(m)] if decreasing_size else [size >> i for i in range(m)[::-1]]
-        self.factors = nn.ModuleList([Block2x2Diag(size_, complex=complex) for size_ in sizes])
+        self.factors = nn.ModuleList([Block2x2Diag(size_, complex=complex, ortho_init=ortho_init) for size_ in sizes])
 
     def forward(self, input):
         """
