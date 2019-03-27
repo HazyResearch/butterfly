@@ -13,7 +13,7 @@ from butterfly import Block2x2DiagProduct, BlockPermProduct
 from inference import Block2x2DiagProduct_to_ABCDs, BP_mul_cy_inplace
 
 from test_factor_multiply import twiddle_list_concat
-from factor_multiply import butterfly_factor_multiply_inplace
+from factor_multiply import butterfly_multiply_inplace
 
 # We limit to 1 thread for reliable speed test
 os.environ['MKL_NUM_THREADS'] = '1'
@@ -83,7 +83,7 @@ for idx_n, (n, ntrial) in enumerate(zip(sizes, ntrials)):
     x_torch = torch.tensor(x).unsqueeze(0)
     # perm_torch = torch.tensor(perm)
     start = timer()
-    [butterfly_factor_multiply_inplace(twiddles, x_torch) for _ in range(ntrial)]
+    [butterfly_multiply_inplace(twiddles, x_torch) for _ in range(ntrial)]
     end = timer()
     bp_all_times[idx_n] = (end-start) / ntrial
 

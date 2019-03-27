@@ -5,7 +5,7 @@ from butterfly import Block2x2DiagProduct, Block2x2DiagProductRectangular
 from test_factor_multiply import twiddle_list_concat
 from butterfly_factor import butterfly_factor_mult_inplace, butterfly_factor_mult_intermediate
 
-from factor_multiply import butterfly_factor_multiply_intermediate
+from factor_multiply import butterfly_multiply_intermediate
 
 
 batch_size = 256
@@ -166,6 +166,12 @@ print(f'CuFFT together: {end - start}s')
 # output = butterfly_factor_mult_inplace(twiddle, x)
 # output.backward(gradient=grad)
 # output = butterfly_factor_mult_intermediate(twiddle, x)
+# output.backward(gradient=grad)
+# B = Block2x2DiagProduct(n, complex=True).to('cuda')
+# x = torch.randn(batch_size, n, 2, requires_grad=True).to('cuda')
+# twiddle = torch.randn_like(twiddle_list_concat(B), requires_grad=True)
+# output = butterfly_factor_mult_intermediate(twiddle, x)
+# grad = torch.randn_like(output)
 # output.backward(gradient=grad)
 # # torch.autograd.grad(output, (twiddle, x), grad, retain_graph=True)
 
