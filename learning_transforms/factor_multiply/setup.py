@@ -11,7 +11,8 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'factor_multiply_cuda.cu'
         ],
         extra_compile_args={'cxx': ['-g', '-march=native'],
-                            'nvcc': ['-arch=sm_60', '-O2', '-lineinfo']})
+                            # 'nvcc': ['-arch=sm_60', '-O2', '-lineinfo']})
+                            'nvcc': ['-O2', '-lineinfo']})
     ext_modules.append(extension)
 # extension = CUDAExtension('factor_multiply', ['factor_multiply.cpp'], extra_compile_args=['-march=native'])
 # extension = CppExtension('factor_multiply', ['factor_multiply.cpp'])
