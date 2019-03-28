@@ -834,22 +834,22 @@ void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor&
   const bool complex = output.dim() == 4;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.type(), "butterfly_multiply_intermediate_cuda", [&] {
     if (!complex) {  // real
-        const auto twiddle_a = twiddle.packed_accessor<scalar_t, 3>();
-        auto output_a = output.packed_accessor<scalar_t, 3>();
-        int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
-        int log_stride = int(log2((double) stride));
-        dim3 block(stride);
-        dim3 grid(div_up(n / 2, stride), batch_size);
-        butterfly_multiply_intermediate_cuda_kernel<scalar_t>
+      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 3>();
+      auto output_a = output.packed_accessor<scalar_t, 3>();
+      int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
+      int log_stride = int(log2((double) stride));
+      dim3 block(stride);
+      dim3 grid(div_up(n / 2, stride), batch_size);
+      butterfly_multiply_intermediate_cuda_kernel<scalar_t>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride);
+      // log_stride = -1;
+      for (log_stride++; log_stride <= log_n - 1; ++log_stride) {
+        stride = 1 << log_stride;
+        dim3 block(MAX_BLOCK_SIZE / 2);
+        dim3 grid(div_up(n / 2, MAX_BLOCK_SIZE / 2), div_up(batch_size, WORK_PER_THREAD));
+        butterfly_multiply_intermediate_onestep_cuda_kernel<scalar_t>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride);
-        // log_stride = -1;
-        for (log_stride++; log_stride <= log_n - 1; ++log_stride) {
-          stride = 1 << log_stride;
-          dim3 block(MAX_BLOCK_SIZE / 2);
-          dim3 grid(div_up(n / 2, MAX_BLOCK_SIZE / 2), div_up(batch_size, WORK_PER_THREAD));
-          butterfly_multiply_intermediate_onestep_cuda_kernel<scalar_t>
-            <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride);
-        }
+      }
     } else {  // complex
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4>();
       auto output_a = output.packed_accessor<scalar_t, 4>();
@@ -916,27 +916,27 @@ __global__ void butterfly_multiply_intermediate_backward_cuda_kernel(const at::P
                                          {grad_val[1] * input_val[0], grad_val[1] * input_val[1]}};
       int tid = threadIdx.x + threadIdx.y * blockDim.x;
       int nthreads = blockDim.x * blockDim.y;
-      // sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, stride, nthreads, tid);
-      // if (tid < stride) {
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0], s_d_twiddle[twiddle_idx]);
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1], s_d_twiddle[twiddle_idx + stride]);
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], s_d_twiddle[twiddle_idx + 2 * stride]);
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], s_d_twiddle[twiddle_idx + 3 * stride]);
-      // }
-      sum_strided_exchange(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, log_stride, nthreads, tid);
-      int block_reduction_stride = max(warpSize, stride);
-      // int n_block_reductions = div_up(nthreads, block_reduction_stride);
-      int n_block_reductions = (nthreads + block_reduction_stride - 1) >> max(5, log_stride);
-      // if ((tid < n_block_reductions * stride) && (tid % n_block_reductions == 0)) {
-      if ((tid < n_block_reductions * stride) && ((tid & (n_block_reductions - 1)) == 0)) {
-        // atomicAdd(&d_twiddle_a[twiddle_start_idx + tid / n_block_reductions][0][0], d_twiddle_val[0][0]);
-        // Trying to avoid integer division
-        int log_n_block_reductions = log_max_stride - max(5, log_stride);  // Use the fact that nthreads == max_stride and warpSize == 32
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + (tid >> log_n_block_reductions)][0][0], d_twiddle_val[0][0]);
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + (tid >> log_n_block_reductions)][0][1], d_twiddle_val[0][1]);
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + (tid >> log_n_block_reductions)][1][0], d_twiddle_val[1][0]);
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + (tid >> log_n_block_reductions)][1][1], d_twiddle_val[1][1]);
+      sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, stride, nthreads, tid);
+      if (tid < stride) {
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0], s_d_twiddle[twiddle_idx]);
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1], s_d_twiddle[twiddle_idx + stride]);
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], s_d_twiddle[twiddle_idx + 2 * stride]);
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], s_d_twiddle[twiddle_idx + 3 * stride]);
       }
+      // sum_strided_exchange(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, log_stride, nthreads, tid);
+      // int block_reduction_stride = max(warpSize, stride);
+      // // int n_block_reductions = div_up(nthreads, block_reduction_stride);
+      // int n_block_reductions = (nthreads + block_reduction_stride - 1) >> max(5, log_stride);
+      // // if ((tid < n_block_reductions * stride) && (tid % n_block_reductions == 0)) {
+      // if ((tid < n_block_reductions * stride) && ((tid & (n_block_reductions - 1)) == 0)) {
+      //   // atomicAdd(&d_twiddle_a[twiddle_start_idx + tid / n_block_reductions][0][0], d_twiddle_val[0][0]);
+      //   // Trying to avoid integer division
+      //   int log_n_block_reductions = log_max_stride - max(5, log_stride);  // Use the fact that nthreads == max_stride and warpSize == 32
+      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + (tid >> log_n_block_reductions)][0][0], d_twiddle_val[0][0]);
+      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + (tid >> log_n_block_reductions)][0][1], d_twiddle_val[0][1]);
+      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + (tid >> log_n_block_reductions)][1][0], d_twiddle_val[1][0]);
+      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + (tid >> log_n_block_reductions)][1][1], d_twiddle_val[1][1]);
+      // }
     }
     __syncthreads();
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
