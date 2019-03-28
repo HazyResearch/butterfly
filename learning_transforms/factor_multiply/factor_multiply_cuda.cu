@@ -380,8 +380,8 @@ void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::T
 
 template <typename scalar_t>
 __global__ void butterfly_multiply_inplace_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                              at::PackedTensorAccessor<scalar_t, 2> input_a,
-                                                              int max_stride) {
+                                                       at::PackedTensorAccessor<scalar_t, 2> input_a,
+                                                       int max_stride) {
   const int batch_size = input_a.size(0);
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
   __shared__ scalar_t s_input[ELEMENTARY_SIZE * 2];
@@ -419,8 +419,8 @@ __global__ void butterfly_multiply_inplace_cuda_kernel(const at::PackedTensorAcc
 
 template <typename scalar_t>
 __global__ void butterfly_multiply_inplace_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                                      at::PackedTensorAccessor<scalar_t, 2> input_a,
-                                                                      int stride) {
+                                                               at::PackedTensorAccessor<scalar_t, 2> input_a,
+                                                               int stride) {
   const int batch_size = input_a.size(0);
   int twiddle_start_idx = stride - 1;
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -476,12 +476,40 @@ void butterfly_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tensor& inpu
      cudaGetLastError());
 }
 
+template <int LENGTH, typename T>
+__device__ __forceinline__ void sum_strided_atomic(T (&val)[LENGTH], T *storage, int stride, int nthreads, int tid) {
+  // Warp reduction
+  for (int offset = warpSize / 2; offset >= stride; offset /= 2) {
+    #pragma unroll
+    for (int j = 0; j < LENGTH; j++) {
+      val[j] += __shfl_down_sync(FULL_MASK, val[j], offset);
+    }
+  }
+  // Block reduction
+  __syncthreads();  // Need this, otherwise might overwrite before other threads can read twiddle values
+  if (tid < stride) {
+    #pragma unroll
+    for (int j = 0; j < LENGTH; j++) {
+      storage[j * stride + tid] = 0;
+    }
+  }
+  __syncthreads();
+  int lane = tid % warpSize;
+  if (lane < stride) {
+    #pragma unroll
+    for (int j = 0; j < LENGTH; j++) {
+      atomicAdd(&storage[j * stride + tid % stride], val[j]);
+    }
+  }
+  __syncthreads();
+}
+
 template <typename scalar_t>
 __global__ void butterfly_multiply_inplace_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                                       at::PackedTensorAccessor<double, 2> output_a,
-                                                                       at::PackedTensorAccessor<scalar_t, 3> d_twiddle_a,
-                                                                       at::PackedTensorAccessor<scalar_t, 2> d_input_a,
-                                                                       int max_stride) {
+                                                                at::PackedTensorAccessor<double, 2> output_a,
+                                                                at::PackedTensorAccessor<scalar_t, 3> d_twiddle_a,
+                                                                at::PackedTensorAccessor<scalar_t, 2> d_input_a,
+                                                                int max_stride) {
   const int batch_size = output_a.size(0);
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
   __shared__ double s_output[ELEMENTARY_SIZE * 2];
@@ -522,48 +550,14 @@ __global__ void butterfly_multiply_inplace_backward_cuda_kernel(const at::Packed
                                        (scalar_t)(grad_val[0] * input_val[1])},
                                       {(scalar_t)(grad_val[1] * input_val[0]),
                                        (scalar_t)(grad_val[1] * input_val[1])}};
-      // Warp reduction
-      for (int offset = warpSize / 2; offset >= stride; offset /= 2) {
-        d_twiddle_val[0][0] += __shfl_down_sync(FULL_MASK, d_twiddle_val[0][0], offset);
-        d_twiddle_val[0][1] += __shfl_down_sync(FULL_MASK, d_twiddle_val[0][1], offset);
-        d_twiddle_val[1][0] += __shfl_down_sync(FULL_MASK, d_twiddle_val[1][0], offset);
-        d_twiddle_val[1][1] += __shfl_down_sync(FULL_MASK, d_twiddle_val[1][1], offset);
-      }
-      // Block reduction
       int tid = threadIdx.x + threadIdx.y * blockDim.x;
       int nthreads = blockDim.x * blockDim.y;
-      int lane = tid % warpSize;
-      // if (lane < stride) {
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0], d_twiddle_val[0][0]);
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1], d_twiddle_val[0][1]);
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], d_twiddle_val[1][0]);
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], d_twiddle_val[1][1]);
-      // }
-      if (stride < nthreads) {
-        __syncthreads();
-        s_d_twiddle[tid] = 0;
-        s_d_twiddle[tid + ELEMENTARY_SIZE] = 0;
-        s_d_twiddle[tid + 2 * ELEMENTARY_SIZE] = 0;
-        s_d_twiddle[tid + 3 * ELEMENTARY_SIZE] = 0;
-        __syncthreads();
-        if (lane < stride) {
-          atomicAdd(&s_d_twiddle[twiddle_idx], d_twiddle_val[0][0]);
-          atomicAdd(&s_d_twiddle[twiddle_idx + ELEMENTARY_SIZE], d_twiddle_val[0][1]);
-          atomicAdd(&s_d_twiddle[twiddle_idx + 2 * ELEMENTARY_SIZE], d_twiddle_val[1][0]);
-          atomicAdd(&s_d_twiddle[twiddle_idx + 3 * ELEMENTARY_SIZE], d_twiddle_val[1][1]);
-        }
-        __syncthreads();
-        if (tid < stride) {
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0], s_d_twiddle[twiddle_idx]);
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1], s_d_twiddle[twiddle_idx + ELEMENTARY_SIZE]);
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], s_d_twiddle[twiddle_idx + 2 * ELEMENTARY_SIZE]);
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], s_d_twiddle[twiddle_idx + 3 * ELEMENTARY_SIZE]);
-        }
-      } else {
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0], d_twiddle_val[0][0]);
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1], d_twiddle_val[0][1]);
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], d_twiddle_val[1][0]);
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], d_twiddle_val[1][1]);
+      sum_strided_atomic(reinterpret_cast<scalar_t (&)[4]>(d_twiddle_val), (scalar_t *)s_d_twiddle, stride, nthreads, tid);
+      if (tid < stride) {
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0], s_d_twiddle[twiddle_idx]);
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1], s_d_twiddle[twiddle_idx + stride]);
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], s_d_twiddle[twiddle_idx + 2 * stride]);
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], s_d_twiddle[twiddle_idx + 3 * stride]);
       }
     }
     __syncthreads();
@@ -575,10 +569,10 @@ __global__ void butterfly_multiply_inplace_backward_cuda_kernel(const at::Packed
 
 template <typename scalar_t>
 __global__ void butterfly_multiply_inplace_backward_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                                               at::PackedTensorAccessor<double, 2> output_a,
-                                                                               at::PackedTensorAccessor<scalar_t, 3> d_twiddle_a,
-                                                                               at::PackedTensorAccessor<scalar_t, 2> d_input_a,
-                                                                               int stride) {
+                                                                        at::PackedTensorAccessor<double, 2> output_a,
+                                                                        at::PackedTensorAccessor<scalar_t, 3> d_twiddle_a,
+                                                                        at::PackedTensorAccessor<scalar_t, 2> d_input_a,
+                                                                        int stride) {
   const int batch_size = output_a.size(0);
   const int n = output_a.size(1);
   int twiddle_start_idx = stride - 1;
@@ -612,7 +606,7 @@ __global__ void butterfly_multiply_inplace_backward_onestep_cuda_kernel(const at
 }
 
 void butterfly_multiply_inplace_backward_cuda(const at::Tensor& grad, const at::Tensor& twiddle, at::Tensor& output,
-                                                     at::Tensor& d_twiddle, at::Tensor& d_input) {
+                                              at::Tensor& d_twiddle, at::Tensor& d_input) {
   const int batch_size = output.size(0);
   const int n = output.size(1);
   AT_DISPATCH_FLOATING_TYPES(grad.type(), "butterfly_multiply_inplace_backward_cuda", [&] {
@@ -657,8 +651,8 @@ void butterfly_multiply_inplace_backward_cuda(const at::Tensor& grad, const at::
 
 template <typename scalar_t>
 __global__ void butterfly_multiply_intermediate_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                                   at::PackedTensorAccessor<scalar_t, 3> output_a,
-                                                                   int max_log_stride) {
+                                                            at::PackedTensorAccessor<scalar_t, 3> output_a,
+                                                            int max_log_stride) {
   const int batch_size = output_a.size(1);
   const int max_stride = 1 << max_log_stride;
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
@@ -696,8 +690,8 @@ __global__ void butterfly_multiply_intermediate_cuda_kernel(const at::PackedTens
 
 template <typename scalar_t>
 __global__ void butterfly_multiply_intermediate_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> twiddle_a,
-                                                                           at::PackedTensorAccessor<scalar_t, 4> output_a,
-                                                                           int max_log_stride) {
+                                                                    at::PackedTensorAccessor<scalar_t, 4> output_a,
+                                                                    int max_log_stride) {
   using complex_t = thrust::complex<scalar_t>;
   const int batch_size = output_a.size(1);
   const int max_stride = 1 << max_log_stride;
@@ -742,8 +736,8 @@ __global__ void butterfly_multiply_intermediate_complex_cuda_kernel(const at::Pa
 
 template <typename scalar_t>
 __global__ void butterfly_multiply_intermediate_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                                           at::PackedTensorAccessor<scalar_t, 3> output_a,
-                                                                           int log_stride) {
+                                                                    at::PackedTensorAccessor<scalar_t, 3> output_a,
+                                                                    int log_stride) {
   const int batch_size = output_a.size(1);
   const int stride = 1 << log_stride;
   int twiddle_start_idx = stride - 1;
@@ -762,8 +756,8 @@ __global__ void butterfly_multiply_intermediate_onestep_cuda_kernel(const at::Pa
 
 template <typename scalar_t>
 __global__ void butterfly_multiply_intermediate_onestep_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> twiddle_a,
-                                                                                   at::PackedTensorAccessor<scalar_t, 4> output_a,
-                                                                                   int log_stride) {
+                                                                            at::PackedTensorAccessor<scalar_t, 4> output_a,
+                                                                            int log_stride) {
   using complex_t = thrust::complex<scalar_t>;
   const int batch_size = output_a.size(1);
   const int stride = 1 << log_stride;
@@ -839,17 +833,18 @@ void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor&
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void butterfly_multiply_intermediate_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                                            const at::PackedTensorAccessor<scalar_t, 3> output_a,
-                                                                            at::PackedTensorAccessor<scalar_t, 3> d_twiddle_a,
-                                                                            at::PackedTensorAccessor<scalar_t, 2> d_input_a,
-                                                                            int log_max_stride) {
+                                                                     const at::PackedTensorAccessor<scalar_t, 3> output_a,
+                                                                     at::PackedTensorAccessor<scalar_t, 3> d_twiddle_a,
+                                                                     at::PackedTensorAccessor<scalar_t, 2> d_input_a,
+                                                                     int log_max_stride) {
   const int batch_size = output_a.size(1);
   const int max_stride = 1 << log_max_stride;
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
   __shared__ scalar_t s_grad[ELEMENTARY_SIZE * 2];
   __shared__ accscalar_t s_twiddle[ELEMENTARY_SIZE][2][2];  // Use accscalar_t instead of scalar_t since we'll reuse the storage for s_d_twiddle
   // __shared__ scalar_t s_d_twiddle[ELEMENTARY_SIZE * 4];
-  accscalar_t* s_d_twiddle = &s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
+  // accscalar_t (* s_d_twiddle)[2][2] = (accscalar_t (*)[2][2])&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
+  accscalar_t* s_d_twiddle = (accscalar_t *)&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
   int64_t b = blockIdx.y * blockDim.y + threadIdx.y;
   if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
@@ -877,48 +872,14 @@ __global__ void butterfly_multiply_intermediate_backward_cuda_kernel(const at::P
       const scalar_t input_val[2] = {output_a[log_stride][b][input_base_idx + pos], output_a[log_stride][b][input_base_idx + pos + stride]};
       accscalar_t d_twiddle_val[2][2] = {{grad_val[0] * input_val[0], grad_val[0] * input_val[1]},
                                          {grad_val[1] * input_val[0], grad_val[1] * input_val[1]}};
-      // Warp reduction
-      for (int offset = warpSize / 2; offset >= stride; offset /= 2) {
-        d_twiddle_val[0][0] += __shfl_down_sync(FULL_MASK, d_twiddle_val[0][0], offset);
-        d_twiddle_val[0][1] += __shfl_down_sync(FULL_MASK, d_twiddle_val[0][1], offset);
-        d_twiddle_val[1][0] += __shfl_down_sync(FULL_MASK, d_twiddle_val[1][0], offset);
-        d_twiddle_val[1][1] += __shfl_down_sync(FULL_MASK, d_twiddle_val[1][1], offset);
-      }
-      // Block reduction
       int tid = threadIdx.x + threadIdx.y * blockDim.x;
       int nthreads = blockDim.x * blockDim.y;
-      int lane = tid % warpSize;
-      // if (lane < stride) {
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0], d_twiddle_val[0][0]);
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1], d_twiddle_val[0][1]);
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], d_twiddle_val[1][0]);
-      //   atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], d_twiddle_val[1][1]);
-      // }
-      if (stride < nthreads) {
-        __syncthreads();
-        s_d_twiddle[tid] = 0;
-        s_d_twiddle[tid + ELEMENTARY_SIZE] = 0;
-        s_d_twiddle[tid + 2 * ELEMENTARY_SIZE] = 0;
-        s_d_twiddle[tid + 3 * ELEMENTARY_SIZE] = 0;
-        __syncthreads();
-        if (lane < stride) {
-          atomicAdd(&s_d_twiddle[twiddle_idx], d_twiddle_val[0][0]);
-          atomicAdd(&s_d_twiddle[twiddle_idx + ELEMENTARY_SIZE], d_twiddle_val[0][1]);
-          atomicAdd(&s_d_twiddle[twiddle_idx + 2 * ELEMENTARY_SIZE], d_twiddle_val[1][0]);
-          atomicAdd(&s_d_twiddle[twiddle_idx + 3 * ELEMENTARY_SIZE], d_twiddle_val[1][1]);
-        }
-        __syncthreads();
-        if (tid < stride) {
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0], s_d_twiddle[twiddle_idx]);
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1], s_d_twiddle[twiddle_idx + ELEMENTARY_SIZE]);
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], s_d_twiddle[twiddle_idx + 2 * ELEMENTARY_SIZE]);
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], s_d_twiddle[twiddle_idx + 3 * ELEMENTARY_SIZE]);
-        }
-      } else {
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0], d_twiddle_val[0][0]);
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1], d_twiddle_val[0][1]);
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], d_twiddle_val[1][0]);
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], d_twiddle_val[1][1]);
+      sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, stride, nthreads, tid);
+      if (tid < stride) {
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0], s_d_twiddle[twiddle_idx]);
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1], s_d_twiddle[twiddle_idx + stride]);
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], s_d_twiddle[twiddle_idx + 2 * stride]);
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], s_d_twiddle[twiddle_idx + 3 * stride]);
       }
     }
     __syncthreads();
@@ -930,10 +891,10 @@ __global__ void butterfly_multiply_intermediate_backward_cuda_kernel(const at::P
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void butterfly_multiply_intermediate_backward_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> twiddle_a,
-                                                                                    const at::PackedTensorAccessor<scalar_t, 4> output_a,
-                                                                                    at::PackedTensorAccessor<scalar_t, 4> d_twiddle_a,
-                                                                                    at::PackedTensorAccessor<scalar_t, 3> d_input_a,
-                                                                                    int log_max_stride) {
+                                                                             const at::PackedTensorAccessor<scalar_t, 4> output_a,
+                                                                             at::PackedTensorAccessor<scalar_t, 4> d_twiddle_a,
+                                                                             at::PackedTensorAccessor<scalar_t, 3> d_input_a,
+                                                                             int log_max_stride) {
   using complex_t = thrust::complex<scalar_t>;
   using acccomplex_t = thrust::complex<accscalar_t>;
   const int batch_size = output_a.size(1);
@@ -946,7 +907,8 @@ __global__ void butterfly_multiply_intermediate_backward_complex_cuda_kernel(con
   __shared__ accscalar_t s_twiddle_storage[ELEMENTARY_SIZE][2][2][2];
   acccomplex_t (* s_twiddle)[2][2] = (acccomplex_t (*)[2][2])&s_twiddle_storage[0];  // To avoid warning about race-condition when initializing complex_t
   // __shared__ scalar_t s_d_twiddle[ELEMENTARY_SIZE * 4];
-  acccomplex_t * s_d_twiddle = &s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
+  // acccomplex_t (* s_d_twiddle)[2][2] = (acccomplex_t (*)[2][2])&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
+  acccomplex_t* s_d_twiddle = (acccomplex_t *)&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
   int64_t b = blockIdx.y * blockDim.y + threadIdx.y;
   if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
@@ -977,50 +939,18 @@ __global__ void butterfly_multiply_intermediate_backward_complex_cuda_kernel(con
       acccomplex_t d_twiddle_val[2][2] =
         {{grad_val[0] * thrust::conj(input_val[0]), grad_val[0] * thrust::conj(input_val[1])},
          {grad_val[1] * thrust::conj(input_val[0]), grad_val[1] * thrust::conj(input_val[1])}};
-      // Warp reduction
-      for (int offset = warpSize / 2; offset >= stride; offset /= 2) {
-        d_twiddle_val[0][0] += __shfl_down_sync(FULL_MASK, d_twiddle_val[0][0], offset);
-        d_twiddle_val[0][1] += __shfl_down_sync(FULL_MASK, d_twiddle_val[0][1], offset);
-        d_twiddle_val[1][0] += __shfl_down_sync(FULL_MASK, d_twiddle_val[1][0], offset);
-        d_twiddle_val[1][1] += __shfl_down_sync(FULL_MASK, d_twiddle_val[1][1], offset);
-      }
-      // Block reduction
       int tid = threadIdx.x + threadIdx.y * blockDim.x;
       int nthreads = blockDim.x * blockDim.y;
-      int lane = tid % warpSize;
-      if (stride < nthreads) {
-        __syncthreads();
-        s_d_twiddle[tid] = 0;
-        s_d_twiddle[tid + ELEMENTARY_SIZE] = 0;
-        s_d_twiddle[tid + 2 * ELEMENTARY_SIZE] = 0;
-        s_d_twiddle[tid + 3 * ELEMENTARY_SIZE] = 0;
-        __syncthreads();
-        if (lane < stride) {
-          atomicAdd(&s_d_twiddle[twiddle_idx], d_twiddle_val[0][0]);
-          atomicAdd(&s_d_twiddle[twiddle_idx + ELEMENTARY_SIZE], d_twiddle_val[0][1]);
-          atomicAdd(&s_d_twiddle[twiddle_idx + 2 * ELEMENTARY_SIZE], d_twiddle_val[1][0]);
-          atomicAdd(&s_d_twiddle[twiddle_idx + 3 * ELEMENTARY_SIZE], d_twiddle_val[1][1]);
-        }
-        __syncthreads();
-        if (tid < stride) {
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0][0], s_d_twiddle[twiddle_idx].real());
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0][1], s_d_twiddle[twiddle_idx].imag());
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1][0], s_d_twiddle[twiddle_idx + ELEMENTARY_SIZE].real());
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1][1], s_d_twiddle[twiddle_idx + ELEMENTARY_SIZE].imag());
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0][0], s_d_twiddle[twiddle_idx + 2 * ELEMENTARY_SIZE].real());
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0][1], s_d_twiddle[twiddle_idx + 2 * ELEMENTARY_SIZE].imag());
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1][0], s_d_twiddle[twiddle_idx + 3 * ELEMENTARY_SIZE].real());
-          atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1][1], s_d_twiddle[twiddle_idx + 3 * ELEMENTARY_SIZE].imag());
-        }
-      } else {
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0][0], d_twiddle_val[0][0].real());
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0][1], d_twiddle_val[0][0].imag());
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1][0], d_twiddle_val[0][1].real());
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1][1], d_twiddle_val[0][1].imag());
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0][0], d_twiddle_val[1][0].real());
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0][1], d_twiddle_val[1][0].imag());
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1][0], d_twiddle_val[1][1].real());
-        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1][1], d_twiddle_val[1][1].imag());
+      sum_strided_atomic(reinterpret_cast<acccomplex_t (&)[4]>(d_twiddle_val), s_d_twiddle, stride, nthreads, tid);
+      if (tid < stride) {
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0][0], s_d_twiddle[twiddle_idx].real());
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][0][1], s_d_twiddle[twiddle_idx].imag());
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1][0], s_d_twiddle[twiddle_idx + stride].real());
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][0][1][1], s_d_twiddle[twiddle_idx + stride].imag());
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0][0], s_d_twiddle[twiddle_idx + 2 * stride].real());
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0][1], s_d_twiddle[twiddle_idx + 2 * stride].imag());
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1][0], s_d_twiddle[twiddle_idx + 3 * stride].real());
+        atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1][1], s_d_twiddle[twiddle_idx + 3 * stride].imag());
       }
     }
     __syncthreads();
@@ -1033,10 +963,10 @@ __global__ void butterfly_multiply_intermediate_backward_complex_cuda_kernel(con
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void butterfly_multiply_intermediate_backward_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                                                    const at::PackedTensorAccessor<scalar_t, 3> output_a,
-                                                                                    at::PackedTensorAccessor<scalar_t, 3> d_twiddle_a,
-                                                                                    at::PackedTensorAccessor<scalar_t, 2> d_input_a,
-                                                                                    int log_stride) {
+                                                                             const at::PackedTensorAccessor<scalar_t, 3> output_a,
+                                                                             at::PackedTensorAccessor<scalar_t, 3> d_twiddle_a,
+                                                                             at::PackedTensorAccessor<scalar_t, 2> d_input_a,
+                                                                             int log_stride) {
   const int batch_size = output_a.size(1);
   const int n = output_a.size(2);
   int stride = 1 << log_stride;
@@ -1067,10 +997,10 @@ __global__ void butterfly_multiply_intermediate_backward_onestep_cuda_kernel(con
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void butterfly_multiply_intermediate_backward_onestep_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> twiddle_a,
-                                                                                            const at::PackedTensorAccessor<scalar_t, 4> output_a,
-                                                                                            at::PackedTensorAccessor<scalar_t, 4> d_twiddle_a,
-                                                                                            at::PackedTensorAccessor<scalar_t, 3> d_input_a,
-                                                                                            int log_stride) {
+                                                                                     const at::PackedTensorAccessor<scalar_t, 4> output_a,
+                                                                                     at::PackedTensorAccessor<scalar_t, 4> d_twiddle_a,
+                                                                                     at::PackedTensorAccessor<scalar_t, 3> d_input_a,
+                                                                                     int log_stride) {
   using complex_t = thrust::complex<scalar_t>;
   using acccomplex_t = thrust::complex<accscalar_t>;
   const int batch_size = output_a.size(1);
@@ -1117,7 +1047,7 @@ __global__ void butterfly_multiply_intermediate_backward_onestep_complex_cuda_ke
 }
 
 void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, const at::Tensor& output,
-                                                          at::Tensor& d_twiddle, at::Tensor& d_input) {
+                                                   at::Tensor& d_twiddle, at::Tensor& d_input) {
   const int batch_size = output.size(1);
   const int n = output.size(2);
   const int log_n = int(log2((double) n));

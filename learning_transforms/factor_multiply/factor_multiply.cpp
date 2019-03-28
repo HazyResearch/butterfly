@@ -876,10 +876,10 @@ std::vector<at::Tensor> permutation_factor_reverse_multiply_backward(const at::T
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_factor_multiply", &butterfly_factor_multiply, "Butterfly factor multiply forward");
   m.def("butterfly_factor_multiply_backward", &butterfly_factor_multiply_backward, "Butterfly factor multiply backward");
-  m.def("butterfly_factor_multiply_inplace", &butterfly_factor_multiply_inplace, "Butterfly factor multiply inplace forward");
-  m.def("butterfly_factor_multiply_inplace_backward", &butterfly_factor_multiply_inplace_backward, "Butterfly factor multiply inplace backward");
-  m.def("butterfly_factor_multiply_intermediate", &butterfly_factor_multiply_intermediate, "Butterfly factor multiply intermediate forward");
-  m.def("butterfly_factor_multiply_intermediate_backward", &butterfly_factor_multiply_intermediate_backward, "Butterfly factor multiply intermediate backward");
+  m.def("butterfly_multiply_inplace", &butterfly_multiply_inplace, "Butterfly factor multiply inplace forward");
+  m.def("butterfly_multiply_inplace_backward", &butterfly_multiply_inplace_backward, "Butterfly factor multiply inplace backward");
+  m.def("butterfly_multiply_intermediate", &butterfly_multiply_intermediate, "Butterfly factor multiply intermediate forward");
+  m.def("butterfly_multiply_intermediate_backward", &butterfly_multiply_intermediate_backward, "Butterfly factor multiply intermediate backward");
   m.def("permutation_factor_even_odd_multiply", &permutation_factor_even_odd_multiply, "Permutation factor (even odd) multiply forward");
   m.def("permutation_factor_even_odd_multiply_backward", &permutation_factor_even_odd_multiply_backward, "Permutation factor (even odd) multiply backward");
   m.def("permutation_factor_reverse_multiply", &permutation_factor_reverse_multiply, "Permutation factor (reverse) multiply forward");
