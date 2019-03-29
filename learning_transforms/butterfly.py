@@ -312,7 +312,7 @@ class Block2x2DiagProductAllinOne(nn.Module):
                     c, s = torch.cos(theta), torch.sin(theta)
                     det = torch.randint(0, 2, (size - 1, ), dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
                     self.twiddle = nn.Parameter(torch.stack((torch.stack((det * c, -det * s), dim=-1),
-                                                             torch.stack((s, c), dim=-1))), dim=-1)
+                                                             torch.stack((s, c), dim=-1)), dim=-1))
                 else:
                     # Sampling from the Haar measure on U(2) is a bit subtle.
                     # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
