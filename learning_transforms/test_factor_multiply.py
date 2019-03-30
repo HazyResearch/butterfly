@@ -139,15 +139,15 @@ class ButterflyFactorTest(unittest.TestCase):
         n = 4096
         B = Block2x2DiagProduct(n)
         input_ = torch.randn(batch_size, n, requires_grad=True)
-        twiddle = twiddle_list_concat(B)
+        twiddle = twiddle_list_concat(B).unsqueeze(0)
         output_intermediate = butterfly_multiply_intermediate(twiddle, input_)
         output = [input_]
         for factor in B.factors[::-1]:
             output.append(butterfly_factor_mult(factor.ABCD, output[-1].view(-1, 2, factor.size // 2)).view(output[-1].shape))
         output = torch.stack(output)
-        self.assertTrue(torch.allclose(output_intermediate, output, rtol=self.rtol, atol=self.atol), (output_intermediate - output).abs().max().item())
+        self.assertTrue(torch.allclose(output_intermediate.squeeze(2), output, rtol=self.rtol, atol=self.atol), (output_intermediate.squeeze(2) - output).abs().max().item())
         grad = torch.randn_like(output[-1])
-        d_twiddle_intermediate, d_input_intermediate = butterfly_multiply_intermediate_backward(grad, twiddle, output_intermediate)
+        d_twiddle_intermediate, d_input_intermediate = butterfly_multiply_intermediate_backward(grad.unsqueeze(1), twiddle, output_intermediate)
         output[-1].backward(grad, retain_graph=True)
         d_input = input_.grad
         d_twiddle = torch.cat([factor.ABCD.grad.permute(2, 0, 1) for factor in B.factors[::-1]])
@@ -159,15 +159,15 @@ class ButterflyFactorTest(unittest.TestCase):
         n = 4096
         B = Block2x2DiagProduct(n, complex=True)
         input_ = torch.randn(batch_size, n, 2, requires_grad=True)
-        twiddle = twiddle_list_concat(B)
+        twiddle = twiddle_list_concat(B).unsqueeze(0)
         output_intermediate = butterfly_multiply_intermediate(twiddle, input_)
         output = [input_]
         for factor in B.factors[::-1]:
             output.append(butterfly_factor_mult(factor.ABCD, output[-1].view(-1, 2, factor.size // 2, 2)).view(output[-1].shape))
         output = torch.stack(output)
-        self.assertTrue(torch.allclose(output_intermediate, output, rtol=self.rtol, atol=self.atol), (output_intermediate - output).abs().max().item())
+        self.assertTrue(torch.allclose(output_intermediate.squeeze(2), output, rtol=self.rtol, atol=self.atol), (output_intermediate.squeeze(2) - output).abs().max().item())
         grad = torch.randn_like(output[-1])
-        d_twiddle_intermediate, d_input_intermediate = butterfly_multiply_intermediate_backward(grad, twiddle, output_intermediate)
+        d_twiddle_intermediate, d_input_intermediate = butterfly_multiply_intermediate_backward(grad.unsqueeze(1), twiddle, output_intermediate)
         output[-1].backward(grad, retain_graph=True)
         d_input = input_.grad
         d_twiddle = torch.cat([factor.ABCD.grad.permute(2, 0, 1, 3) for factor in B.factors[::-1]])
@@ -180,15 +180,15 @@ class ButterflyFactorTest(unittest.TestCase):
         n = 4096
         B = Block2x2DiagProduct(n).to('cuda')
         input_ = torch.randn(batch_size, n, device='cuda', requires_grad=True)
-        twiddle = twiddle_list_concat(B)
+        twiddle = twiddle_list_concat(B).unsqueeze(0)
         output_intermediate = butterfly_multiply_intermediate(twiddle, input_)
         output = [input_]
         for factor in B.factors[::-1]:
             output.append(butterfly_factor_mult(factor.ABCD, output[-1].view(-1, 2, factor.size // 2)).view(output[-1].shape))
         output = torch.stack(output)
-        self.assertTrue(torch.allclose(output_intermediate, output, rtol=self.rtol, atol=self.atol), (output_intermediate - output).abs().max().item())
+        self.assertTrue(torch.allclose(output_intermediate.squeeze(2), output, rtol=self.rtol, atol=self.atol), (output_intermediate.squeeze(2) - output).abs().max().item())
         grad = torch.randn_like(output[-1])
-        d_twiddle_intermediate, d_input_intermediate = butterfly_multiply_intermediate_backward(grad, twiddle, output_intermediate)
+        d_twiddle_intermediate, d_input_intermediate = butterfly_multiply_intermediate_backward(grad.unsqueeze(1), twiddle, output_intermediate)
         output[-1].backward(grad, retain_graph=True)
         d_input = input_.grad
         d_twiddle = torch.cat([factor.ABCD.grad.permute(2, 0, 1) for factor in B.factors[::-1]])
@@ -201,15 +201,15 @@ class ButterflyFactorTest(unittest.TestCase):
         n = 4096
         B = Block2x2DiagProduct(n, complex=True).to('cuda')
         input_ = torch.randn(batch_size, n, 2, device='cuda', requires_grad=True)
-        twiddle = twiddle_list_concat(B)
+        twiddle = twiddle_list_concat(B).unsqueeze(0)
         output_intermediate = butterfly_multiply_intermediate(twiddle, input_)
         output = [input_]
         for factor in B.factors[::-1]:
             output.append(butterfly_factor_mult(factor.ABCD, output[-1].view(-1, 2, factor.size // 2, 2)).view(output[-1].shape))
         output = torch.stack(output)
-        self.assertTrue(torch.allclose(output_intermediate, output, rtol=self.rtol, atol=self.atol), (output_intermediate - output).abs().max().item())
+        self.assertTrue(torch.allclose(output_intermediate.squeeze(2), output, rtol=self.rtol, atol=self.atol), (output_intermediate.squeeze(2) - output).abs().max().item())
         grad = torch.randn_like(output[-1])
-        d_twiddle_intermediate, d_input_intermediate = butterfly_multiply_intermediate_backward(grad, twiddle, output_intermediate)
+        d_twiddle_intermediate, d_input_intermediate = butterfly_multiply_intermediate_backward(grad.unsqueeze(1), twiddle, output_intermediate)
         output[-1].backward(grad, retain_graph=True)
         d_input = input_.grad
         d_twiddle = torch.cat([factor.ABCD.grad.permute(2, 0, 1, 3) for factor in B.factors[::-1]])
