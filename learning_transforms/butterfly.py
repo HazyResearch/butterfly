@@ -337,7 +337,8 @@ class Block2x2DiagProductAllinOne(nn.Module):
         Return:
             output: (batch, rank * size) if real or (batch, rank * size, 2) if complex
         """
-        return butterfly_factor_mult_intermediate(self.twiddle, input).view(input.shape[0], self.rank * input.shape[1])
+        output_shape = (input.shape[0], self.rank * input.shape[1]) if self.real else (input.shape[0], self.rank * input.shape[1], 2)
+        return butterfly_factor_mult_intermediate(self.twiddle, input).view(output_shape)
 
 
 class Block2x2DiagRectangular(nn.Module):

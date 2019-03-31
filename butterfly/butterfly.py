@@ -3,8 +3,8 @@ import math
 import torch
 from torch import nn
 
-from complex_utils import complex_mul
-from utils import bitreversal_permutation
+from .complex_utils import complex_mul
+from .utils import bitreversal_permutation
 
 
 class ButterflyFactor(nn.Module):

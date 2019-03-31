@@ -13,7 +13,7 @@ DCT, DST, and dense matrix-vector multiply, and `speed_plot.py` plots the result
 
 To compile Cython extension: `python setup.py build_ext --inplace`
 
-To compile C++ extension for Pytorch:
+To compile and install C++ extension for Pytorch:
 ```
 cd factor_multiply
 python setup.py install

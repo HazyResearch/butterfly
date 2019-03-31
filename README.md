@@ -13,7 +13,7 @@ that are needed for this use.
 
 For training, we've had better results with the Adam optimizer than SGD.
 
-* The directory `learning_transforms` contains code to learning the transforms
+* The directory `learning_transforms` contains code to learn the transforms
   as presented in the paper. This directory is presently being developed and
   refactored.
 
