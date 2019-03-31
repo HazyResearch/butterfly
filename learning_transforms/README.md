@@ -15,7 +15,6 @@ To compile Cython extension: `python setup.py build_ext --inplace`
 
 To compile C++ extension for Pytorch:
 ```
-cd butterfly_factor_multiply
-python setup.py build_ext --inplace
-ln -s butterfly_factor_multiply.*.so ../
+cd factor_multiply
+python setup.py install
 ```
