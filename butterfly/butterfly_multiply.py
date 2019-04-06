@@ -38,7 +38,7 @@ def butterfly_mult_torch(twiddle, input, return_intermediate=False):
             output_reshape = output.view(batch_size, nstack, n // (2 * stride), 1, 2, stride)
             output = (t.unsqueeze(1) * output_reshape).sum(dim=4)
             intermediates.append(output)
-        return output.view(batch_size, nstack, n) if not return_intermediate else torch.stack(intermediates).view(m + 1, batch_size, nstack, n)
+        return output.view(batch_size, nstack, n) if not return_intermediate else torch.stack([intermediate.view(batch_size, nstack, n) for intermediate in intermediates])
     else:  # complex
         output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n, 2)
         intermediates = [output]
@@ -48,7 +48,7 @@ def butterfly_mult_torch(twiddle, input, return_intermediate=False):
             output_reshape = output.view(batch_size, nstack, n // (2 * stride), 1, 2, stride, 2)
             output = complex_mul(t.unsqueeze(1), output_reshape).sum(dim=4)
             intermediates.append(output)
-        return output.view(batch_size, nstack, n, 2) if not return_intermediate else torch.stack(intermediates).view(m + 1, batch_size, nstack, n, 2)
+        return output.view(batch_size, nstack, n, 2) if not return_intermediate else torch.stack([intermediate.view(batch_size, nstack, n, 2) for intermediate in intermediates])
 
 
 class ButterflyMult(torch.autograd.Function):

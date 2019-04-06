@@ -18,7 +18,7 @@ class ButterflyMultTest(unittest.TestCase):
         batch_size = 10
         n = 4096
         nstack = 2
-        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True) / 2
+        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True) / math.sqrt(2)
         input = torch.randn(batch_size, n, requires_grad=True)
         output = butterfly_mult(twiddle, input)
         output_torch = butterfly_mult_torch(twiddle, input)
@@ -38,7 +38,7 @@ class ButterflyMultTest(unittest.TestCase):
         batch_size = 10
         n = 4096
         nstack = 2
-        twiddle = torch.randn(nstack, n - 1, 2, 2, 2, requires_grad=True) / math.sqrt(2)
+        twiddle = torch.randn(nstack, n - 1, 2, 2, 2, requires_grad=True) / 2
         input = torch.randn(batch_size, n, 2, requires_grad=True)
         output = butterfly_mult(twiddle, input)
         output_torch = butterfly_mult_torch(twiddle, input)
@@ -58,7 +58,7 @@ class ButterflyMultTest(unittest.TestCase):
         batch_size = 10
         n = 4096
         nstack = 2
-        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True, device='cuda') / 2
+        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True, device='cuda') / math.sqrt(2)
         input = torch.randn(batch_size, n, requires_grad=True, device=twiddle.device)
         output = butterfly_mult(twiddle, input)
         output_torch = butterfly_mult_torch(twiddle, input)
@@ -73,13 +73,13 @@ class ButterflyMultTest(unittest.TestCase):
         self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
                         ((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item())
 
-    @unittest.skip("Not numerically stable for some reason, idk")
+    # @unittest.skip("Not numerically stable for some reason, idk")
     @unittest.skipIf(not torch.cuda.is_available(), "need CUDA")
     def test_butterfly_complex_cuda(self):
         batch_size = 10
         n = 4096
         nstack = 2
-        twiddle = torch.randn(nstack, n - 1, 2, 2, 2, requires_grad=True, device='cuda') / math.sqrt(2)
+        twiddle = torch.randn(nstack, n - 1, 2, 2, 2, requires_grad=True, device='cuda') / 2
         input = torch.randn(batch_size, n, 2, requires_grad=True, device=twiddle.device)
         output = butterfly_mult(twiddle, input)
         output_torch = butterfly_mult_torch(twiddle, input)
@@ -100,7 +100,7 @@ class ButterflyMultTest(unittest.TestCase):
         n = 4096
         # TODO: in-place implementation doesn't support nstack for now
         nstack = 1
-        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True) / 2
+        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True) / math.sqrt(2)
         input = torch.randn(batch_size, n, requires_grad=True)
         output_inplace = butterfly_mult_inplace(twiddle.squeeze(0), input)
         output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
@@ -121,7 +121,7 @@ class ButterflyMultTest(unittest.TestCase):
         n = 4096
         # TODO: in-place implementation doesn't support nstack for now
         nstack = 1
-        twiddle = torch.randn(nstack, n - 1, 2, 2, 2, requires_grad=True) / math.sqrt(2)
+        twiddle = torch.randn(nstack, n - 1, 2, 2, 2, requires_grad=True) / 2
         input = torch.randn(batch_size, n, 2, requires_grad=True)
         output_inplace = butterfly_mult_inplace(twiddle.squeeze(0), input)
         output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
@@ -135,7 +135,7 @@ class ButterflyMultTest(unittest.TestCase):
         n = 4096
         # TODO: in-place implementation doesn't support nstack for now
         nstack = 1
-        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True, device='cuda') / 2
+        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True, device='cuda') / math.sqrt(2)
         input = torch.randn(batch_size, n, requires_grad=True, device=twiddle.device)
         output_inplace = butterfly_mult_inplace(twiddle.squeeze(0), input)
         output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
