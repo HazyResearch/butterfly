@@ -908,6 +908,7 @@ at::Tensor permutation_factor_reverse_multiply(const at::Tensor& p, const at::Te
          p input + (1 - p) input_reversed: (batch_size, n) if real or (batch_size, n, 2) if complex
   */
   auto output = torch::empty_like(input);
+  AT_CHECK(input.size(1) > 2, "permutation_factor_reverse_multiply: n must be bigger than 2");
   if (input.is_cuda()) {
     AT_CHECK(p.is_cuda(), "permutation_factor_reverse_multiply: Expected p to be CUDA tensor");
     permutation_factor_reverse_multiply_cuda(p, input, output);
@@ -983,6 +984,7 @@ std::vector<at::Tensor> permutation_factor_reverse_multiply_backward(const at::T
   */
   const auto batch_size = grad.size(0);
   const auto n = grad.size(1);
+  AT_CHECK(n > 2, "permutation_factor_reverse_multiply_backward: n must be bigger than 2");
   auto d_input = torch::empty_like(input);
   if (input.is_cuda()) {
     AT_CHECK(grad.is_cuda() && p.is_cuda(), "permutation_factor_reverse_multiply_backward: Expected grad and p to be CUDA tensor");
@@ -1028,8 +1030,8 @@ std::vector<at::Tensor> permutation_factor_reverse_multiply_backward(const at::T
       case 3: // complex
         {
           const auto input_folded = input.reshape({batch_size, 2, n / 2, 2});
-          const auto grad_folded = grad.reshape({batch_size, n / 2, 2, 2});
-          d_input = d_input.view({batch_size, n/ 2, 2, 2});
+          const auto grad_folded = grad.reshape({batch_size, 2, n / 2, 2});
+          d_input = d_input.view({batch_size, 2, n / 2, 2});
           // Accessors
           const auto input_a = input_folded.accessor<scalar_t, 4>();
           const auto grad_a = grad_folded.accessor<scalar_t, 4>();
