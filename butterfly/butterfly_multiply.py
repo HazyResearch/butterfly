@@ -7,8 +7,9 @@ from .complex_utils import complex_mul
 
 use_extension = True
 try:
-    from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
     from factor_multiply import butterfly_multiply_intermediate, butterfly_multiply_intermediate_backward
+    from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
+    from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
 except:
     use_extension = False
     import warnings
@@ -107,3 +108,66 @@ class ButterflyMultInplace(torch.autograd.Function):
         return d_coefficients, d_input
 
 butterfly_mult_inplace = ButterflyMultInplace.apply
+
+
+class ButterflyFactorMult(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, twiddle, input):
+        """Multiply by a single factor.
+        Parameters:
+            twiddle: (2, 2, n) if real or (2, 2, n, 2) if complex
+            input: (batch_size, 2, n) if real or (batch_size, 2, n, 2) if complex
+        Returns:
+            output: (batch_size, 2, n) if real or (batch_size, 2, n, 2) if complex
+        """
+        ctx.save_for_backward(twiddle, input)
+        return butterfly_factor_multiply(twiddle, input)
+
+    @staticmethod
+    def backward(ctx, grad):
+        """
+        Parameters:
+            grad: (batch_size, 2, n) if real or (batch_size, 2, n, 2) if complex
+        Returns:
+            d_twiddle: (2, 2, n) if real or (2, 2, n, 2) if complex
+            d_input: (batch_size, 2, n) if real or (batch_size, 2, n, 2) if complex
+        """
+        twiddle, input = ctx.saved_tensors
+        d_twiddle, d_input = butterfly_factor_multiply_backward(grad, twiddle, input)
+        return d_twiddle, d_input
+
+butterfly_factor_mult = ButterflyFactorMult.apply
+
+
+def butterfly_mult_factors(twiddle, input, return_intermediate=False):
+    """Implementation that have separate kernels for each factor, for debugging.
+    Parameters:
+        twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
+        input: (batch_size, n) if real or (batch_size, n, 2) if complex
+        return_intermediates: whether to return all the intermediate values computed, for debugging
+    Returns:
+        output: (batch_size, n) if real or (batch_size, n, 2) if complex
+    """
+    batch_size, n = input.shape[:2]
+    m = int(math.log2(n))
+    assert n == 1 << m, "size must be a power of 2"
+    assert twiddle.shape == (n - 1, 2, 2) if input.dim() == 2 else (n - 1, 2, 2, 2)
+    output = input.contiguous()
+    intermediates = [output]
+    if input.dim() == 2:  # real
+        for log_stride in range(m):
+            stride = 1 << log_stride
+            t = twiddle[(stride - 1):(2 * stride - 1)].permute(1, 2, 0)  # shape (2, 2, stride)
+            output_reshape = output.view(batch_size * n // (2 * stride), 2, stride)
+            output = butterfly_factor_mult(t, output_reshape)
+            intermediates.append(output)
+        return output.view(batch_size, n) if not return_intermediate else torch.stack([intermediate.view(batch_size, n) for intermediate in intermediates])
+    else:  # complex
+        for log_stride in range(m):
+            stride = 1 << log_stride
+            t = twiddle[(stride - 1):(2 * stride - 1)].permute(1, 2, 0, 3)  # shape (2, 2, stride, 2)
+            output_reshape = output.view(batch_size * n // (2 * stride), 2, stride, 2)
+            output = butterfly_factor_mult(t, output_reshape)
+            intermediates.append(output)
+        return output.view(batch_size, n, 2) if not return_intermediate else torch.stack([intermediate.view(batch_size, n, 2) for intermediate in intermediates])
