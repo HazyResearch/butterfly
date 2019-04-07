@@ -3,139 +3,100 @@ import math
 import torch
 from torch import nn
 
-from .complex_utils import complex_mul
-from .utils import bitreversal_permutation
-
-
-class ButterflyFactor(nn.Module):
-    """Block matrix of size k n x k n of the form [[A, B], [C, D]] where each of A, B,
-    C, D are diagonal. This means that only the diagonal and the n//2-th
-    subdiagonal and superdiagonal are nonzero.
-    """
-
-    def __init__(self, size, stack=1, complex=False, ABCD=None, n_blocks=1, tied_weight=True):
-        """
-        Parameters:
-            size: input has shape (stack, ..., size)
-            stack: number of stacked components, output has shape (stack, ..., size)
-            complex: real or complex matrix
-            ABCD: block of [[A, B], [C, D]], of shape (stack, 2, 2, size//2) if real or (stack, 2, 2, size//2, 2) if complex
-            n_blocks: number of such blocks of ABCD
-            tied_weight: whether the weights ABCD at different blocks are tied to be the same.
-        """
-        super().__init__()
-        assert size % 2 == 0, 'size must be even'
-        self.size = size
-        self.stack = stack
-        self.complex = complex
-        self.n_blocks = n_blocks
-        self.tied_weight = tied_weight
-        if tied_weight:
-            ABCD_shape = (stack, 2, 2, size // 2) if not complex else (stack, 2, 2, size // 2, 2)
-        else:
-            ABCD_shape = (stack, n_blocks, 2, 2, size // 2) if not complex else (stack, n_blocks, 2, 2, size // 2, 2)
-        scaling = 1.0 / 2 if complex else 1.0 / math.sqrt(2)
-        if ABCD is None:
-            self.ABCD = nn.Parameter(torch.randn(ABCD_shape) * scaling)
-        else:
-            assert ABCD.shape == ABCD_shape, f'ABCD must have shape {ABCD_shape}'
-            self.ABCD = ABCD
-
-    def forward(self, input):
-        """
-        Parameters:
-            input: (stack, ..., size) if real or (stack, ..., size, 2) if complex
-            if not tied_weight: (stack, n_blocks, ..., size) if real or (stack, n_blocks, ..., size, 2) if complex
-        Return:
-            output: (stack, ..., size) if real or (stack, ..., size, 2) if complex
-            if not tied_weight: (stack, n_blocks, ..., size) if real or (stack, n_blocks, ..., size, 2) if complex
-        """
-        if self.tied_weight:
-            if not self.complex:
-                return (self.ABCD.unsqueeze(1) * input.view(self.stack, -1, 1, 2, self.size // 2)).sum(dim=-2).view(input.shape)
-            else:
-                return complex_mul(self.ABCD.unsqueeze(1), input.view(self.stack, -1, 1, 2, self.size // 2, 2)).sum(dim=-3).view(input.shape)
-        else:
-            if not self.complex:
-                return (self.ABCD.unsqueeze(2) * input.view(self.stack, self.n_blocks, -1, 1, 2, self.size // 2)).sum(dim=-2).view(input.shape)
-            else:
-                return complex_mul(self.ABCD.unsqueeze(2), input.view(self.stack, self.n_blocks, -1, 1, 2, self.size // 2, 2)).sum(dim=-3).view(input.shape)
+from .butterfly_multiply import butterfly_mult, butterfly_mult_untied
 
 
 class Butterfly(nn.Module):
-    """Product of block 2x2 diagonal matrices.
+    """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
+    Compatible with torch.nn.Linear.
+
+    Parameters:
+        in_size: size of input
+        out_size: size of output
+        bias: If set to False, the layer will not learn an additive bias.
+                Default: ``True``
+        complex: whether complex or real
+        tied_weight: whether the weights in the butterfly factors are tied.
+            If True, will have 4N parameters, else will have 2 N log N parameters (not counting bias)
+        ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
     """
 
-    def __init__(self, in_size, out_size, complex=False, decreasing_size=True, tied_weight=True, bias=True):
+    def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True, ortho_init=False):
         super().__init__()
         self.in_size = in_size
         m = int(math.ceil(math.log2(in_size)))
-        self.in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
+        size = self.in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
         self.out_size = out_size
-        self.stack = int(math.ceil(out_size / self.in_size_extended))
+        self.nstack = int(math.ceil(out_size / self.in_size_extended))
         self.complex = complex
         self.tied_weight = tied_weight
-        in_sizes = [self.in_size_extended >> i for i in range(m)] if decreasing_size else [self.in_size_extended >> i for i in range(m)[::-1]]
-        if tied_weight:
-            self.factors = nn.ModuleList([ButterflyFactor(in_size_, stack=self.stack, complex=complex)
-                                          for in_size_ in in_sizes])
+        self.ortho_init = ortho_init
+        twiddle_core_shape = (self.nstack, size - 1) if tied_weight else (self.nstack, m, size // 2)
+        if not ortho_init:
+            twiddle_shape = twiddle_core_shape + ((2, 2) if not complex else (2, 2, 2))
+            scaling = 1.0 / 2 if complex else 1.0 / math.sqrt(2)
+            self.twiddle = nn.Parameter(torch.randn(twiddle_shape) * scaling)
         else:
-            self.factors = nn.ModuleList([ButterflyFactor(in_size_, stack=self.stack, complex=complex, n_blocks=self.in_size_extended // in_size_, tied_weight=tied_weight)
-                                          for in_size_ in in_sizes])
-        if bias:
-            if not self.complex:
-                self.bias = nn.Parameter(torch.Tensor(out_size))
+            if not complex:
+                theta = torch.rand(twiddle_core_shape) * math.pi * 2
+                c, s = torch.cos(theta), torch.sin(theta)
+                det = torch.randint(0, 2, (twiddle_core_shape), dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
+                self.twiddle = nn.Parameter(torch.stack((torch.stack((det * c, -det * s), dim=-1),
+                                                         torch.stack((s, c), dim=-1)), dim=-1))
             else:
-                self.bias = nn.Parameter(torch.Tensor(out_size, 2))
+                # Sampling from the Haar measure on U(2) is a bit subtle.
+                # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
+                phi = torch.asin(torch.sqrt(torch.rand(twiddle_core_shape)))
+                c, s = torch.cos(phi), torch.sin(phi)
+                alpha, psi, chi = torch.randn((3, ) + twiddle_core_shape) * math.pi * 2
+                A = torch.stack((c * torch.cos(alpha + psi), c * torch.sin(alpha + psi)), dim=-1)
+                B = torch.stack((s * torch.cos(alpha + chi), s * torch.sin(alpha + chi)), dim=-1)
+                C = torch.stack((-s * torch.cos(alpha - chi), -s * torch.sin(alpha - chi)), dim=-1)
+                D = torch.stack((c * torch.cos(alpha - psi), c * torch.sin(alpha - psi)), dim=-1)
+                self.twiddle = nn.Parameter(torch.stack((torch.stack((A, B), dim=-2),
+                                                         torch.stack((C, D), dim=-2)), dim=-2))
+        if bias:
+            bias_shape = (out_size, ) if not complex else (out_size, 2)
+            self.bias = nn.Parameter(torch.Tensor(bias_shape))
+        else:
+            self.register_parameter('bias', None)
         self.reset_parameters()
 
     def reset_parameters(self):
         """Initialize bias the same way as torch.nn.Linear."""
-        if hasattr(self, 'bias'):
+        if self.bias is not None:
             bound = 1 / math.sqrt(self.in_size)
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input):
         """
         Parameters:
-            input: (..., in_size) if real or (..., in_size, 2) if complex
+            input: (batch, in_size) if real or (batch, in_size, 2) if complex
         Return:
-            output: (..., out_size) if real or (..., out_size, 2) if complex
+            output: (batch, out_size) if real or (batch, out_size, 2) if complex
         """
-        output = input.contiguous()
+        batch = input.shape[0]
+        output = input
         if self.in_size != self.in_size_extended:  # Zero-pad
+            padded_shape = (batch, self.in_size_extended - self.in_size) + (() if not self.complex else (2, ))
+            output = torch.cat((output, torch.zeros(padded_shape, dtype=output.dtype, device=output.device)),
+                               dim=-1 if not self.complex else -2)
+        output = butterfly_mult(self.twiddle, output) if self.tied_weight else butterfly_mult_untied(self.twiddle, output)
+        output = output.view((batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
+        out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
+        if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
             if not self.complex:
-                output = torch.cat((output, torch.zeros(output.shape[:-1] + (self.in_size_extended - self.in_size, ), dtype=output.dtype, device=output.device)), dim=-1)
+                output = output.view(batch, self.in_size_extended // out_size_extended, out_size_extended).mean(dim=1)
             else:
-                output = torch.cat((output, torch.zeros(output.shape[:-2] + (self.in_size_extended - self.in_size, 2), dtype=output.dtype, device=output.device)), dim=-2)
-        output = output.unsqueeze(0).expand((self.stack, ) + output.shape)
-        for factor in self.factors[::-1]:
-            if not self.complex:
-                output = factor(output.view(output.shape[:-1] + (-1, factor.size))).view(output.shape)
-            else:
-                output = factor(output.view(output.shape[:-2] + (-1, factor.size, 2))).view(output.shape)
-        if not self.complex:
-            output = output.permute(tuple(range(1, output.dim() - 1)) + (0, -1)).reshape(input.shape[:-1] + (self.stack * self.in_size_extended, ))[..., :self.out_size]
-        else:
-            output = output.permute(tuple(range(1, output.dim() - 2)) + (0, -2, -1)).reshape(input.shape[:-2] + (self.stack * self.in_size_extended, 2))[..., :self.out_size, :]
-        if hasattr(self, 'bias'):
-            output += self.bias
-        return output
+                output = output.view(batch, self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=1)
+        if self.out_size != out_size_extended:  # Take top rows
+            output = output[:, :self.out_size]
+        return output if self.bias is None else output + self.bias
 
-
-def test_buttefly_factor():
-    batch_size = 3
-    size = 8
-    stack = 2
-    model = ButterflyFactor(size, stack=stack)
-    input = torch.randn((stack, batch_size, size))
-    output = model(input)
-    assert output.shape == (stack, batch_size, size)
-    model = ButterflyFactor(size, stack=stack, complex=True)
-    input = torch.randn((stack, batch_size, size, 2))
-    output = model(input)
-    assert output.shape == (stack, batch_size, size, 2)
-
+    def extra_repr(self):
+        return 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, ortho_init={}'.format(
+            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.ortho_init
+        )
 
 def test_butterfly():
     batch_size = 3
