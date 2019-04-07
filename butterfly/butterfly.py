@@ -98,39 +98,3 @@ class Butterfly(nn.Module):
             self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.ortho_init
         )
 
-def test_butterfly():
-    batch_size = 3
-    in_size = 7
-    out_size = 15
-    model = Butterfly(in_size, out_size)
-    input = torch.randn((batch_size, in_size))
-    output = model(input)
-    assert output.shape == (batch_size, out_size)
-    model = Butterfly(in_size, out_size, complex=True)
-    input = torch.randn((batch_size, in_size, 2))
-    output = model(input)
-    assert output.shape == (batch_size, out_size, 2)
-
-
-def test_butterfly_tied_weight():
-    batch_size = 3
-    in_size = 7
-    out_size = 15
-    model = Butterfly(in_size, out_size, tied_weight=False)
-    input = torch.randn((batch_size, in_size))
-    output = model(input)
-    assert output.shape == (batch_size, out_size)
-    model = Butterfly(in_size, out_size, complex=True, tied_weight=False)
-    input = torch.randn((batch_size, in_size, 2))
-    output = model(input)
-    assert output.shape == (batch_size, out_size, 2)
-
-
-def main():
-    test_buttefly_factor()
-    test_butterfly()
-    test_butterfly_tied_weight()
-
-
-if __name__ == '__main__':
-    main()

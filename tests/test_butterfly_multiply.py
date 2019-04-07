@@ -6,6 +6,7 @@ import unittest
 
 import torch
 
+from butterfly import Butterfly
 from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
 
@@ -175,13 +176,14 @@ class ButterflyMultTest(unittest.TestCase):
         self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
                         ((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item())
 
-    @unittest.skip("Not numerically stable if twiddle factors aren't orthogonal")
+    # @unittest.skip("Not numerically stable if twiddle factors aren't orthogonal")
     def test_butterfly_inplace_cpu(self):
         batch_size = 10
         n = 4096
         # TODO: in-place implementation doesn't support nstack for now
         nstack = 1
-        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True) / math.sqrt(2)
+        b = Butterfly(n, n, bias=False, ortho_init=True)
+        twiddle = b.twiddle
         input = torch.randn(batch_size, n, requires_grad=True)
         output_inplace = butterfly_mult_inplace(twiddle.squeeze(0), input)
         output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
@@ -196,27 +198,29 @@ class ButterflyMultTest(unittest.TestCase):
         self.assertTrue(torch.allclose(d_twiddle_inplace, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
                         ((d_twiddle_inplace - d_twiddle_torch) / d_twiddle_torch).abs().max().item())
 
-    @unittest.skip("Not numerically stable if twiddle factors aren't orthogonal")
+    # @unittest.skip("Not numerically stable if twiddle factors aren't orthogonal")
     def test_butterfly_complex_inplace_cpu(self):
         batch_size = 10
         n = 4096
         # TODO: in-place implementation doesn't support nstack for now
         nstack = 1
-        twiddle = torch.randn(nstack, n - 1, 2, 2, 2, requires_grad=True) / 2
+        b = Butterfly(n, n, bias=False, complex=True, ortho_init=True)
+        twiddle = b.twiddle
         input = torch.randn(batch_size, n, 2, requires_grad=True)
         output_inplace = butterfly_mult_inplace(twiddle.squeeze(0), input)
         output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
         self.assertTrue(torch.allclose(output_inplace, output_torch, rtol=self.rtol, atol=self.atol),
                         (output_inplace - output_torch).abs().max().item())
 
-    @unittest.skip("Not numerically stable if twiddle factors aren't orthogonal")
+    # @unittest.skip("Not numerically stable if twiddle factors aren't orthogonal")
     @unittest.skipIf(not torch.cuda.is_available(), "need CUDA")
     def test_butterfly_inplace_cuda(self):
         batch_size = 10
         n = 4096
         # TODO: in-place implementation doesn't support nstack for now
         nstack = 1
-        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True, device='cuda') / math.sqrt(2)
+        b = Butterfly(n, n, bias=False, ortho_init=True).to('cuda')
+        twiddle = b.twiddle
         input = torch.randn(batch_size, n, requires_grad=True, device=twiddle.device)
         output_inplace = butterfly_mult_inplace(twiddle.squeeze(0), input)
         output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
