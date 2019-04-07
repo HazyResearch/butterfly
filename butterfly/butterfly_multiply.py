@@ -8,6 +8,7 @@ from .complex_utils import complex_mul
 use_extension = True
 try:
     from factor_multiply import butterfly_multiply_intermediate, butterfly_multiply_intermediate_backward
+    from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_backward
     from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
     from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
 except:
@@ -83,6 +84,75 @@ class ButterflyMult(torch.autograd.Function):
         return d_coefficients, d_input
 
 butterfly_mult = ButterflyMult.apply if use_extension else butterfly_mult_torch
+
+
+def butterfly_mult_untied_torch(twiddle, input, return_intermediate=False):
+    """
+    Parameters:
+        twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
+        input: (batch_size, n) if real or (batch_size, n, 2) if complex
+        return_intermediates: whether to return all the intermediate values computed, for debugging
+    Returns:
+        output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
+    """
+    batch_size, n = input.shape[:2]
+    m = int(math.log2(n))
+    assert n == 1 << m, "size must be a power of 2"
+    nstack = twiddle.shape[0]
+    assert twiddle.shape == (nstack, m, n // 2, 2, 2) if input.dim() == 2 else (nstack, m, n // 2, 2, 2, 2)
+    if input.dim() == 2:  # real
+        output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n)
+        intermediates = [output]
+        for log_stride in range(m):
+            stride = 1 << log_stride
+            t = twiddle[:, log_stride].view(nstack, n // (2 * stride), stride, 2, 2).permute(0, 1, 3, 4, 2)  # shape (nstack, n // (2 * stride, )2, 2, stride)
+            output_reshape = output.view(batch_size, nstack, n // (2 * stride), 1, 2, stride)
+            output = (t * output_reshape).sum(dim=4)
+            intermediates.append(output)
+        return output.view(batch_size, nstack, n) if not return_intermediate else torch.stack([intermediate.view(batch_size, nstack, n) for intermediate in intermediates])
+    else:  # complex
+        output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n, 2)
+        intermediates = [output]
+        for log_stride in range(m):
+            stride = 1 << log_stride
+            t = twiddle[:, log_stride].view(nstack, n // (2 * stride), stride, 2, 2, 2).permute(0, 1, 3, 4, 2, 5)  # shape (nstack, n // (2 * stride, )2, 2, stride, 2)
+            output_reshape = output.view(batch_size, nstack, n // (2 * stride), 1, 2, stride, 2)
+            output = complex_mul(t, output_reshape).sum(dim=4)
+            intermediates.append(output)
+        return output.view(batch_size, nstack, n, 2) if not return_intermediate else torch.stack([intermediate.view(batch_size, nstack, n, 2) for intermediate in intermediates])
+
+
+class ButterflyMultUntied(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, twiddle, input):
+        """
+        Parameters:
+            twiddle: (nstack, log 2, n / 2, 2, 2) if real or (nstack, log 2, n / 2, 2, 2, 2) if complex
+            input: (batch_size, n) if real or (batch_size, n, 2) if complex
+        Returns:
+            output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
+        """
+        output_and_intermediate = butterfly_multiply_untied(twiddle, input)
+        ctx.save_for_backward(twiddle, output_and_intermediate)
+        return output_and_intermediate[-1]
+
+    @staticmethod
+    def backward(ctx, grad):
+        """
+        Parameters:
+            grad: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
+            twiddle: (nstack, log 2, n / 2, 2, 2) if real or (nstack, log 2, n / 2, 2, 2, 2) if complex
+            output + intermediate values for backward: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
+        Return:
+            d_twiddle: (nstack, log 2, n / 2, 2, 2) if real or (nstack, log 2, n / 2, 2, 2, 2) if complex
+            d_input: (batch_size, n) if real or (batch_size, n, 2) if complex
+        """
+        twiddle, output_and_intermediate = ctx.saved_tensors
+        d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate)
+        return d_coefficients, d_input
+
+butterfly_mult_untied = ButterflyMultUntied.apply if use_extension else butterfly_mult_untied_torch
 
 
 class ButterflyMultInplace(torch.autograd.Function):
