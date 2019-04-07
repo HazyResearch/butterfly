@@ -10,6 +10,7 @@ from butterfly import Butterfly
 from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
 
+
 class ButterflyMultTest(unittest.TestCase):
 
     def setUp(self):

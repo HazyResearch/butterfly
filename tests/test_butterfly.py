@@ -10,6 +10,7 @@ import torch
 
 from butterfly import Butterfly
 
+
 class ButterflyTest(unittest.TestCase):
 
     def test_butterfly(self):

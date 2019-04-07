@@ -17,7 +17,7 @@ except:
     warnings.warn("C++/CUDA extension isn't installed. Will use butterfly multiply implemented in Pytorch, which is much slower.")
 
 
-def butterfly_mult_torch(twiddle, input, return_intermediate=False):
+def butterfly_mult_torch(twiddle, input, return_intermediates=False):
     """
     Parameters:
         twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
@@ -40,7 +40,7 @@ def butterfly_mult_torch(twiddle, input, return_intermediate=False):
             output_reshape = output.view(batch_size, nstack, n // (2 * stride), 1, 2, stride)
             output = (t.unsqueeze(1) * output_reshape).sum(dim=4)
             intermediates.append(output)
-        return output.view(batch_size, nstack, n) if not return_intermediate else torch.stack([intermediate.view(batch_size, nstack, n) for intermediate in intermediates])
+        return output.view(batch_size, nstack, n) if not return_intermediates else torch.stack([intermediate.view(batch_size, nstack, n) for intermediate in intermediates])
     else:  # complex
         output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n, 2)
         intermediates = [output]
@@ -50,7 +50,7 @@ def butterfly_mult_torch(twiddle, input, return_intermediate=False):
             output_reshape = output.view(batch_size, nstack, n // (2 * stride), 1, 2, stride, 2)
             output = complex_mul(t.unsqueeze(1), output_reshape).sum(dim=4)
             intermediates.append(output)
-        return output.view(batch_size, nstack, n, 2) if not return_intermediate else torch.stack([intermediate.view(batch_size, nstack, n, 2) for intermediate in intermediates])
+        return output.view(batch_size, nstack, n, 2) if not return_intermediates else torch.stack([intermediate.view(batch_size, nstack, n, 2) for intermediate in intermediates])
 
 
 class ButterflyMult(torch.autograd.Function):
@@ -86,7 +86,7 @@ class ButterflyMult(torch.autograd.Function):
 butterfly_mult = ButterflyMult.apply if use_extension else butterfly_mult_torch
 
 
-def butterfly_mult_untied_torch(twiddle, input, return_intermediate=False):
+def butterfly_mult_untied_torch(twiddle, input, return_intermediates=False):
     """
     Parameters:
         twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
@@ -109,7 +109,7 @@ def butterfly_mult_untied_torch(twiddle, input, return_intermediate=False):
             output_reshape = output.view(batch_size, nstack, n // (2 * stride), 1, 2, stride)
             output = (t * output_reshape).sum(dim=4)
             intermediates.append(output)
-        return output.view(batch_size, nstack, n) if not return_intermediate else torch.stack([intermediate.view(batch_size, nstack, n) for intermediate in intermediates])
+        return output.view(batch_size, nstack, n) if not return_intermediates else torch.stack([intermediate.view(batch_size, nstack, n) for intermediate in intermediates])
     else:  # complex
         output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n, 2)
         intermediates = [output]
@@ -119,7 +119,7 @@ def butterfly_mult_untied_torch(twiddle, input, return_intermediate=False):
             output_reshape = output.view(batch_size, nstack, n // (2 * stride), 1, 2, stride, 2)
             output = complex_mul(t, output_reshape).sum(dim=4)
             intermediates.append(output)
-        return output.view(batch_size, nstack, n, 2) if not return_intermediate else torch.stack([intermediate.view(batch_size, nstack, n, 2) for intermediate in intermediates])
+        return output.view(batch_size, nstack, n, 2) if not return_intermediates else torch.stack([intermediate.view(batch_size, nstack, n, 2) for intermediate in intermediates])
 
 
 class ButterflyMultUntied(torch.autograd.Function):
@@ -210,7 +210,7 @@ class ButterflyFactorMult(torch.autograd.Function):
 butterfly_factor_mult = ButterflyFactorMult.apply
 
 
-def butterfly_mult_factors(twiddle, input, return_intermediate=False):
+def butterfly_mult_factors(twiddle, input, return_intermediates=False):
     """Implementation that have separate kernels for each factor, for debugging.
     Parameters:
         twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
@@ -232,7 +232,7 @@ def butterfly_mult_factors(twiddle, input, return_intermediate=False):
             output_reshape = output.view(batch_size * n // (2 * stride), 2, stride)
             output = butterfly_factor_mult(t, output_reshape)
             intermediates.append(output)
-        return output.view(batch_size, n) if not return_intermediate else torch.stack([intermediate.view(batch_size, n) for intermediate in intermediates])
+        return output.view(batch_size, n) if not return_intermediates else torch.stack([intermediate.view(batch_size, n) for intermediate in intermediates])
     else:  # complex
         for log_stride in range(m):
             stride = 1 << log_stride
@@ -240,4 +240,4 @@ def butterfly_mult_factors(twiddle, input, return_intermediate=False):
             output_reshape = output.view(batch_size * n // (2 * stride), 2, stride, 2)
             output = butterfly_factor_mult(t, output_reshape)
             intermediates.append(output)
-        return output.view(batch_size, n, 2) if not return_intermediate else torch.stack([intermediate.view(batch_size, n, 2) for intermediate in intermediates])
+        return output.view(batch_size, n, 2) if not return_intermediates else torch.stack([intermediate.view(batch_size, n, 2) for intermediate in intermediates])
