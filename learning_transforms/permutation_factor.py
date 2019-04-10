@@ -5,7 +5,7 @@ import functools
 import torch
 from torch import nn
 
-from complex_utils import real_to_complex, complex_mul, complex_matmul
+from butterfly.complex_utils import real_to_complex, complex_mul, complex_matmul
 
 from factor_multiply import permutation_factor_even_odd_multiply, permutation_factor_even_odd_multiply_backward
 from factor_multiply import permutation_factor_reverse_multiply, permutation_factor_reverse_multiply_backward

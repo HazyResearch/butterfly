@@ -3,8 +3,7 @@ import math
 import torch
 from torch import nn
 
-from complex_utils import real_to_complex, complex_mul, complex_matmul
-# from butterfly import Block2x2Diag, Block2x2DiagProduct
+from butterfly.complex_utils import real_to_complex, complex_mul, complex_matmul
 
 from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
 from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward

@@ -67,7 +67,7 @@ def named_target_matrix(name, size):
         # matrix1d = LA.dft(size_sr, scale='sqrtn')
         # assert np.allclose(np.kron(m1d, m1d), matrix)
         # return matrix[:, :, None].view('float64')
-        from utils import bitreversal_permutation
+        from butterfly.utils import bitreversal_permutation
         br_perm = bitreversal_permutation(size_sr)
         br_perm2 = np.arange(size_sr**2).reshape(size_sr, size_sr)[br_perm][:, br_perm].reshape(-1)
         matrix = np.ascontiguousarray(matrix[:, br_perm2])
