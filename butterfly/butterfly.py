@@ -18,10 +18,14 @@ class Butterfly(nn.Module):
         complex: whether complex or real
         tied_weight: whether the weights in the butterfly factors are tied.
             If True, will have 4N parameters, else will have 2 N log N parameters (not counting bias)
+         increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 2).
+             Note that this only changes the order of multiplication, not how twiddle is stored.
+             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
     """
 
-    def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True, ortho_init=False):
+    def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True, increasing_stride=True, ortho_init=False):
         super().__init__()
         self.in_size = in_size
         m = int(math.ceil(math.log2(in_size)))
@@ -30,6 +34,7 @@ class Butterfly(nn.Module):
         self.nstack = int(math.ceil(out_size / self.in_size_extended))
         self.complex = complex
         self.tied_weight = tied_weight
+        self.increasing_stride = increasing_stride
         self.ortho_init = ortho_init
         twiddle_core_shape = (self.nstack, size - 1) if tied_weight else (self.nstack, m, size // 2)
         if not ortho_init:
@@ -81,7 +86,7 @@ class Butterfly(nn.Module):
             padded_shape = (batch, self.in_size_extended - self.in_size) + (() if not self.complex else (2, ))
             output = torch.cat((output, torch.zeros(padded_shape, dtype=output.dtype, device=output.device)),
                                dim=-1 if not self.complex else -2)
-        output = butterfly_mult(self.twiddle, output) if self.tied_weight else butterfly_mult_untied(self.twiddle, output)
+        output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
         output = output.view((batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
@@ -94,7 +99,7 @@ class Butterfly(nn.Module):
         return output if self.bias is None else output + self.bias
 
     def extra_repr(self):
-        return 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, ortho_init={}'.format(
-            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.ortho_init
+        return 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}'.format(
+            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init
         )
 
