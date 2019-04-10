@@ -47,7 +47,7 @@ class Permutation(nn.Module):
         if self.share_logit:
             m = int(math.ceil(math.log2(self.size)))
             prob = prob.unsqueeze(0).expand(m - 1, 3)
-        input = torch.arange(self.size, dtype=torch.float, device=self.logit.device).unsqueeze(0)
+        input = torch.arange(self.size, dtype=prob.dtype, device=self.logit.device).unsqueeze(0)
         return permutation_mult(prob, input, increasing_stride=self.increasing_stride).squeeze(0).round().long()
 
     def extra_repr(self):
@@ -106,7 +106,7 @@ class PermutationFactor(nn.Module):
             p: (self.size, ) array of int, the most probable permutation.
         """
         prob = torch.sigmoid(self.logit).round()
-        input = torch.arange(self.size, dtype=torch.float, device=self.logit.device).unsqueeze(0)
+        input = torch.arange(self.size, dtype=prob.dtype, device=self.logit.device).unsqueeze(0)
         return permutation_mult_single(prob, input).squeeze(0).round().long()
 
     def extra_repr(self):

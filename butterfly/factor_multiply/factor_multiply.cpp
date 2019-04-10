@@ -940,7 +940,7 @@ at::Tensor permutation_factor_reverse_multiply(const at::Tensor& p, const at::Te
   const auto batch_size = input.size(0);
   const auto n = input.size(1);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_reverse_multiply", [&] {
-    const scalar_t p_a[2] = {p.accessor<float, 1>()[0], p.accessor<float, 1>()[1]};
+    const scalar_t p_a[2] = {p.accessor<scalar_t, 1>()[0], p.accessor<scalar_t, 1>()[1]};
     switch (input.dim()) {
       case 2: // real
         {
