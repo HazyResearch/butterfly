@@ -6,10 +6,10 @@ void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::T
                                              at::Tensor& d_twiddle_expanded, at::Tensor& d_input);
 void butterfly_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tensor& input);
 void butterfly_multiply_inplace_backward_cuda(const at::Tensor& grad, const at::Tensor& twiddle, at::Tensor& output,
-                                                     at::Tensor& d_twiddle, at::Tensor& d_input);
-void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor& input);
+                                              at::Tensor& d_twiddle, at::Tensor& d_input);
+void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor& input, bool increasing_stride);
 void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, const at::Tensor& output,
-                                                          at::Tensor& d_twiddle, at::Tensor& d_input);
+                                                   at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
 void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& input);
 void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at::Tensor& output,
                                              at::Tensor& d_twiddle, at::Tensor& d_input);
@@ -359,10 +359,14 @@ std::vector<at::Tensor> butterfly_multiply_inplace_backward(const at::Tensor& gr
   return {d_twiddle, d_input};
 }
 
-at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::Tensor& input) {
+at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::Tensor& input, bool increasing_stride) {
   /* Parameters:
          twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
          input: (batch_size, n) if real or (batch_size, n, 2) if complex
+         increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 2).
+             Note that this only changes the order of multiplication, not how twiddle is stored.
+             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Returns:
          output + intermediate values for backward pass: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
   */
@@ -381,7 +385,7 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
     torch::empty({log_n + 1, batch_size, nstack, n, 2}, torch::dtype(input.dtype()).device(input.device()));
   output[0] = input.unsqueeze(1);
   if (input.is_cuda()) {
-    butterfly_multiply_intermediate_cuda(twiddle, output);
+    butterfly_multiply_intermediate_cuda(twiddle, output, increasing_stride);
     return output;
   }
   const bool complex = input.dim() == 3;
@@ -389,8 +393,8 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
     if (!complex) {  // real
       const auto twiddle_a = twiddle.accessor<scalar_t, 4>();
       auto output_a = output.accessor<scalar_t, 4>();
-      // for (int64_t stride = 1; stride <= n / 2; stride *= 2) {
-      for (int64_t log_stride = 0; log_stride <= log_n - 1; ++log_stride) {
+      for (int64_t idx = 0; idx <= log_n - 1; ++idx) {
+        int64_t log_stride = increasing_stride ? idx : (log_n - 1 - idx);
         int64_t stride = 1 << log_stride;
         int64_t twiddle_start_idx = stride - 1;
         for (int64_t b = 0; b < batch_size; ++b) {
@@ -401,9 +405,9 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
               int64_t pos = 2 * (i - low_order_bit) + low_order_bit;
               const scalar_t twiddle_val[2][2] = {{twiddle_a[s][twiddle_idx][0][0], twiddle_a[s][twiddle_idx][0][1]},
                                                   {twiddle_a[s][twiddle_idx][1][0], twiddle_a[s][twiddle_idx][1][1]}};
-              const scalar_t input_val[2] = {output_a[log_stride][b][s][pos], output_a[log_stride][b][s][pos + stride]};
-              output_a[log_stride+1][b][s][pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
-              output_a[log_stride+1][b][s][pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
+              const scalar_t input_val[2] = {output_a[idx][b][s][pos], output_a[idx][b][s][pos + stride]};
+              output_a[idx+1][b][s][pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
+              output_a[idx+1][b][s][pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
             }
           }
         }
@@ -412,7 +416,8 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
       using complex_t = std::complex<scalar_t>;
       const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
       auto output_a = output.accessor<scalar_t, 5>();
-      for (int64_t log_stride = 0; log_stride <= log_n - 1; ++log_stride) {
+      for (int64_t idx = 0; idx <= log_n - 1; ++idx) {
+        int64_t log_stride = increasing_stride ? idx : log_n - 1 - idx;
         int64_t stride = 1 << log_stride;
         int64_t twiddle_start_idx = stride - 1;
         for (int64_t b = 0; b < batch_size; ++b) {
@@ -427,16 +432,16 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
                  {complex_t(twiddle_a[s][twiddle_idx][1][0][0], twiddle_a[s][twiddle_idx][1][0][1]),
                   complex_t(twiddle_a[s][twiddle_idx][1][1][0], twiddle_a[s][twiddle_idx][1][1][1])}};
               const complex_t input_val[2] =
-                {complex_t(output_a[log_stride][b][s][pos][0], output_a[log_stride][b][s][pos][1]),
-                 complex_t(output_a[log_stride][b][s][pos + stride][0], output_a[log_stride][b][s][pos + stride][1])};
+                {complex_t(output_a[idx][b][s][pos][0], output_a[idx][b][s][pos][1]),
+                 complex_t(output_a[idx][b][s][pos + stride][0], output_a[idx][b][s][pos + stride][1])};
               const complex_t output_val[2] =
                 {twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1],
                 twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1]};
-              // output_a[log_stride+1][b][s][pos][0] = std::real(output_val[0]);
-              output_a[log_stride+1][b][s][pos][0] = output_val[0].real();
-              output_a[log_stride+1][b][s][pos][1] = output_val[0].imag();
-              output_a[log_stride+1][b][s][pos + stride][0] = output_val[1].real();
-              output_a[log_stride+1][b][s][pos + stride][1] = output_val[1].imag();
+              // output_a[idx+1][b][s][pos][0] = std::real(output_val[0]);
+              output_a[idx+1][b][s][pos][0] = output_val[0].real();
+              output_a[idx+1][b][s][pos][1] = output_val[0].imag();
+              output_a[idx+1][b][s][pos + stride][0] = output_val[1].real();
+              output_a[idx+1][b][s][pos + stride][1] = output_val[1].imag();
             }
           }
         }
@@ -446,11 +451,15 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
   return output;
 }
 
-std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& output) {
+std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& output, bool increasing_stride) {
   /* Parameters:
          grad: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
          twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
          output + intermediate values for backward: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
+         increasing_stride: whether the forward pass multiply was with increasing stride (e.g. 2, 4, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 2).
+             Note that this only changes the order of multiplication, not how twiddle is stored.
+             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Return:
          d_twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
          d_input: (batch_size, n) if real or (batch_size, n, 2) if complex
@@ -470,7 +479,7 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
   auto d_input = grad.clone();
   auto d_twiddle = torch::zeros_like(twiddle);
   if (output.is_cuda()) {
-    butterfly_multiply_intermediate_backward_cuda(twiddle, output, d_twiddle, d_input);
+    butterfly_multiply_intermediate_backward_cuda(twiddle, output, d_twiddle, d_input, increasing_stride);
     return {d_twiddle, nstack > 1 ? d_input.sum(/*dim=*/1) : d_input.squeeze(/*dim=*/1)} ;
   }
   bool complex = grad.dim() == 4;
@@ -480,7 +489,8 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
       auto output_a = output.accessor<scalar_t, 4>();
       auto d_twiddle_a = d_twiddle.accessor<scalar_t, 4>();
       auto d_input_a = d_input.accessor<scalar_t, 3>();
-      for (int64_t log_stride = log_n - 1; log_stride >= 0; --log_stride) {
+      for (int64_t idx = log_n - 1; idx >= 0; --idx) {
+        int64_t log_stride = increasing_stride ? idx : log_n - 1 - idx;
         int64_t stride = 1 << log_stride;
         int64_t twiddle_start_idx = stride - 1;
         for (int64_t b = 0; b < batch_size; ++b) {
@@ -494,7 +504,7 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
               const scalar_t grad_val[2] = {d_input_a[b][s][pos], d_input_a[b][s][pos + stride]};
               d_input_a[b][s][pos] = twiddle_val[0][0] * grad_val[0] + twiddle_val[1][0] * grad_val[1];
               d_input_a[b][s][pos + stride] = twiddle_val[0][1] * grad_val[0] + twiddle_val[1][1] * grad_val[1];
-              const scalar_t input_val[2] = {output_a[log_stride][b][s][pos], output_a[log_stride][b][s][pos + stride]};
+              const scalar_t input_val[2] = {output_a[idx][b][s][pos], output_a[idx][b][s][pos + stride]};
               d_twiddle_a[s][twiddle_idx][0][0] += grad_val[0] * input_val[0];
               d_twiddle_a[s][twiddle_idx][0][1] += grad_val[0] * input_val[1];
               d_twiddle_a[s][twiddle_idx][1][0] += grad_val[1] * input_val[0];
@@ -509,7 +519,8 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
       const auto output_a = output.accessor<scalar_t, 5>();
       auto d_twiddle_a = d_twiddle.accessor<scalar_t, 5>();
       auto d_input_a = d_input.accessor<scalar_t, 4>();
-      for (int64_t log_stride = log_n - 1; log_stride >= 0; --log_stride) {
+      for (int64_t idx = log_n - 1; idx >= 0; --idx) {
+        int64_t log_stride = increasing_stride ? idx : log_n - 1 - idx;
         int64_t stride = 1 << log_stride;
         int64_t twiddle_start_idx = stride - 1;
         for (int64_t b = 0; b < batch_size; ++b) {
@@ -534,8 +545,8 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
               d_input_a[b][s][pos + stride][0] = d_input_val[1].real();
               d_input_a[b][s][pos + stride][1] = d_input_val[1].imag();
               const complex_t input_val[2] =
-                {complex_t(output_a[log_stride][b][s][pos][0], output_a[log_stride][b][s][pos][1]),
-                 complex_t(output_a[log_stride][b][s][pos + stride][0], output_a[log_stride][b][s][pos + stride][1])};
+                {complex_t(output_a[idx][b][s][pos][0], output_a[idx][b][s][pos][1]),
+                 complex_t(output_a[idx][b][s][pos + stride][0], output_a[idx][b][s][pos + stride][1])};
               const complex_t d_twiddle_val[2][2] =
                 {{grad_val[0] * std::conj(input_val[0]), grad_val[0] * std::conj(input_val[1])},
                  {grad_val[1] * std::conj(input_val[0]), grad_val[1] * std::conj(input_val[1])}};
