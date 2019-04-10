@@ -240,80 +240,24 @@ class ButterflyMultTest(unittest.TestCase):
         batch_size = 10
         n = 4096
         nstack = 1  # Does not support nstack
-        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True) / math.sqrt(2)
-        input = torch.randn(batch_size, n, requires_grad=True)
-        output = butterfly_mult_factors(twiddle.squeeze(0), input)
-        output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
-        self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
-                        (output - output_torch).abs().max().item())
-        grad = torch.randn_like(output_torch)
-        d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input), grad, retain_graph=True)
-        d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
-        self.assertTrue(torch.allclose(d_input, d_input_torch, rtol=self.rtol, atol=self.atol),
-                        (d_input - d_input_torch).abs().max().item())
-        # print((d_twiddle - d_twiddle_torch) / d_twiddle_torch)
-        self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
-                        ((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item())
-
-    def test_butterfly_factors_complex_cpu(self):
-        batch_size = 10
-        n = 4096
-        nstack = 1  # Does not support nstack
-        twiddle = torch.randn(nstack, n - 1, 2, 2, 2, requires_grad=True) / 2
-        input = torch.randn(batch_size, n, 2, requires_grad=True)
-        output = butterfly_mult_factors(twiddle.squeeze(0), input)
-        output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
-        self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
-                        (output - output_torch).abs().max().item())
-        grad = torch.randn_like(output_torch)
-        d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input), grad, retain_graph=True)
-        d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
-        self.assertTrue(torch.allclose(d_input, d_input_torch, rtol=self.rtol, atol=self.atol),
-                        (d_input - d_input_torch).abs().max().item())
-        # print((d_twiddle - d_twiddle_torch) / d_twiddle_torch)
-        self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
-                        ((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item())
-
-    @unittest.skipIf(not torch.cuda.is_available(), "need CUDA")
-    def test_butterfly_factors_cuda(self):
-        batch_size = 10
-        n = 4096
-        nstack = 1  # Does not support nstack
-        twiddle = torch.randn(nstack, n - 1, 2, 2, requires_grad=True, device='cuda') / math.sqrt(2)
-        input = torch.randn(batch_size, n, requires_grad=True, device=twiddle.device)
-        output = butterfly_mult_factors(twiddle.squeeze(0), input)
-        output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
-        self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
-                        (output - output_torch).abs().max().item())
-        grad = torch.randn_like(output_torch)
-        d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input), grad, retain_graph=True)
-        d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
-        self.assertTrue(torch.allclose(d_input, d_input_torch, rtol=self.rtol, atol=self.atol),
-                        (d_input - d_input_torch).abs().max().item())
-        # print((d_twiddle - d_twiddle_torch) / d_twiddle_torch)
-        self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
-                        ((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item())
-
-    @unittest.skipIf(not torch.cuda.is_available(), "need CUDA")
-    def test_butterfly_factors_complex_cuda(self):
-        batch_size = 10
-        n = 4096
-        nstack = 1  # Does not support nstack
-        twiddle = torch.randn(nstack, n - 1, 2, 2, 2, requires_grad=True, device='cuda') / 2
-        input = torch.randn(batch_size, n, 2, requires_grad=True, device=twiddle.device)
-        output = butterfly_mult_factors(twiddle.squeeze(0), input)
-        output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
-        self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
-                        (output - output_torch).abs().max().item())
-        grad = torch.randn_like(output_torch)
-        d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input), grad, retain_graph=True)
-        d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
-        self.assertTrue(torch.allclose(d_input, d_input_torch, rtol=self.rtol, atol=self.atol),
-                        (d_input - d_input_torch).abs().max().item())
-        # print((d_twiddle - d_twiddle_torch) / d_twiddle_torch)
-        self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
-                        ((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item())
-
+        for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+            for complex in [False, True]:
+                for increasing_stride in [True, False]:
+                    scaling = 1 / math.sqrt(2) if not complex else 1 / 2
+                    twiddle = torch.randn((nstack, n - 1, 2, 2) + (() if not complex else (2, )), requires_grad=True, device=device) * scaling
+                    input = torch.randn((batch_size, n) + (() if not complex else (2, )), requires_grad=True, device=twiddle.device)
+                    output = butterfly_mult_factors(twiddle.squeeze(0), input, increasing_stride=increasing_stride)
+                    output_torch = butterfly_mult_torch(twiddle, input, increasing_stride=increasing_stride).squeeze(1)
+                    self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
+                                    ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
+                    grad = torch.randn_like(output_torch)
+                    d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input), grad, retain_graph=True)
+                    d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
+                    self.assertTrue(torch.allclose(d_input, d_input_torch, rtol=self.rtol, atol=self.atol),
+                                    ((d_input - d_input_torch).abs().max().item(), device, complex, increasing_stride))
+                    # print((d_twiddle - d_twiddle_torch) / d_twiddle_torch)
+                    self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
+                                    (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(), device, complex, increasing_stride))
 
 if __name__ == "__main__":
     unittest.main()

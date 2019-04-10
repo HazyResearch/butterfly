@@ -17,11 +17,15 @@ except:
     warnings.warn("C++/CUDA extension isn't installed. Will use butterfly multiply implemented in Pytorch, which is much slower.")
 
 
-def butterfly_mult_torch(twiddle, input, return_intermediates=False):
+def butterfly_mult_torch(twiddle, input, increasing_stride=True, return_intermediates=False):
     """
     Parameters:
         twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
         input: (batch_size, n) if real or (batch_size, n, 2) if complex
+        increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
+            decreasing stride (e.g., n/2, n/4, ..., 2).
+            Note that this only changes the order of multiplication, not how prob is stored.
+            In other words, twiddle[@log_stride] always stores the probability for @stride.
         return_intermediates: whether to return all the intermediate values computed, for debugging
     Returns:
         output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
@@ -34,7 +38,7 @@ def butterfly_mult_torch(twiddle, input, return_intermediates=False):
     if input.dim() == 2:  # real
         output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n)
         intermediates = [output]
-        for log_stride in range(m):
+        for log_stride in range(m) if increasing_stride else range(m)[::-1]:
             stride = 1 << log_stride
             t = twiddle[:, (stride - 1):(2 * stride - 1)].permute(0, 2, 3, 1)  # shape (nstack, 2, 2, stride)
             output_reshape = output.view(batch_size, nstack, n // (2 * stride), 1, 2, stride)
@@ -44,7 +48,7 @@ def butterfly_mult_torch(twiddle, input, return_intermediates=False):
     else:  # complex
         output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n, 2)
         intermediates = [output]
-        for log_stride in range(m):
+        for log_stride in range(m) if increasing_stride else range(m)[::-1]:
             stride = 1 << log_stride
             t = twiddle[:, (stride - 1):(2 * stride - 1)].permute(0, 2, 3, 1, 4)  # shape (nstack, 2, 2, stride, 2)
             output_reshape = output.view(batch_size, nstack, n // (2 * stride), 1, 2, stride, 2)
@@ -210,11 +214,15 @@ class ButterflyFactorMult(torch.autograd.Function):
 butterfly_factor_mult = ButterflyFactorMult.apply
 
 
-def butterfly_mult_factors(twiddle, input, return_intermediates=False):
+def butterfly_mult_factors(twiddle, input, increasing_stride=True, return_intermediates=False):
     """Implementation that have separate kernels for each factor, for debugging.
     Parameters:
         twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
         input: (batch_size, n) if real or (batch_size, n, 2) if complex
+        increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
+            decreasing stride (e.g., n/2, n/4, ..., 2).
+            Note that this only changes the order of multiplication, not how prob is stored.
+            In other words, twiddle[@log_stride] always stores the probability for @stride.
         return_intermediates: whether to return all the intermediate values computed, for debugging
     Returns:
         output: (batch_size, n) if real or (batch_size, n, 2) if complex
@@ -226,7 +234,7 @@ def butterfly_mult_factors(twiddle, input, return_intermediates=False):
     output = input.contiguous()
     intermediates = [output]
     if input.dim() == 2:  # real
-        for log_stride in range(m):
+        for log_stride in range(m) if increasing_stride else range(m)[::-1]:
             stride = 1 << log_stride
             t = twiddle[(stride - 1):(2 * stride - 1)].permute(1, 2, 0)  # shape (2, 2, stride)
             output_reshape = output.view(batch_size * n // (2 * stride), 2, stride)
@@ -234,7 +242,7 @@ def butterfly_mult_factors(twiddle, input, return_intermediates=False):
             intermediates.append(output)
         return output.view(batch_size, n) if not return_intermediates else torch.stack([intermediate.view(batch_size, n) for intermediate in intermediates])
     else:  # complex
-        for log_stride in range(m):
+        for log_stride in range(m) if increasing_stride else range(m)[::-1]:
             stride = 1 << log_stride
             t = twiddle[(stride - 1):(2 * stride - 1)].permute(1, 2, 0, 3)  # shape (2, 2, stride, 2)
             output_reshape = output.view(batch_size * n // (2 * stride), 2, stride, 2)
