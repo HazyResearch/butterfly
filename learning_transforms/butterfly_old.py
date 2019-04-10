@@ -5,9 +5,9 @@ import functools
 import torch
 from torch import nn
 
-from complex_utils import real_to_complex, complex_mul, complex_matmul
+from butterfly.complex_utils import real_to_complex, complex_mul, complex_matmul
 from sparsemax import sparsemax
-from utils import bitreversal_permutation
+from butterfly.utils import bitreversal_permutation
 from butterfly_factor import butterfly_factor_mult, butterfly_factor_mult_intermediate
 from permutation_factor import permutation_factor_even_odd_mult, permutation_factor_reverse_mult
 
@@ -766,61 +766,6 @@ def test_block2x2diagproduct():
                                                          [0.0, 1.0]]]]))
     input = torch.stack((torch.eye(size), torch.zeros(size, size)), dim=-1)
     assert torch.allclose(model(input[:, [0, 2, 1, 3]]), torch.fft(input, 1))
-
-
-def test_block2x2diagrectangular():
-    batch_size = 3
-    size = 8
-    stack = 2
-    model = Block2x2DiagRectangular(size, stack=stack)
-    input = torch.randn((stack, batch_size, size))
-    output = model(input)
-    assert output.shape == (stack, batch_size, size)
-    model = Block2x2DiagRectangular(size, stack=stack, complex=True)
-    input = torch.randn((stack, batch_size, size, 2))
-    output = model(input)
-    assert output.shape == (stack, batch_size, size, 2)
-
-
-def test_block2x2diagproductrectangular():
-    batch_size = 3
-    in_size = 7
-    out_size = 15
-    model = Block2x2DiagProductRectangular(in_size, out_size)
-    input = torch.randn((batch_size, in_size))
-    output = model(input)
-    assert output.shape == (batch_size, out_size)
-    model = Block2x2DiagProductRectangular(in_size, out_size, complex=True)
-    input = torch.randn((batch_size, in_size, 2))
-    output = model(input)
-    assert output.shape == (batch_size, out_size, 2)
-
-
-def test_block2x2diagproductrectangular_tied_weight():
-    batch_size = 3
-    in_size = 7
-    out_size = 15
-    model = Block2x2DiagProductRectangular(in_size, out_size, tied_weight=False)
-    input = torch.randn((batch_size, in_size))
-    output = model(input)
-    assert output.shape == (batch_size, out_size)
-    model = Block2x2DiagProductRectangular(in_size, out_size, complex=True, tied_weight=False)
-    input = torch.randn((batch_size, in_size, 2))
-    output = model(input)
-    assert output.shape == (batch_size, out_size, 2)
-
-
-def test_block2x2diagproductallinone():
-    batch_size = 3
-    in_size = 8
-    model = Block2x2DiagProductAllinOne(in_size)
-    input = torch.randn((batch_size, in_size))
-    output = model(input)
-    assert output.shape == (batch_size, in_size)
-    model = Block2x2DiagProductAllinOne(in_size, complex=True)
-    input = torch.randn((batch_size, in_size, 2))
-    output = model(input)
-    assert output.shape == (batch_size, in_size, 2)
 
 
 def test_blockpermproduct():
