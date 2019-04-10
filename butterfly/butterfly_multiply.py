@@ -151,8 +151,7 @@ class ButterflyMultUntied(torch.autograd.Function):
         Returns:
             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
-        # TODO: Implement decreasing_stride
-        output_and_intermediate = butterfly_multiply_untied(twiddle, input)
+        output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride)
         ctx.save_for_backward(twiddle, output_and_intermediate)
         ctx._increasing_stride = increasing_stride
         return output_and_intermediate[-1]
@@ -170,8 +169,8 @@ class ButterflyMultUntied(torch.autograd.Function):
         """
         twiddle, output_and_intermediate = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
-        d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate)
-        return d_coefficients, d_input
+        d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate, increasing_stride)
+        return d_coefficients, d_input, None  # Autograd requires 3 gradients
 
 butterfly_mult_untied = ButterflyMultUntied.apply if use_extension else butterfly_mult_untied_torch
 
