@@ -143,19 +143,71 @@ def permutation_mult_factors(prob, input, increasing_stride=False, return_interm
     if input.dim() == 2:  # real
         for log_stride in range(1, nsteps + 1) if increasing_stride else range(1, nsteps + 1)[::-1]:
             stride = 1 << log_stride
-            output_reshape = output.view(batch_size * n // (2 * stride), 2 * stride)
-            output = permutation_factor_even_odd_mult(prob[log_stride - 1, :1], output_reshape)
+            output = output.view(batch_size * n // (2 * stride), 2 * stride)
+            output = permutation_factor_even_odd_mult(prob[log_stride - 1, :1], output)
             output = permutation_factor_reverse_mult(prob[log_stride - 1, 1:], output)
             intermediates.append(output)
         return output.view(batch_size, n) if not return_intermediates else torch.stack([intermediate.view(batch_size, n) for intermediate in intermediates])
     else:  # complex
         for log_stride in range(1, nsteps + 1) if increasing_stride else range(1, nsteps + 1)[::-1]:
             stride = 1 << log_stride
-            output_reshape = output.view(batch_size * n // (2 * stride), 2 * stride, 2)
-            output = permutation_factor_even_odd_mult(prob[log_stride - 1, :1], output_reshape)
+            output = output.view(batch_size * n // (2 * stride), 2 * stride, 2)
+            output = permutation_factor_even_odd_mult(prob[log_stride - 1, :1], output)
             output = permutation_factor_reverse_mult(prob[log_stride - 1, 1:], output)
             intermediates.append(output)
         return output.view(batch_size, n, 2) if not return_intermediates else torch.stack([intermediate.view(batch_size, n, 2) for intermediate in intermediates])
 
 
 permutation_mult = permutation_mult_factors if use_extension else permutation_mult_torch
+
+
+def permutation_mult_single_factor_torch(prob, input):
+    """Multiply by a single permutation factor.
+    Parameters:
+        prob: (3, ), where prob[0] is the probability of separating the even and odd indices,
+            and prob[1:3] are the probabilities of reversing the 1st and 2nd halves respectively.
+        input: (batch_size, n) if real or (batch_size, n, 2) if complex
+    Returns:
+        output: (batch_size, n) if real or (batch_size, n, 2) if complex
+    """
+    batch_size, n = input.shape[:2]
+    m = int(math.log2(n))
+    assert n == 1 << m, "size must be a power of 2"
+    assert prob.shape == (3, )
+    output = input.contiguous()
+    if input.dim() == 2:  # real
+        stride = n // 2
+        # First step: weighted mean of identity permutation and permutation that yields [even, odd]
+        output = ((1 - prob[0]) * output.view(-1, 2, stride) + prob[0] * output.view(-1, stride, 2).transpose(-1, -2))
+        # Second step: weighted mean of identity permutation and permutation that reverses the first and the second half
+        output = (((1 - prob[1:]).unsqueeze(-1) * output + prob[1:].unsqueeze(-1) * output.flip(-1)))
+        return output.view(batch_size, n)
+    else:  # complex
+        stride = n // 2
+        # First step: weighted mean of identity permutation and permutation that yields [even, odd]
+        output = ((1 - prob[0]) * output.view(-1, 2, stride, 2) + prob[0] * output.view(-1, stride, 2, 2).transpose(-2, -3))
+        # Second step: weighted mean of identity permutation and permutation that reverses the first and the second half
+        output = (((1 - prob[1:]).unsqueeze(-1).unsqueeze(-1) * output + prob[1:].unsqueeze(-1).unsqueeze(-1) * output.flip(-2)))
+        return output.view(batch_size, n, 2)
+
+
+def permutation_mult_single_factor(prob, input):
+    """Multiply by a single permutation factor, parameterized by the probabilities.
+    Parameters:
+        prob: (3, ), where prob[0] is the probability of separating the even and odd indices,
+            and prob[1:3] are the probabilities of reversing the 1st and 2nd halves respectively.
+        input: (batch_size, n) if real or (batch_size, n, 2) if complex
+    Returns:
+        output: (batch_size, n) if real or (batch_size, n, 2) if complex
+    """
+    batch_size, n = input.shape[:2]
+    m = int(math.log2(n))
+    assert n == 1 << m, "size must be a power of 2"
+    assert prob.shape == (3, )
+    output = input.contiguous()
+    output = permutation_factor_even_odd_mult(prob[:1], output)
+    output = permutation_factor_reverse_mult(prob[1:], output)
+    return output
+
+
+permutation_mult_single = permutation_mult_single_factor if use_extension else permutation_mult_single_factor_torch
