@@ -71,7 +71,7 @@ class TrainableMatrixFactorization(TrainableFixedData):
     def freeze(self):
         pass
 
-    def polish(self, nsteps, save_to_self_model=False):
+    def polish(self, nmaxsteps=50, patience=5, threshold=1e-10, save_to_self_model=False):
         if not save_to_self_model:
             model_bak = self.model
             self.model = copy.deepcopy(self.model)
@@ -82,9 +82,17 @@ class TrainableMatrixFactorization(TrainableFixedData):
             loss = self.loss()
             loss.backward()
             return loss
-        for i in range(nsteps):
-            # TODO: Bug here when using multiprocessing, is my C++ code not thread safe?
+        n_bad_steps = 0
+        best_loss = float('inf')
+        for i in range(nmaxsteps):
             loss = optimizer.step(closure)
+            if loss.item() < best_loss - threshold:
+                best_loss = loss.item()
+                n_bad_steps = 0
+            else:
+                n_bad_steps += 1
+            if n_bad_steps > patience:
+                break
         if not save_to_self_model:
             self.model = model_bak
         return loss.item()

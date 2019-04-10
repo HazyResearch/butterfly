@@ -1,11 +1,13 @@
-import argparse
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+# Add to $PYTHONPATH in addition to sys.path so that ray workers can see
+os.environ['PYTHONPATH'] = project_root + ":" + os.environ.get('PYTHONPATH', '')
+
 import math
-import multiprocessing as mp
-import os
 from pathlib import Path
 import pickle
 import random
-import sys
 
 import numpy as np
 
@@ -20,61 +22,66 @@ import ray
 from ray.tune import Trainable, Experiment as RayExperiment, sample_from
 from ray.tune.schedulers import AsyncHyperBandScheduler
 
-from tune import run_experiments
+from tune import run
 
-from butterfly import Block2x2DiagProduct, BlockPerm, BlockPermProduct, FixedPermutation, Block2x2DiagProductBmm
-from semantic_loss import semantic_loss_exactly_one
+from butterfly import Butterfly
+from butterfly.permutation import Permutation, FixedPermutation, PermutationFactor
+from butterfly.utils import bitreversal_permutation
+from butterfly.complex_utils import real_to_complex
 from training import PytorchTrainable, TrainableMatrixFactorization
-from utils import bitreversal_permutation
-from complex_utils import real_to_complex, complex_matmul
 from target_matrix import named_target_matrix
 
 
 N_LBFGS_STEPS = 50
-N_LBFGS_STEPS_VALIDATION = 15
 N_TRIALS_TO_POLISH = 16
 
 
-class TrainableButterfly(TrainableMatrixFactorization):
-    """Product of butterfly matrices, with fixed bit-reversal permutation matrix.
-    """
-
-    def _setup(self, config):
-        device = config['device']
-        self.device = device
-        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
-        assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
-        assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
-        size = self.target_matrix.shape[0]
-        complex = self.target_matrix.dim() == 3 or config['complex']
-        torch.manual_seed(config['seed'])
-        self.model = Block2x2DiagProduct(size=size, complex=complex).to(device)
-        # self.model = Block2x2DiagProductBmm(size=size, complex=complex).to(device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
-        self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.n_epochs_per_validation = config['n_epochs_per_validation']
-        self.input = torch.eye(size)[:, torch.tensor(bitreversal_permutation(size))].to(device)
-        if complex:
-            self.input = real_to_complex(self.input)
-
-
 class TrainableBP(TrainableMatrixFactorization):
-    """Product of butterfly matrices and product of block permutation matrices.
+    """Product of butterfly matrices and permutation matrices.
     """
 
     def _setup(self, config):
         device = config['device']
         self.device = device
-        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
+        size = config['size']
+        if isinstance(config['target_matrix'], str):
+            self.target_matrix = torch.tensor(named_target_matrix(config['target_matrix'], size), dtype=torch.float).to(device)
+        else:
+            self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
         assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
         assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
-        size = self.target_matrix.shape[0]
         complex = self.target_matrix.dim() == 3 or config['complex']
         torch.manual_seed(config['seed'])
-        self.model = nn.Sequential(
-            BlockPermProduct(size=size, complex=complex, share_logit=config['share_logit_0']),
-            Block2x2DiagProduct(size=size, complex=complex)
-        ).to(device)
+        if config['model'] == 'B':
+            self.model = nn.Sequential(
+                FixedPermutation(torch.tensor(bitreversal_permutation(size))),
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, ortho_init=True)
+            ).to(device)
+        elif config['model'] == 'BP':
+            self.model = nn.Sequential(
+                Permutation(size=size, share_logit=config['share_logit'][0]),
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, ortho_init=True)
+            ).to(device)
+        elif config['model'] == 'PBT':
+            self.model = nn.Sequential(
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, increasing_stride=False, ortho_init=True),
+                Permutation(size=size, share_logit=config['share_logit'][0])
+            ).to(device)
+        elif config['model'] == 'BPP':
+            self.model = nn.Sequential(
+                PermutationFactor(size=size),
+                Permutation(size=size, share_logit=config['share_logit'][0]),
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, ortho_init=True)
+            ).to(device)
+        elif config['model'] == 'BPBP':
+            self.model = nn.Sequential(
+                Permutation(size=size, share_logit=config['share_logit'][0]),
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, ortho_init=True),
+                Permutation(size=size, share_logit=config['share_logit'][1]),
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, ortho_init=True)
+            ).to(device)
+        else:
+            assert False, f'Model {model} not implemented'
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.n_epochs_per_validation = config['n_epochs_per_validation']
@@ -83,110 +90,9 @@ class TrainableBP(TrainableMatrixFactorization):
             self.input = real_to_complex(self.input)
 
     def freeze(self):
-        if not isinstance(self.model[0], FixedPermutation):
-            self.model[0] = FixedPermutation(self.model[0].argmax(), complex=self.model[0].complex)
-
-
-class TrainablePBT(TrainableMatrixFactorization):
-    """Product of block permutation matrices and product butterfly matrices, but
-    with increasing size (i.e. transpose of the normal butterfly block).
-    """
-    # Transposing the permutation product won't capture the FFT, since we'll
-    # need permutations that interleave the first half and second half (inverse
-    # of the permutation that separates the even and the odd). However, using
-    # the permutation product with increasing size will work since it can
-    # represent bit reversal, which is its own inverse.
-
-    def _setup(self, config):
-        device = config['device']
-        self.device = device
-        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
-        assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
-        assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
-        size = self.target_matrix.shape[0]
-        complex = self.target_matrix.dim() == 3 or config['complex']
-        torch.manual_seed(config['seed'])
-        self.model = nn.Sequential(
-            Block2x2DiagProduct(size=size, complex=complex, decreasing_size=False),
-            BlockPermProduct(size=size, complex=complex, share_logit=config['share_logit_0'], increasing_size=True),
-        ).to(device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
-        self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.n_epochs_per_validation = config['n_epochs_per_validation']
-        self.input = torch.eye(size).to(device)
-        if complex:
-            self.input = real_to_complex(self.input)
-
-    def freeze(self):
-        if not isinstance(self.model[1], FixedPermutation):
-            self.model[1] = FixedPermutation(self.model[1].argmax(), complex=self.model[1].complex)
-
-
-class TrainableBPP(TrainableMatrixFactorization):
-    """Product of butterfly matrices and product of block permutation matrices,
-    plus an extra permutation for more flexibility.
-    """
-
-    def _setup(self, config):
-        device = config['device']
-        self.device = device
-        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
-        assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
-        assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
-        size = self.target_matrix.shape[0]
-        complex = self.target_matrix.dim() == 3 or config['complex']
-        torch.manual_seed(config['seed'])
-        self.model = nn.Sequential(
-            BlockPerm(size=size, complex=complex),
-            BlockPermProduct(size=size, complex=complex, share_logit=config['share_logit_0']),
-            Block2x2DiagProduct(size=size, complex=complex)
-        ).to(device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
-        self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.n_epochs_per_validation = config['n_epochs_per_validation']
-        self.input = torch.eye(size).to(device)
-        if complex:
-            self.input = real_to_complex(self.input)
-
-    def freeze(self):
-        if not isinstance(self.model[0], FixedPermutation):
-            self.model[0] = FixedPermutation(self.model[0].argmax(), complex=self.model[0].complex)
-        if not isinstance(self.model[1], FixedPermutation):
-            self.model[1] = FixedPermutation(self.model[1].argmax(), complex=self.model[1].complex)
-
-
-class TrainableBPBP(TrainableMatrixFactorization):
-    """Combine two (BP) blocks, where B is product of butterflies and P is
-    product of block permutations.
-    """
-
-    def _setup(self, config):
-        device = config['device']
-        self.device = device
-        self.target_matrix = torch.tensor(config['target_matrix'], dtype=torch.float).to(device)
-        assert self.target_matrix.shape[0] == self.target_matrix.shape[1], 'Only square matrices are supported'
-        assert self.target_matrix.dim() in [2, 3], 'target matrix must be 2D if real of 3D if complex'
-        size = self.target_matrix.shape[0]
-        complex = self.target_matrix.dim() == 3 or config['complex']
-        torch.manual_seed(config['seed'])
-        self.model = nn.Sequential(
-            BlockPermProduct(size=size, complex=complex, share_logit=config['share_logit_0']),
-            Block2x2DiagProduct(size=size, complex=complex),
-            BlockPermProduct(size=size, complex=complex, share_logit=config['share_logit_0']),
-            Block2x2DiagProduct(size=size, complex=complex),
-        ).to(device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
-        self.n_steps_per_epoch = config['n_steps_per_epoch']
-        self.n_epochs_per_validation = config['n_epochs_per_validation']
-        self.input = torch.eye(size).to(device)
-        if complex:
-            self.input = real_to_complex(self.input)
-
-    def freeze(self):
-        if not isinstance(self.model[0], FixedPermutation):
-            self.model[0] = FixedPermutation(self.model[0].argmax(), complex=self.model[0].complex)
-        if not isinstance(self.model[2], FixedPermutation):
-            self.model[2] = FixedPermutation(self.model[2].argmax(), complex=self.model[2].complex)
+        for i, m in enumerate(self.model):
+            if isinstance(m, Permutation) or isinstance(m, PermutationFactor):
+                self.model[i] = FixedPermutation(m.argmax())
 
 
 def polish(trial):
@@ -194,24 +100,15 @@ def polish(trial):
     matrices (using the largest logits), and re-optimize using L-BFGS to find
     the nearest local optima.
     """
-    # Polish on CPUs, not GPUs
-    device = trial.config['device']
-    trial.config['device'] = 'cpu'
-    trainable = eval(trial.trainable_name)(trial.config)
+    # Hack: create new instance without call __init__, since trainable.__init__
+    # creates result_dir and log_dir in the wrong place (~/ray_results)
+    trainable_cls = TrainableBP
+    trainable = trainable_cls.__new__(trainable_cls)
+    trainable._setup(trial.config)
     trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
     loss = trainable.polish(N_LBFGS_STEPS, save_to_self_model=True)
     torch.save(trainable.model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
-    trial.config['device'] = device
     return loss
-
-
-model_name_to_trainable = {
-    'B': TrainableButterfly,
-    'BP': TrainableBP,
-    'PBT': TrainablePBT,
-    'BPP': TrainableBPP,
-    'BPBP': TrainableBPBP,
-}
 
 
 ex = Experiment('Transform_factorization')
@@ -228,24 +125,25 @@ def default_config():
     size = 8  # Size of matrix to factor, must be power of 2
     complex = True  # Whether to use complex factorization or real factorization
     fixed_order = True  # Whether the order of the factors are fixed
-    softmax_fn = 'softmax'  # Whether to use softmax (+ semantic loss) or sparsemax
     ntrials = 20  # Number of trials for hyperparameter tuning
     nsteps = 400  # Number of steps per epoch
     nepochsvalid = 5  # Frequency of validation (polishing), in terms of epochs
     nmaxepochs = 200  # Maximum number of epochs
-    result_dir = 'results_new'  # Directory to store results
+    result_dir = project_root + '/results_new'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
     nthreads = 1  # Number of CPU threads per job
     smoke_test = False  # Finish quickly for testing
 
 
 @ex.capture
-def transform_experiment(trainable, target, size, complex, ntrials, nsteps, nepochsvalid, result_dir, cuda, nthreads, smoke_test):
+def transform_experiment(model, target, size, complex, ntrials, nsteps, nepochsvalid, result_dir, cuda, nthreads, smoke_test):
+    assert model in ['B', 'BP', 'PBT', 'BPP', 'BPBP'], f'Model {model} not implemented'
     config={
-        'target_matrix': named_target_matrix(target, size),
+        'model': model,
+        'target_matrix': target,
+        'size': size,
         'complex': complex,
-        'share_logit_0': sample_from(lambda spec: random.choice([True, False])),
-        'share_logit_1': sample_from(lambda spec: random.choice([True, False])),
+        'share_logit': sample_from(lambda spec: np.random.choice((True, False), size=2)),
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_steps_per_epoch': nsteps,
@@ -253,8 +151,8 @@ def transform_experiment(trainable, target, size, complex, ntrials, nsteps, nepo
         'device': 'cuda' if cuda else 'cpu',
      }
     experiment = RayExperiment(
-        name=f'{target}_factorization_{trainable.__name__}_{complex}_{size}',
-        run=trainable,
+        name=f'{target}_factorization_{model}_{complex}_{size}',
+        run=TrainableBP,
         local_dir=result_dir,
         num_samples=ntrials,
         checkpoint_at_end=True,
@@ -269,29 +167,30 @@ def transform_experiment(trainable, target, size, complex, ntrials, nsteps, nepo
 
 
 @ex.automain
-def run(model, result_dir, nmaxepochs, nthreads):
-    trainable = model_name_to_trainable[model]
-    experiment = transform_experiment(trainable)
+def run(result_dir, nmaxepochs, nthreads, cuda):
+    experiment = transform_experiment()
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(nthreads)
-    ray.init()
+    torch.set_num_threads(nthreads)
+    try:
+        with open('../config/redis_address', 'r') as f:
+            address = f.read().strip()
+            ray.init(redis_address=address)
+    except:
+        ray.init()
     ahb = AsyncHyperBandScheduler(reward_attr='negative_loss', max_t=nmaxepochs)
-    trials = run_experiments(experiment, scheduler=ahb, raise_on_failed_trial=False, early_stop_all_trials=True)
+    trials = run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True, early_stop_all_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
-    losses = [-trial.last_result.get('negative_loss', float('inf')) for trial in trials]
+    losses = [-trial.last_result.get('negative_loss', float('-inf')) for trial in trials]
+    print(np.array(losses))
 
     # Polish solutions with L-BFGS
-    pool = mp.Pool()
-    sorted_trials = sorted(trials, key=lambda trial: -trial.last_result['negative_loss'])
-    polished_losses = pool.map(polish, sorted_trials[:N_TRIALS_TO_POLISH])
-    # polished_losses = [-trial.last_result['polished_negative_loss'] for trial in sorted_trials[:N_TRIALS_TO_POLISH]]
-    pool.close()
-    pool.join()
+    polish_fn = ray.remote(num_gpus=0.25 if cuda else 0)(polish)
+    sorted_trials = sorted(trials, key=lambda trial: -trial.last_result.get('negative_loss', float('-inf')))
+    polished_losses = ray.get([polish_fn.remote(trial) for trial in sorted_trials[:N_TRIALS_TO_POLISH]])
     for i in range(min(N_TRIALS_TO_POLISH, len(trials))):
         sorted_trials[i].last_result['polished_negative_loss'] = -polished_losses[i]
-    print(np.array(losses))
-    print(np.sort(losses))
-    # print(np.sort(losses)[:N_TRIALS_TO_POLISH])
+    print(np.sort(losses)[:N_TRIALS_TO_POLISH])
     print(np.sort(polished_losses))
 
     checkpoint_path = Path(result_dir) / experiment.name
