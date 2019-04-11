@@ -32,8 +32,8 @@ import os
 os.environ['MKL_NUM_THREADS'] = '1'
 torch.set_num_threads(1)
 
-nsteps = 50
-# nsteps = 1
+# nsteps = 50
+nsteps = 1
 batch_size = 1000
 # batch_size = 1
 n = 1024
@@ -109,6 +109,8 @@ grad = torch.randn_like(x)
 # torch.cuda.synchronize()
 # end = time.perf_counter()
 # print('Total: ', end - start)
+output = B(x)
+output.backward(gradient=grad)
 
 # output = x
 # torch.cuda.synchronize()
@@ -141,11 +143,11 @@ grad = torch.randn_like(x)
 # b = a[:, ::2].sum(dim=-1)
 # b = a.sum(dim=0)
 
-output = x
-prob = torch.zeros(3, device=x.device, requires_grad=True)
-prob[0] = 0.7
-prob[1] = 0.6
-prob[2] = 0.4
+# output = x
+# prob = torch.zeros(3, device=x.device, requires_grad=True)
+# prob[0] = 0.7
+# prob[1] = 0.6
+# prob[2] = 0.4
 
 # torch.cuda.synchronize()
 # start = time.perf_counter()
@@ -197,33 +199,33 @@ prob[2] = 0.4
 # end = time.perf_counter()
 # print('Total: ', end - start)
 
-torch.cuda.synchronize()
-start = time.perf_counter()
-for factor in P.factors[::-1]:
-    torch.cuda.synchronize()
-    start_micro = time.perf_counter()
-    for _ in range(nsteps):
-        output_fast = permutation_factor_reverse_mult(prob[1:], output.view(-1, factor.size))
-        # output_slow = ((1 - prob[1:]).unsqueeze(-1) * output.view(-1, 2, factor.size//2) + prob[1:].unsqueeze(-1) * output.view(-1, 2, factor.size//2).flip(-1)).view(-1, factor.size)
-        # print((output_fast - output_slow).abs().max().item())
-    torch.cuda.synchronize()
-    end_micro = time.perf_counter()
-    print(f'Size {factor.size}: {end_micro - start_micro}s')
-    torch.cuda.synchronize()
-    start_micro = time.perf_counter()
-    for _ in range(nsteps):
-        d_prob_fast, d_output_fast = torch.autograd.grad(output_fast, (prob, output), grad.view(output_fast.shape), retain_graph=True)
-        # d_prob_slow, d_output_slow = torch.autograd.grad(output_slow, (prob, output), grad.view(output_slow.shape), retain_graph=True)
-        # print((d_prob_fast))
-        # print((d_prob_slow))
-        # assert d_output_fast.shape == d_output_slow.shape
-        # print((d_output_fast - d_output_slow).abs().max().item())
-    torch.cuda.synchronize()
-    end_micro = time.perf_counter()
-    print(f'Size {factor.size}: {end_micro - start_micro}s')
-torch.cuda.synchronize()
-end = time.perf_counter()
-print('Total: ', end - start)
+# torch.cuda.synchronize()
+# start = time.perf_counter()
+# for factor in P.factors[::-1]:
+#     torch.cuda.synchronize()
+#     start_micro = time.perf_counter()
+#     for _ in range(nsteps):
+#         output_fast = permutation_factor_reverse_mult(prob[1:], output.view(-1, factor.size))
+#         # output_slow = ((1 - prob[1:]).unsqueeze(-1) * output.view(-1, 2, factor.size//2) + prob[1:].unsqueeze(-1) * output.view(-1, 2, factor.size//2).flip(-1)).view(-1, factor.size)
+#         # print((output_fast - output_slow).abs().max().item())
+#     torch.cuda.synchronize()
+#     end_micro = time.perf_counter()
+#     print(f'Size {factor.size}: {end_micro - start_micro}s')
+#     torch.cuda.synchronize()
+#     start_micro = time.perf_counter()
+#     for _ in range(nsteps):
+#         d_prob_fast, d_output_fast = torch.autograd.grad(output_fast, (prob, output), grad.view(output_fast.shape), retain_graph=True)
+#         # d_prob_slow, d_output_slow = torch.autograd.grad(output_slow, (prob, output), grad.view(output_slow.shape), retain_graph=True)
+#         # print((d_prob_fast))
+#         # print((d_prob_slow))
+#         # assert d_output_fast.shape == d_output_slow.shape
+#         # print((d_output_fast - d_output_slow).abs().max().item())
+#     torch.cuda.synchronize()
+#     end_micro = time.perf_counter()
+#     print(f'Size {factor.size}: {end_micro - start_micro}s')
+# torch.cuda.synchronize()
+# end = time.perf_counter()
+# print('Total: ', end - start)
 
 # torch.cuda.synchronize()
 # start = time.perf_counter()
