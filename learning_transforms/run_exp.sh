@@ -75,5 +75,5 @@ python learning_transforms.py with target=legendre model=BP size=32 ntrials=40
 python learning_transforms.py with target=legendre model=BP size=64 ntrials=60
 python learning_transforms.py with target=legendre model=BP size=128 ntrials=80
 python learning_transforms.py with target=legendre model=BP size=256 ntrials=160
-python learning_transforms.py with target=legendre model=BP size=512 ntrials=160  # gpu4
-python learning_transforms.py with target=legendre model=BP size=1024 ntrials=320  # gpu6
+python learning_transforms.py with target=legendre model=BP size=512 ntrials=160
+python learning_transforms.py with target=legendre model=BP size=1024 ntrials=320
