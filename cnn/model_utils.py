@@ -5,7 +5,7 @@ name_to_model = {
     'LeNet': lambda args: models.LeNet(),
     'ResNet18': lambda args: models.ResNet18(),
     'ResNet20Original': lambda args: models.resnet20original(),
-    'MobileNet': lambda args: models.MobileNet(),
+    'MobileNet': lambda args: models.MobileNet(**args),
 }
 
 
