@@ -21,7 +21,7 @@ def butterfly_mult_torch(twiddle, input, increasing_stride=True, return_intermed
     """
     Parameters:
         twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
-        input: (batch_size, n) if real or (batch_size, n, 2) if complex
+        input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
             decreasing stride (e.g., n/2, n/4, ..., 1).
             Note that this only changes the order of multiplication, not how twiddle is stored.
@@ -30,13 +30,12 @@ def butterfly_mult_torch(twiddle, input, increasing_stride=True, return_intermed
     Returns:
         output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
     """
-    batch_size, n = input.shape[:2]
-    nstack = twiddle.shape[0]
+    batch_size, nstack, n = input.shape[:3]
     assert twiddle.shape == (nstack, n - 1, 2, 2) if input.dim() == 2 else (nstack, n - 1, 2, 2, 2)
     m = int(math.log2(n))
     assert n == 1 << m, "size must be a power of 2"
-    if input.dim() == 2:  # real
-        output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n)
+    if input.dim() == 3:  # real
+        output = input.contiguous()
         intermediates = [output]
         for log_stride in range(m) if increasing_stride else range(m)[::-1]:
             stride = 1 << log_stride
@@ -46,7 +45,7 @@ def butterfly_mult_torch(twiddle, input, increasing_stride=True, return_intermed
             intermediates.append(output)
         return output.view(batch_size, nstack, n) if not return_intermediates else torch.stack([intermediate.view(batch_size, nstack, n) for intermediate in intermediates])
     else:  # complex
-        output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n, 2)
+        output = input.contiguous()
         intermediates = [output]
         for log_stride in range(m) if increasing_stride else range(m)[::-1]:
             stride = 1 << log_stride
@@ -64,7 +63,7 @@ class ButterflyMult(torch.autograd.Function):
         """
         Parameters:
             twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
-            input: (batch_size, n) if real or (batch_size, n, 2) if complex
+            input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
             increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
                 decreasing stride (e.g., n/2, n/4, ..., 1).
                 Note that this only changes the order of multiplication, not how twiddle is stored.
@@ -86,7 +85,7 @@ class ButterflyMult(torch.autograd.Function):
             output + intermediate values for backward: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
         Return:
             d_twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
-            d_input: (batch_size, n) if real or (batch_size, n, 2) if complex
+            d_input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
         twiddle, output_and_intermediate = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
@@ -100,7 +99,7 @@ def butterfly_mult_untied_torch(twiddle, input, increasing_stride=True, return_i
     """
     Parameters:
         twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
-        input: (batch_size, n) if real or (batch_size, n, 2) if complex
+        input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
             decreasing stride (e.g., n/2, n/4, ..., 1).
             Note that this only changes the order of multiplication, not how twiddle is stored.
@@ -109,13 +108,12 @@ def butterfly_mult_untied_torch(twiddle, input, increasing_stride=True, return_i
     Returns:
         output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
     """
-    batch_size, n = input.shape[:2]
+    batch_size, nstack, n = input.shape[:3]
     m = int(math.log2(n))
     assert n == 1 << m, "size must be a power of 2"
-    nstack = twiddle.shape[0]
     assert twiddle.shape == (nstack, m, n // 2, 2, 2) if input.dim() == 2 else (nstack, m, n // 2, 2, 2, 2)
-    if input.dim() == 2:  # real
-        output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n)
+    if input.dim() == 3:  # real
+        output = input.contiguous()
         intermediates = [output]
         for log_stride in range(m) if increasing_stride else range(m)[::-1]:
             stride = 1 << log_stride
@@ -125,7 +123,7 @@ def butterfly_mult_untied_torch(twiddle, input, increasing_stride=True, return_i
             intermediates.append(output)
         return output.view(batch_size, nstack, n) if not return_intermediates else torch.stack([intermediate.view(batch_size, nstack, n) for intermediate in intermediates])
     else:  # complex
-        output = input.contiguous().unsqueeze(1).expand(batch_size, nstack, n, 2)
+        output = input.contiguous()
         intermediates = [output]
         for log_stride in range(m) if increasing_stride else range(m)[::-1]:
             stride = 1 << log_stride
@@ -143,7 +141,7 @@ class ButterflyMultUntied(torch.autograd.Function):
         """
         Parameters:
             twiddle: (nstack, log 2, n / 2, 2, 2) if real or (nstack, log 2, n / 2, 2, 2, 2) if complex
-            input: (batch_size, n) if real or (batch_size, n, 2) if complex
+            input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
             increasing_stride: whether to multiply with increasing stride (e.g. 1, 4, ..., n/2) or
                 decreasing stride (e.g., n/2, n/4, ..., 1).
                 Note that this only changes the order of multiplication, not how twiddle is stored.
@@ -165,7 +163,7 @@ class ButterflyMultUntied(torch.autograd.Function):
             output + intermediate values for backward: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
         Return:
             d_twiddle: (nstack, log 2, n / 2, 2, 2) if real or (nstack, log 2, n / 2, 2, 2, 2) if complex
-            d_input: (batch_size, n) if real or (batch_size, n, 2) if complex
+            d_input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
         twiddle, output_and_intermediate = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride

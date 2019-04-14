@@ -362,7 +362,7 @@ std::vector<at::Tensor> butterfly_multiply_inplace_backward(const at::Tensor& gr
 at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::Tensor& input, bool increasing_stride) {
   /* Parameters:
          twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
-         input: (batch_size, n) if real or (batch_size, n, 2) if complex
+         input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
          increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
              decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
@@ -371,24 +371,24 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
          output + intermediate values for backward pass: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
   */
   const auto batch_size = input.size(0);
-  const auto n = input.size(1);
-  const auto nstack = twiddle.size(0);
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
   const int log_n = int(log2((double) n));
-  AT_CHECK((twiddle.dim() == 4 && input.dim() == 2) || (twiddle.dim() == 5 && input.dim() == 3),
-           "butterfly_multiply_intermediate: twiddle and input must have dimension 4,2 or 5,3");
+  AT_CHECK((twiddle.dim() == 4 && input.dim() == 3) || (twiddle.dim() == 5 && input.dim() == 4),
+           "butterfly_multiply_intermediate: twiddle and input must have dimension 4,3 or 5,4");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(1) == n - 1 && twiddle.size(2) == 2 && twiddle.size(3) == 2, "butterfly_multiply_intermediate: twiddle must have shape (nstack, n-1, 2, 2) or (nstack, n-1, 2, 2, 2)");
-  auto output = input.dim() == 2 ?
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == n - 1 && twiddle.size(2) == 2 && twiddle.size(3) == 2, "butterfly_multiply_intermediate: twiddle must have shape (nstack, n-1, 2, 2) or (nstack, n-1, 2, 2, 2)");
+  auto output = input.dim() == 3 ?
     torch::empty({log_n + 1, batch_size, nstack, n}, torch::dtype(input.dtype()).device(input.device())) :
     torch::empty({log_n + 1, batch_size, nstack, n, 2}, torch::dtype(input.dtype()).device(input.device()));
-  output[0] = input.unsqueeze(1);
+  output[0] = input;
   if (input.is_cuda()) {
     butterfly_multiply_intermediate_cuda(twiddle, output, increasing_stride);
     return output;
   }
-  const bool complex = input.dim() == 3;
+  const bool complex = input.dim() == 4;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_intermediate", [&] {
     if (!complex) {  // real
       const auto twiddle_a = twiddle.accessor<scalar_t, 4>();
@@ -462,7 +462,7 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Return:
          d_twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
-         d_input: (batch_size, n) if real or (batch_size, n, 2) if complex
+         d_input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
   */
   const auto batch_size = grad.size(0);
   const auto nstack = grad.size(1);
@@ -480,7 +480,7 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
   auto d_twiddle = torch::zeros_like(twiddle);
   if (output.is_cuda()) {
     butterfly_multiply_intermediate_backward_cuda(twiddle, output, d_twiddle, d_input, increasing_stride);
-    return {d_twiddle, nstack > 1 ? d_input.sum(/*dim=*/1) : d_input.squeeze(/*dim=*/1)} ;
+    return {d_twiddle, d_input} ;
   }
   bool complex = grad.dim() == 4;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "butterfly_multiply_intermediate_backward", [&] {
@@ -564,13 +564,13 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
       }
     }
   });
-  return {d_twiddle, nstack > 1 ? d_input.sum(/*dim=*/1) : d_input.squeeze(/*dim=*/1)} ;
+  return {d_twiddle, d_input} ;
 }
 
 at::Tensor butterfly_multiply_untied(const at::Tensor& twiddle, const at::Tensor& input, bool increasing_stride) {
   /* Parameters:
          twiddle: (nstack, log n, n/2, 2, 2) if real or (nstack, log n, n/2, 2, 2, 2) if complex
-         input: (batch_size, n) if real or (batch_size, n, 2) if complex
+         input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
          increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
              decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
@@ -579,24 +579,24 @@ at::Tensor butterfly_multiply_untied(const at::Tensor& twiddle, const at::Tensor
          output + untied values for backward pass: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
   */
   const auto batch_size = input.size(0);
-  const auto n = input.size(1);
-  const auto nstack = twiddle.size(0);
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
   const int log_n = int(log2((double) n));
-  AT_CHECK((twiddle.dim() == 5 && input.dim() == 2) || (twiddle.dim() == 6 && input.dim() == 3),
-           "butterfly_multiply_untied: twiddle and input must have dimension 5,2 or 6,3");
+  AT_CHECK((twiddle.dim() == 5 && input.dim() == 3) || (twiddle.dim() == 6 && input.dim() == 4),
+           "butterfly_multiply_untied: twiddle and input must have dimension 5,3 or 6,4");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
-  auto output = input.dim() == 2 ?
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
+  auto output = input.dim() == 3 ?
     torch::empty({log_n + 1, batch_size, nstack, n}, torch::dtype(input.dtype()).device(input.device())) :
     torch::empty({log_n + 1, batch_size, nstack, n, 2}, torch::dtype(input.dtype()).device(input.device()));
-  output[0] = input.unsqueeze(1);
+  output[0] = input;
   if (input.is_cuda()) {
     butterfly_multiply_untied_cuda(twiddle, output, increasing_stride);
     return output;
   }
-  const bool complex = input.dim() == 3;
+  const bool complex = input.dim() == 4;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_untied", [&] {
     if (!complex) {  // real
       const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
@@ -666,7 +666,7 @@ std::vector<at::Tensor> butterfly_multiply_untied_backward(const at::Tensor& gra
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Return:
          d_twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
-         d_input: (batch_size, n) if real or (batch_size, n, 2) if complex
+         d_input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
   */
   const auto batch_size = grad.size(0);
   const auto nstack = grad.size(1);
@@ -684,7 +684,7 @@ std::vector<at::Tensor> butterfly_multiply_untied_backward(const at::Tensor& gra
   auto d_twiddle = torch::zeros_like(twiddle);
   if (output.is_cuda()) {
     butterfly_multiply_untied_backward_cuda(twiddle, output, d_twiddle, d_input, increasing_stride);
-    return {d_twiddle, nstack > 1 ? d_input.sum(/*dim=*/1) : d_input.squeeze(/*dim=*/1)} ;
+    return {d_twiddle, d_input} ;
   }
   bool complex = grad.dim() == 4;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "butterfly_multiply_untied_backward", [&] {
@@ -764,7 +764,7 @@ std::vector<at::Tensor> butterfly_multiply_untied_backward(const at::Tensor& gra
       }
     }
   });
-  return {d_twiddle, nstack > 1 ? d_input.sum(/*dim=*/1) : d_input.squeeze(/*dim=*/1)} ;
+  return {d_twiddle, d_input} ;
 }
 
 at::Tensor permutation_factor_even_odd_multiply(const at::Tensor& p, const at::Tensor& input) {
