@@ -3,11 +3,12 @@
 See the paper "MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications"
 for more details.
 '''
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .butterfly1x1conv import Butterfly1x1Conv
+from .butterfly_conv import Butterfly1x1Conv
 from .circulant1x1conv import Circulant1x1Conv
 from .toeplitzlike1x1conv import Toeplitzlike1x1Conv
 
