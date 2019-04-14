@@ -62,7 +62,7 @@ class Butterfly(nn.Module):
                                                          torch.stack((C, D), dim=-2)), dim=-2))
         if bias:
             bias_shape = (out_size, ) if not complex else (out_size, 2)
-            self.bias = nn.Parameter(torch.Tensor(bias_shape))
+            self.bias = nn.Parameter(torch.Tensor(*bias_shape))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -104,3 +104,69 @@ class Butterfly(nn.Module):
             self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init
         )
 
+
+class ButterflyBmm(Butterfly):
+    """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
+    Perform batch matrix multiply.
+
+    Parameters:
+        in_size: size of input
+        out_size: size of output
+        matrix_batch: how many copies of the matrix
+        bias: If set to False, the layer will not learn an additive bias.
+                Default: ``True``
+        complex: whether complex or real
+        tied_weight: whether the weights in the butterfly factors are tied.
+            If True, will have 4N parameters, else will have 2 N log N parameters (not counting bias)
+         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 1).
+             Note that this only changes the order of multiplication, not how twiddle is stored.
+             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+        ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
+    """
+
+    def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False, tied_weight=True, increasing_stride=True, ortho_init=False):
+        m = int(math.ceil(math.log2(in_size)))
+        in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
+        nstack = int(math.ceil(out_size / in_size_extended))
+        super().__init__(in_size_extended, in_size_extended * nstack * matrix_batch, bias, complex, tied_weight, increasing_stride, ortho_init)
+        self.in_size = in_size
+        self.out_size = out_size
+        self.nstack = nstack
+        self.matrix_batch = matrix_batch
+        if self.bias is not None:
+            with torch.no_grad():
+                bias_reshape = self.bias.view((matrix_batch, in_size_extended * nstack) + (() if not self.complex else (2, )))
+                self.bias = nn.Parameter(bias_reshape[:, :out_size].contiguous())
+
+    def forward(self, input):
+        """
+        Parameters:
+            input: (batch, matrix_batch, in_size) if real or (batch, matrix_batch, in_size, 2) if complex
+        Return:
+            output: (batch, matrix_batch, out_size) if real or (batch, matrix_batch, out_size, 2) if complex
+        """
+        batch = input.shape[0]
+        output = input
+        if self.in_size != self.in_size_extended:  # Zero-pad
+            padded_shape = (batch, self.matrix_batch, self.in_size_extended - self.in_size) + (() if not self.complex else (2, ))
+            output = torch.cat((output, torch.zeros(padded_shape, dtype=output.dtype, device=output.device)),
+                               dim=-1 if not self.complex else -2)
+        output = output.unsqueeze(2).expand((batch, self.matrix_batch, self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
+        output = output.reshape((batch, self.matrix_batch * self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
+        output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
+        output = output.view((batch, self.matrix_batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
+        out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
+        if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
+            if not self.complex:
+                output = output.view(batch, self.matrix_batch, self.in_size_extended // out_size_extended, out_size_extended).mean(dim=2)
+            else:
+                output = output.view(batch, self.matrix_batch, self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=2)
+        if self.out_size != out_size_extended:  # Take top rows
+            output = output[:, :, :self.out_size]
+        return output if self.bias is None else output + self.bias
+
+    def extra_repr(self):
+        return 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}'.format(
+            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init
+        )
