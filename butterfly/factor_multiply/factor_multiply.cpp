@@ -363,8 +363,8 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
   /* Parameters:
          twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
          input: (batch_size, n) if real or (batch_size, n, 2) if complex
-         increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
-             decreasing stride (e.g., n/2, n/4, ..., 2).
+         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Returns:
@@ -456,8 +456,8 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
          grad: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
          twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
          output + intermediate values for backward: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
-         increasing_stride: whether the forward pass multiply was with increasing stride (e.g. 2, 4, ..., n/2) or
-             decreasing stride (e.g., n/2, n/4, ..., 2).
+         increasing_stride: whether the forward pass multiply was with increasing stride (e.g. 1, 2, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Return:
@@ -571,8 +571,8 @@ at::Tensor butterfly_multiply_untied(const at::Tensor& twiddle, const at::Tensor
   /* Parameters:
          twiddle: (nstack, log n, n/2, 2, 2) if real or (nstack, log n, n/2, 2, 2, 2) if complex
          input: (batch_size, n) if real or (batch_size, n, 2) if complex
-         increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
-             decreasing stride (e.g., n/2, n/4, ..., 2).
+         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Returns:
@@ -660,8 +660,8 @@ std::vector<at::Tensor> butterfly_multiply_untied_backward(const at::Tensor& gra
          grad: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
          twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
          output + untied values for backward: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
-         increasing_stride: whether the forward pass multiply was with increasing stride (e.g. 2, 4, ..., n/2) or
-             decreasing stride (e.g., n/2, n/4, ..., 2).
+         increasing_stride: whether the forward pass multiply was with increasing stride (e.g. 1, 2, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Return:

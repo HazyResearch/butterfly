@@ -19,10 +19,10 @@ def permutation_mult_torch(prob, input, increasing_stride=False, return_intermed
     Parameters:
         prob: (nsteps, 3), where prob[:, 0] is the probability of separating the even and odd indices,
             and prob[:, 1:3] are the probabilities of reversing the 1st and 2nd halves respectively.
-            Note that stride starts at 4, not 2 (as permutations do nothing at stride 2).
+            Note that stride starts at 2, not 1 (as permutations do nothing at stride 1).
         input: (batch_size, n) if real or (batch_size, n, 2) if complex
-        increasing_stride: whether to multiply with increasing stride (e.g. 4, 8, ..., n/2) or
-            decreasing stride (e.g., n/2, n/4, ..., 4).
+        increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
+            decreasing stride (e.g., n/2, n/4, ..., 2).
             Note that this only changes the order of multiplication, not how prob is stored.
             In other words, prob[@log_stride - 1] always stores the probability for @stride.
         return_intermediates: whether to return all the intermediate values computed, for debugging
@@ -123,10 +123,10 @@ def permutation_mult_factors(prob, input, increasing_stride=False, return_interm
     Parameters:
         prob: (nsteps, 3), where prob[:, 0] is the probability of separating the even and odd indices,
             and prob[:, 1:3] are the probabilities of reversing the 1st and 2nd halves respectively.
-            Note that stride starts at 4, not 2 (as permutations do nothing at stride 2).
+            Note that stride starts at 2, not 1 (as permutations do nothing at stride 1).
         input: (batch_size, n) if real or (batch_size, n, 2) if complex
-        increasing_stride: whether to multiply with increasing stride (e.g. 4, 8, ..., n/2) or
-            decreasing stride (e.g., n/2, n/4, ..., 4).
+        increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
+            decreasing stride (e.g., n/2, n/4, ..., 2).
             Note that this only changes the order of multiplication, not how prob is stored.
             In other words, prob[@log_stride - 1] always stores the probability for @stride.
         return_intermediates: whether to return all the intermediate values computed, for debugging

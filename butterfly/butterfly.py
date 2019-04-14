@@ -18,8 +18,8 @@ class Butterfly(nn.Module):
         complex: whether complex or real
         tied_weight: whether the weights in the butterfly factors are tied.
             If True, will have 4N parameters, else will have 2 N log N parameters (not counting bias)
-         increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
-             decreasing stride (e.g., n/2, n/4, ..., 2).
+         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.

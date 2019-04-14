@@ -22,8 +22,8 @@ def butterfly_mult_torch(twiddle, input, increasing_stride=True, return_intermed
     Parameters:
         twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
         input: (batch_size, n) if real or (batch_size, n, 2) if complex
-        increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
-            decreasing stride (e.g., n/2, n/4, ..., 2).
+        increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+            decreasing stride (e.g., n/2, n/4, ..., 1).
             Note that this only changes the order of multiplication, not how twiddle is stored.
             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         return_intermediates: whether to return all the intermediate values computed, for debugging
@@ -65,8 +65,8 @@ class ButterflyMult(torch.autograd.Function):
         Parameters:
             twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
             input: (batch_size, n) if real or (batch_size, n, 2) if complex
-            increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
-                decreasing stride (e.g., n/2, n/4, ..., 2).
+            increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+                decreasing stride (e.g., n/2, n/4, ..., 1).
                 Note that this only changes the order of multiplication, not how twiddle is stored.
                 In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         Returns:
@@ -101,8 +101,8 @@ def butterfly_mult_untied_torch(twiddle, input, increasing_stride=True, return_i
     Parameters:
         twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
         input: (batch_size, n) if real or (batch_size, n, 2) if complex
-        increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
-            decreasing stride (e.g., n/2, n/4, ..., 2).
+        increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+            decreasing stride (e.g., n/2, n/4, ..., 1).
             Note that this only changes the order of multiplication, not how twiddle is stored.
             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         return_intermediates: whether to return all the intermediate values computed, for debugging
@@ -144,8 +144,8 @@ class ButterflyMultUntied(torch.autograd.Function):
         Parameters:
             twiddle: (nstack, log 2, n / 2, 2, 2) if real or (nstack, log 2, n / 2, 2, 2, 2) if complex
             input: (batch_size, n) if real or (batch_size, n, 2) if complex
-            increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
-                decreasing stride (e.g., n/2, n/4, ..., 2).
+            increasing_stride: whether to multiply with increasing stride (e.g. 1, 4, ..., n/2) or
+                decreasing stride (e.g., n/2, n/4, ..., 1).
                 Note that this only changes the order of multiplication, not how twiddle is stored.
                 In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         Returns:
@@ -184,8 +184,8 @@ class ButterflyMultInplace(torch.autograd.Function):
         Parameters:
             twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
             input: (batch_size, n) if real or (batch_size, n, 2) if complex
-            increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
-                decreasing stride (e.g., n/2, n/4, ..., 2).
+            increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+                decreasing stride (e.g., n/2, n/4, ..., 1).
                 Note that this only changes the order of multiplication, not how twiddle is stored.
                 In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         Returns:
@@ -240,8 +240,8 @@ def butterfly_mult_factors(twiddle, input, increasing_stride=True, return_interm
     Parameters:
         twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
         input: (batch_size, n) if real or (batch_size, n, 2) if complex
-        increasing_stride: whether to multiply with increasing stride (e.g. 2, 4, ..., n/2) or
-            decreasing stride (e.g., n/2, n/4, ..., 2).
+        increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+            decreasing stride (e.g., n/2, n/4, ..., 1).
             Note that this only changes the order of multiplication, not how twiddle is stored.
             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         return_intermediates: whether to return all the intermediate values computed, for debugging
