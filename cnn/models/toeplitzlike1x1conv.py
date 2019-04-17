@@ -107,6 +107,8 @@ class ToeplitzlikeLinear(nn.Module):
         init_stddev = math.sqrt(1. / (rank * size))
         self.G = nn.Parameter(torch.randn(nstack, rank, size) * init_stddev)
         self.H = nn.Parameter(torch.randn(nstack, rank, size) * init_stddev)
+        self.G._is_structured = True  # Flag to avoid weight decay
+        self.H._is_structured = True
         self.register_buffer('reverse_idx', torch.arange(size - 1, -1, -1))
 
     def forward(self, input):

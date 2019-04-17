@@ -40,10 +40,16 @@ class TrainableModel(Trainable):
             torch.cuda.manual_seed(config['seed'])
         self.model = model_utils.get_model(config['model']).to(device)
         self.train_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
+        structured_params = filter(lambda p: hasattr(p, '_is_structured') and p._is_structured, self.model.parameters())
+        unstructured_params = filter(lambda p: not (hasattr(p, '_is_structured') and p._is_structured), self.model.parameters())
         if config['optimizer'] == 'Adam':
-            self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
+            self.optimizer = optim.Adam([{'params': structured_params, 'weight_decay': 0.0},
+                                         {'params': unstructured_params}],
+                                        lr=config['lr'], weight_decay=config['weight_decay'])
         else:
-            self.optimizer = optim.SGD(self.model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=config['weight_decay'])
+            self.optimizer = optim.SGD([{'params': structured_params, 'weight_decay': 0.0},
+                                        {'params': unstructured_params}],
+                                       lr=config['lr'], momentum=0.9, weight_decay=config['weight_decay'])
         self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
 
     def _train_iteration(self):

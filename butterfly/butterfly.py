@@ -60,6 +60,7 @@ class Butterfly(nn.Module):
                 D = torch.stack((c * torch.cos(alpha - psi), c * torch.sin(alpha - psi)), dim=-1)
                 self.twiddle = nn.Parameter(torch.stack((torch.stack((A, B), dim=-2),
                                                          torch.stack((C, D), dim=-2)), dim=-2))
+        self.twiddle._is_structured = True  # Flag to avoid weight decay
         if bias:
             bias_shape = (out_size, ) if not complex else (out_size, 2)
             self.bias = nn.Parameter(torch.Tensor(*bias_shape))

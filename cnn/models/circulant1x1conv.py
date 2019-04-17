@@ -14,6 +14,7 @@ class CirculantLinear(nn.Module):
         init_stddev = math.sqrt(1. / self.size)
         c = torch.randn(nstack, size) * init_stddev
         self.c_f = nn.Parameter(torch.rfft(c, 1))
+        self.c_f._is_structured = True  # Flag to avoid weight decay
 
     def forward(self, input):
         """
