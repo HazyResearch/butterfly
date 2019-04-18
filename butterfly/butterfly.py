@@ -18,14 +18,16 @@ class Butterfly(nn.Module):
         complex: whether complex or real
         tied_weight: whether the weights in the butterfly factors are tied.
             If True, will have 4N parameters, else will have 2 N log N parameters (not counting bias)
-         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
-             decreasing stride (e.g., n/2, n/4, ..., 1).
-             Note that this only changes the order of multiplication, not how twiddle is stored.
-             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+        increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+            decreasing stride (e.g., n/2, n/4, ..., 1).
+            Note that this only changes the order of multiplication, not how twiddle is stored.
+            In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
+        ortho_param: whether to parameterize the twiddle to always be orthogonal 2x2 matrices.
+            Only implemented for real, not complex, for now.
     """
 
-    def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True, increasing_stride=True, ortho_init=False):
+    def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True, increasing_stride=True, ortho_init=False, ortho_param=False):
         super().__init__()
         self.in_size = in_size
         m = int(math.ceil(math.log2(in_size)))
@@ -36,30 +38,35 @@ class Butterfly(nn.Module):
         self.tied_weight = tied_weight
         self.increasing_stride = increasing_stride
         self.ortho_init = ortho_init
+        self.ortho_param = ortho_param
         twiddle_core_shape = (self.nstack, size - 1) if tied_weight else (self.nstack, m, size // 2)
-        if not ortho_init:
-            twiddle_shape = twiddle_core_shape + ((2, 2) if not complex else (2, 2, 2))
-            scaling = 1.0 / 2 if complex else 1.0 / math.sqrt(2)
-            self.twiddle = nn.Parameter(torch.randn(twiddle_shape) * scaling)
-        else:
-            if not complex:
-                theta = torch.rand(twiddle_core_shape) * math.pi * 2
-                c, s = torch.cos(theta), torch.sin(theta)
-                det = torch.randint(0, 2, (twiddle_core_shape), dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
-                self.twiddle = nn.Parameter(torch.stack((torch.stack((det * c, -det * s), dim=-1),
-                                                         torch.stack((s, c), dim=-1)), dim=-1))
+        if not ortho_param:
+            if not ortho_init:
+                twiddle_shape = twiddle_core_shape + ((2, 2) if not complex else (2, 2, 2))
+                scaling = 1.0 / 2 if complex else 1.0 / math.sqrt(2)
+                self.twiddle = nn.Parameter(torch.randn(twiddle_shape) * scaling)
             else:
-                # Sampling from the Haar measure on U(2) is a bit subtle.
-                # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
-                phi = torch.asin(torch.sqrt(torch.rand(twiddle_core_shape)))
-                c, s = torch.cos(phi), torch.sin(phi)
-                alpha, psi, chi = torch.randn((3, ) + twiddle_core_shape) * math.pi * 2
-                A = torch.stack((c * torch.cos(alpha + psi), c * torch.sin(alpha + psi)), dim=-1)
-                B = torch.stack((s * torch.cos(alpha + chi), s * torch.sin(alpha + chi)), dim=-1)
-                C = torch.stack((-s * torch.cos(alpha - chi), -s * torch.sin(alpha - chi)), dim=-1)
-                D = torch.stack((c * torch.cos(alpha - psi), c * torch.sin(alpha - psi)), dim=-1)
-                self.twiddle = nn.Parameter(torch.stack((torch.stack((A, B), dim=-2),
-                                                         torch.stack((C, D), dim=-2)), dim=-2))
+                if not complex:
+                    theta = torch.rand(twiddle_core_shape) * math.pi * 2
+                    c, s = torch.cos(theta), torch.sin(theta)
+                    det = torch.randint(0, 2, (twiddle_core_shape), dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
+                    self.twiddle = nn.Parameter(torch.stack((torch.stack((det * c, -det * s), dim=-1),
+                                                            torch.stack((s, c), dim=-1)), dim=-1))
+                else:
+                    # Sampling from the Haar measure on U(2) is a bit subtle.
+                    # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
+                    phi = torch.asin(torch.sqrt(torch.rand(twiddle_core_shape)))
+                    c, s = torch.cos(phi), torch.sin(phi)
+                    alpha, psi, chi = torch.randn((3, ) + twiddle_core_shape) * math.pi * 2
+                    A = torch.stack((c * torch.cos(alpha + psi), c * torch.sin(alpha + psi)), dim=-1)
+                    B = torch.stack((s * torch.cos(alpha + chi), s * torch.sin(alpha + chi)), dim=-1)
+                    C = torch.stack((-s * torch.cos(alpha - chi), -s * torch.sin(alpha - chi)), dim=-1)
+                    D = torch.stack((c * torch.cos(alpha - psi), c * torch.sin(alpha - psi)), dim=-1)
+                    self.twiddle = nn.Parameter(torch.stack((torch.stack((A, B), dim=-2),
+                                                            torch.stack((C, D), dim=-2)), dim=-2))
+        else:
+            assert not complex, 'ortho_param is only implemented for real, not complex'
+            self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
         self.twiddle._is_structured = True  # Flag to avoid weight decay
         if bias:
             bias_shape = (out_size, ) if not complex else (out_size, 2)
@@ -88,7 +95,13 @@ class Butterfly(nn.Module):
             output = torch.cat((output, torch.zeros(padded_shape, dtype=output.dtype, device=output.device)),
                                dim=-1 if not self.complex else -2)
         output = output.unsqueeze(1).expand((batch, self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
-        output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
+        if not self.ortho_param:
+            output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
+        else:
+            c, s = torch.cos(self.twiddle), torch.sin(self.twiddle)
+            twiddle = torch.stack((torch.stack((c, -s), dim=-1),
+                                   torch.stack((s, c), dim=-1)), dim=-1)
+            output = butterfly_mult(twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(twiddle, output, self.increasing_stride)
         output = output.view((batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
@@ -124,13 +137,15 @@ class ButterflyBmm(Butterfly):
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
+        ortho_param: whether to parameterize the twiddle to always be orthogonal 2x2 matrices.
+            Only implemented for real, not complex, for now.
     """
 
-    def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False, tied_weight=True, increasing_stride=True, ortho_init=False):
+    def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False, tied_weight=True, increasing_stride=True, ortho_init=False, ortho_param=False):
         m = int(math.ceil(math.log2(in_size)))
         in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
         nstack = int(math.ceil(out_size / in_size_extended))
-        super().__init__(in_size_extended, in_size_extended * nstack * matrix_batch, bias, complex, tied_weight, increasing_stride, ortho_init)
+        super().__init__(in_size_extended, in_size_extended * nstack * matrix_batch, bias, complex, tied_weight, increasing_stride, ortho_init, ortho_param)
         self.in_size = in_size
         self.out_size = out_size
         self.nstack = nstack
@@ -155,7 +170,13 @@ class ButterflyBmm(Butterfly):
                                dim=-1 if not self.complex else -2)
         output = output.unsqueeze(2).expand((batch, self.matrix_batch, self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         output = output.reshape((batch, self.matrix_batch * self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
-        output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
+        if not self.ortho_param:
+            output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
+        else:
+            c, s = torch.cos(self.twiddle), torch.sin(self.twiddle)
+            twiddle = torch.stack((torch.stack((c, -s), dim=-1),
+                                   torch.stack((s, c), dim=-1)), dim=-1)
+            output = butterfly_mult(twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(twiddle, output, self.increasing_stride)
         output = output.view((batch, self.matrix_batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
