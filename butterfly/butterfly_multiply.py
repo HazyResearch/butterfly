@@ -73,10 +73,10 @@ class ButterflyMult(torch.autograd.Function):
         """
         # output_and_intermediate = butterfly_multiply_intermediate(twiddle, input, increasing_stride, True)
         # ctx.save_for_backward(twiddle, output_and_intermediate)
-        # return output_and_intermediate[-1]
         output = butterfly_multiply_intermediate(twiddle, input, increasing_stride, False)
         ctx.save_for_backward(twiddle, input)
         ctx._increasing_stride = increasing_stride
+        # return output_and_intermediate[-1]
         return output
 
     @staticmethod
@@ -145,7 +145,7 @@ class ButterflyMultUntied(torch.autograd.Function):
     def forward(ctx, twiddle, input, increasing_stride=True):
         """
         Parameters:
-            twiddle: (nstack, log 2, n / 2, 2, 2) if real or (nstack, log 2, n / 2, 2, 2, 2) if complex
+            twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
             input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
             increasing_stride: whether to multiply with increasing stride (e.g. 1, 4, ..., n/2) or
                 decreasing stride (e.g., n/2, n/4, ..., 1).
@@ -154,24 +154,29 @@ class ButterflyMultUntied(torch.autograd.Function):
         Returns:
             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
-        output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride)
-        ctx.save_for_backward(twiddle, output_and_intermediate)
+        # output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride)
+        # ctx.save_for_backward(twiddle, output_and_intermediate)
+        output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
+        ctx.save_for_backward(twiddle, input)
         ctx._increasing_stride = increasing_stride
-        return output_and_intermediate[-1]
+        # return output_and_intermediate[-1]
+        return output
 
     @staticmethod
     def backward(ctx, grad):
         """
         Parameters:
             grad: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
-            twiddle: (nstack, log 2, n / 2, 2, 2) if real or (nstack, log 2, n / 2, 2, 2, 2) if complex
+            twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
             output + intermediate values for backward: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
         Return:
-            d_twiddle: (nstack, log 2, n / 2, 2, 2) if real or (nstack, log 2, n / 2, 2, 2, 2) if complex
+            d_twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
             d_input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
-        twiddle, output_and_intermediate = ctx.saved_tensors
+        # twiddle, output_and_intermediate = ctx.saved_tensors
+        twiddle, input = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
+        output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride, True)
         d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate, increasing_stride)
         return d_coefficients, d_input, None  # Autograd requires 3 gradients
 

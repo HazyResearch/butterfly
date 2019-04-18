@@ -919,7 +919,6 @@ void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor&
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n)
                              : butterfly_multiply_intermediate_complex_cuda_kernel<scalar_t, false, false>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n);
-
       }
     }
   });
@@ -1251,7 +1250,7 @@ void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, co
      cudaGetLastError());
 }
 
-template <typename scalar_t, bool increasing_stride>
+template <typename scalar_t, bool increasing_stride, bool return_intermediates>
 __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
                                                       at::PackedTensorAccessor<scalar_t, 4> output_a,
                                                       int log_max_stride,
@@ -1279,13 +1278,15 @@ __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAcce
       const scalar_t input_val[2] = {s_input[pos], s_input[pos + stride]};
       s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
       s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
-      output_a[idx+1][b][s][input_base_idx + pos] = s_input[pos];
-      output_a[idx+1][b][s][input_base_idx + pos + stride] = s_input[pos + stride];
+      if (return_intermediates || idx == first_idx + log_max_stride) {
+        output_a[idx+1][b][s][input_base_idx + pos] = s_input[pos];
+        output_a[idx+1][b][s][input_base_idx + pos + stride] = s_input[pos + stride];
+      }
     }
   }
 }
 
-template <typename scalar_t, bool increasing_stride>
+template <typename scalar_t, bool increasing_stride, bool return_intermediates>
 __global__ void butterfly_multiply_untied_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 6> twiddle_a,
                                                               at::PackedTensorAccessor<scalar_t, 5> output_a,
                                                               int log_max_stride,
@@ -1319,10 +1320,12 @@ __global__ void butterfly_multiply_untied_complex_cuda_kernel(const at::PackedTe
       const complex_t input_val[2] = {s_input[pos], s_input[pos + stride]};
       s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
       s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
-      output_a[idx+1][b][s][input_base_idx + pos][0] = s_input[pos].real();
-      output_a[idx+1][b][s][input_base_idx + pos][1] = s_input[pos].imag();
-      output_a[idx+1][b][s][input_base_idx + pos + stride][0] = s_input[pos + stride].real();
-      output_a[idx+1][b][s][input_base_idx + pos + stride][1] = s_input[pos + stride].imag();
+      if (return_intermediates || idx == first_idx + log_max_stride) {
+        output_a[idx+1][b][s][input_base_idx + pos][0] = s_input[pos].real();
+        output_a[idx+1][b][s][input_base_idx + pos][1] = s_input[pos].imag();
+        output_a[idx+1][b][s][input_base_idx + pos + stride][0] = s_input[pos + stride].real();
+        output_a[idx+1][b][s][input_base_idx + pos + stride][1] = s_input[pos + stride].imag();
+      }
     }
   }
 }
@@ -1380,7 +1383,7 @@ __global__ void butterfly_multiply_untied_onestep_complex_cuda_kernel(const at::
   }
 }
 
-void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& output, bool increasing_stride) {
+void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& output, bool increasing_stride, bool return_intermediates) {
   const int batch_size = output.size(1);
   const int nstack = twiddle.size(0);
   const int n = output.size(3);
@@ -1395,7 +1398,9 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
         int log_stride = int(log2((double) stride));
         dim3 block(stride);
         dim3 grid(div_up(n / 2, stride), batch_size, nstack);
-        butterfly_multiply_untied_cuda_kernel<scalar_t, true>
+        return_intermediates ? butterfly_multiply_untied_cuda_kernel<scalar_t, true, true>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n)
+                             : butterfly_multiply_untied_cuda_kernel<scalar_t, true, false>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n);
         for (log_stride++; log_stride <= log_n - 1; ++log_stride) {
           dim3 block(MAX_BLOCK_SIZE / 2);
@@ -1414,7 +1419,9 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
         int stride = 1 << log_stride;
         dim3 block(stride);
         dim3 grid(div_up(n / 2, stride), batch_size, nstack);
-        butterfly_multiply_untied_cuda_kernel<scalar_t, false>
+        return_intermediates ? butterfly_multiply_untied_cuda_kernel<scalar_t, false, true>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n)
+                             : butterfly_multiply_untied_cuda_kernel<scalar_t, false, false>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n);
       }
     } else {  // complex
@@ -1425,7 +1432,9 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
         int log_stride = int(log2((double) stride));
         dim3 block(stride);
         dim3 grid(div_up(n / 2, stride), batch_size, nstack);
-        butterfly_multiply_untied_complex_cuda_kernel<scalar_t, true>
+        return_intermediates ? butterfly_multiply_untied_complex_cuda_kernel<scalar_t, true, true>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n)
+                             : butterfly_multiply_untied_complex_cuda_kernel<scalar_t, true, false>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n);
         for (log_stride++; log_stride <= log_n - 1; ++log_stride) {
           dim3 block(MAX_BLOCK_SIZE / 2);
@@ -1444,9 +1453,10 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
         int stride = 1 << log_stride;
         dim3 block(stride);
         dim3 grid(div_up(n / 2, stride), batch_size, nstack);
-        butterfly_multiply_untied_complex_cuda_kernel<scalar_t, false>
+        return_intermediates ? butterfly_multiply_untied_complex_cuda_kernel<scalar_t, false, true>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n)
+                             : butterfly_multiply_untied_complex_cuda_kernel<scalar_t, false, false>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n);
-
       }
     }
   });
