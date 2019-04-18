@@ -725,6 +725,7 @@ __global__ void butterfly_multiply_intermediate_cuda_kernel(const at::PackedTens
       __syncthreads();
       const scalar_t twiddle_val[2][2] = {{s_twiddle[twiddle_idx][0][0], s_twiddle[twiddle_idx][0][1]},
                                           {s_twiddle[twiddle_idx][1][0], s_twiddle[twiddle_idx][1][1]}};
+      __syncthreads();  // otherwise some thread might go back to writing to s_twiddle before other thread can read
       const scalar_t input_val[2] = {s_input[pos], s_input[pos + stride]};
       s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
       s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
@@ -775,6 +776,7 @@ __global__ void butterfly_multiply_intermediate_complex_cuda_kernel(const at::Pa
       __syncthreads();
       const complex_t twiddle_val[2][2] = {{s_twiddle[twiddle_idx][0][0], s_twiddle[twiddle_idx][0][1]},
                                            {s_twiddle[twiddle_idx][1][0], s_twiddle[twiddle_idx][1][1]}};
+      __syncthreads();  // otherwise some thread might go back to writing to s_twiddle before other thread can read
       const complex_t input_val[2] = {s_input[pos], s_input[pos + stride]};
       s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
       s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
@@ -966,6 +968,7 @@ __global__ void butterfly_multiply_intermediate_backward_cuda_kernel(const at::P
       __syncthreads();
       const scalar_t twiddle_val[2][2] = {{s_twiddle[twiddle_idx][0][0], s_twiddle[twiddle_idx][0][1]},
                                           {s_twiddle[twiddle_idx][1][0], s_twiddle[twiddle_idx][1][1]}};
+      // Don't need to sync here since we sync later at sum_strided_atomic, so no writing to s_twiddle can occur until then
       const scalar_t grad_val[2] = {s_grad[pos], s_grad[pos + stride]};
       s_grad[pos] = twiddle_val[0][0] * grad_val[0] + twiddle_val[1][0] * grad_val[1];
       s_grad[pos + stride] = twiddle_val[0][1] * grad_val[0] + twiddle_val[1][1] * grad_val[1];
