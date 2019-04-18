@@ -71,10 +71,13 @@ class ButterflyMult(torch.autograd.Function):
         Returns:
             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
-        output_and_intermediate = butterfly_multiply_intermediate(twiddle, input, increasing_stride)
-        ctx.save_for_backward(twiddle, output_and_intermediate)
+        # output_and_intermediate = butterfly_multiply_intermediate(twiddle, input, increasing_stride, True)
+        # ctx.save_for_backward(twiddle, output_and_intermediate)
+        # return output_and_intermediate[-1]
+        output = butterfly_multiply_intermediate(twiddle, input, increasing_stride, False)
+        ctx.save_for_backward(twiddle, input)
         ctx._increasing_stride = increasing_stride
-        return output_and_intermediate[-1]
+        return output
 
     @staticmethod
     def backward(ctx, grad):
@@ -87,8 +90,10 @@ class ButterflyMult(torch.autograd.Function):
             d_twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
             d_input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
-        twiddle, output_and_intermediate = ctx.saved_tensors
+        # twiddle, output_and_intermediate = ctx.saved_tensors
+        twiddle, input = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
+        output_and_intermediate = butterfly_multiply_intermediate(twiddle, input, increasing_stride, True)
         d_coefficients, d_input = butterfly_multiply_intermediate_backward(grad, twiddle, output_and_intermediate, increasing_stride)
         return d_coefficients, d_input, None  # Autograd requires 3 gradients
 

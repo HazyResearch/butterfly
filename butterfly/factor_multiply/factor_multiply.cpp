@@ -7,7 +7,7 @@ void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::T
 void butterfly_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tensor& input);
 void butterfly_multiply_inplace_backward_cuda(const at::Tensor& grad, const at::Tensor& twiddle, at::Tensor& output,
                                               at::Tensor& d_twiddle, at::Tensor& d_input);
-void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor& input, bool increasing_stride);
+void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor& input, bool increasing_stride, bool return_intermediates);
 void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, const at::Tensor& output,
                                                    at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
 void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& input, bool increasing_stride);
@@ -359,7 +359,7 @@ std::vector<at::Tensor> butterfly_multiply_inplace_backward(const at::Tensor& gr
   return {d_twiddle, d_input};
 }
 
-at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::Tensor& input, bool increasing_stride) {
+at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::Tensor& input, bool increasing_stride, bool return_intermediates) {
   /* Parameters:
          twiddle: (nstack, n - 1, 2, 2) if real or (nstack, n - 1, 2, 2, 2) if complex
          input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
@@ -367,8 +367,13 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
              decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+         return_intermediates: whether to return just the output (i.e. computed in-place) or output
+             and intermediate values for backward pass.
      Returns:
-         output + intermediate values for backward pass: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
+         if return_intermediates:
+             output + intermediate values for backward pass: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
+         else:
+             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
   */
   const auto batch_size = input.size(0);
   const auto nstack = input.size(1);
@@ -380,13 +385,18 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
   CHECK_DEVICE(input);
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
   AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == n - 1 && twiddle.size(2) == 2 && twiddle.size(3) == 2, "butterfly_multiply_intermediate: twiddle must have shape (nstack, n-1, 2, 2) or (nstack, n-1, 2, 2, 2)");
+  const int output_first_dim = return_intermediates ? log_n + 1 : 1;
   auto output = input.dim() == 3 ?
-    torch::empty({log_n + 1, batch_size, nstack, n}, torch::dtype(input.dtype()).device(input.device())) :
-    torch::empty({log_n + 1, batch_size, nstack, n, 2}, torch::dtype(input.dtype()).device(input.device()));
+    torch::empty({output_first_dim, batch_size, nstack, n}, torch::dtype(input.dtype()).device(input.device())) :
+    torch::empty({output_first_dim, batch_size, nstack, n, 2}, torch::dtype(input.dtype()).device(input.device()));
+  if (!return_intermediates) {
+    output = input.dim() == 3 ? output.expand({log_n + 1, batch_size, nstack, n})
+                              : output.expand({log_n + 1, batch_size, nstack, n, 2});
+  }
   output[0] = input;
   if (input.is_cuda()) {
-    butterfly_multiply_intermediate_cuda(twiddle, output, increasing_stride);
-    return output;
+    butterfly_multiply_intermediate_cuda(twiddle, output, increasing_stride, return_intermediates);
+    return return_intermediates ? output : output[-1];
   }
   const bool complex = input.dim() == 4;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_intermediate", [&] {
@@ -448,7 +458,7 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
       }
     }
   });
-  return output;
+  return return_intermediates ? output : output[-1];
 }
 
 std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& output, bool increasing_stride) {

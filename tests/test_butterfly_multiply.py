@@ -123,7 +123,7 @@ class ButterflyMultTest(unittest.TestCase):
         self.assertTrue(torch.allclose(d_twiddle_inplace, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
                         ((d_twiddle_inplace - d_twiddle_torch) / d_twiddle_torch).abs().max().item())
 
-    def test_butterfly_factors_cpu(self):
+    def test_butterfly_factors(self):
         batch_size = 10
         n = 4096
         nstack = 1  # Does not support nstack
