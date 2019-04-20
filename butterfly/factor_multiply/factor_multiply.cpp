@@ -1,4 +1,6 @@
 #include <vector>
+#include <utility>
+#include <cmath>
 #include <torch/extension.h>
 
 void butterfly_factor_multiply_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output);
@@ -21,6 +23,14 @@ void permutation_factor_reverse_multiply_backward_cuda(const at::Tensor& grad, c
                                                        at::Tensor& d_p_expanded, at::Tensor& d_input);
 
 #define CHECK_DEVICE(x) AT_CHECK(x.type().device_type() == at::kCPU || x.type().device_type() == at::kCUDA, #x " must be on CPU or CUDA")
+
+// 2x2 matrix [a, b; c, d] multiplied by a vector [x, y]
+template <typename scalar_t>
+static inline std::pair<scalar_t, scalar_t> mult2x2(scalar_t a, scalar_t b,
+                                                    scalar_t c, scalar_t d,
+                                                    scalar_t x, scalar_t y) {
+  return std::make_pair(a * x + b * y, c * x + d * y);
+}
 
 at::Tensor butterfly_factor_multiply(const at::Tensor& twiddle, const at::Tensor& input) {
   /* Parameters:
@@ -192,7 +202,7 @@ at::Tensor butterfly_multiply_inplace(const at::Tensor& twiddle, const at::Tenso
     AT_CHECK(twiddle.is_cuda(), "butterfly_multiply_inplace: Expected twiddle to be CUDA tensor");
     // butterfly_multiply_inplace_cuda(twiddle, output);
     // int m = int(log2((double) input.size(1)));
-    auto input_temp = input.dim() == 3 ?
+    auto input_temp_phi = input.dim() == 3 ?
       torch::empty({batch_size, n, 2}, torch::dtype(twiddle.dtype()).device(twiddle.device())) :
       torch::empty({batch_size, n}, torch::dtype(twiddle.dtype()).device(twiddle.device()));
     butterfly_multiply_inplace_cuda(twiddle, output);
@@ -787,6 +797,159 @@ std::vector<at::Tensor> butterfly_multiply_untied_backward(const at::Tensor& gra
   return {d_twiddle, d_input} ;
 }
 
+at::Tensor butterfly_multiply_untied_svd(const at::Tensor& twiddle, const at::Tensor& input, bool increasing_stride, bool return_intermediates) {
+  /* The twiddles uses SVD paramterization:
+         [cos theta, -sin theta; sin theta, cos theta] [sigma_1, 0; 0, sigma_2] [cos phi, -sin phi; sin phi, cos phi]
+     The order of storage is twiddle[2][2] = {{theta, phi}, {sigma_1, sigma_2}}.
+     Only support real, not complex.
+     Parameters:
+         twiddle: (nstack, log n, n/2, 2, 2) if real or (nstack, log n, n/2, 2, 2, 2) if complex
+         input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
+         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 1).
+             Note that this only changes the order of multiplication, not how twiddle is stored.
+             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+         return_intermediates: whether to return just the output (i.e. computed in-place) or output
+             and intermediate values for backward pass.
+     Returns:
+         if return_intermediates:
+             output + intermediate values for backward pass: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
+         else:
+             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
+  */
+  const auto batch_size = input.size(0);
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
+  const int log_n = int(log2((double) n));
+  AT_CHECK((twiddle.dim() == 5 && input.dim() == 3),
+           "butterfly_multiply_untied_svd: twiddle and input must have dimension 5,3");
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(input);
+  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_svd: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  const int output_first_dim = return_intermediates ? log_n + 1 : 1;
+  auto output = torch::empty({output_first_dim, batch_size, nstack, n}, torch::dtype(input.dtype()).device(input.device()));
+  if (!return_intermediates) {
+    output = output.expand({log_n + 1, batch_size, nstack, n});
+  }
+  output[0] = input;
+  // if (input.is_cuda()) {
+  //   butterfly_multiply_untied_svd_cuda(twiddle, output, increasing_stride, return_intermediates);
+  //   return return_intermediates ? output : output[-1];
+  // }
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_untied_svd", [&] {
+    const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
+    auto output_a = output.accessor<scalar_t, 4>();
+    for (int64_t idx = 0; idx <= log_n - 1; ++idx) {
+      int64_t log_stride = increasing_stride ? idx : (log_n - 1 - idx);
+      int64_t stride = 1 << log_stride;
+      for (int64_t b = 0; b < batch_size; ++b) {
+        for (int64_t s = 0; s < nstack; ++s) {
+          for (int64_t i = 0; i < n / 2; ++i) {
+            int64_t low_order_bit = i % stride;
+            int64_t pos = 2 * (i - low_order_bit) + low_order_bit;
+            const scalar_t twiddle_val[2][2] = {{twiddle_a[s][log_stride][i][0][0], twiddle_a[s][log_stride][i][0][1]},
+                                                {twiddle_a[s][log_stride][i][1][0], twiddle_a[s][log_stride][i][1][1]}};
+            const scalar_t input_val[2] = {output_a[idx][b][s][pos], output_a[idx][b][s][pos + stride]};
+            const scalar_t sin_theta = std::sin(twiddle_val[0][0]), cos_theta = std::cos(twiddle_val[0][0]);
+            const scalar_t sin_phi = std::sin(twiddle_val[0][1]), cos_phi = std::cos(twiddle_val[0][1]);
+            scalar_t temp[2];
+            std::tie(temp[0], temp[1]) = mult2x2(cos_phi, -sin_phi, sin_phi, cos_phi, input_val[0], input_val[1]);
+            std::tie(temp[0], temp[1]) = mult2x2(cos_theta, -sin_theta, sin_theta, cos_theta,
+                                                 temp[0] * twiddle_val[1][0], temp[1] * twiddle_val[1][1]);
+            output_a[idx+1][b][s][pos] = temp[0];
+            output_a[idx+1][b][s][pos + stride] = temp[1];
+          }
+        }
+      }
+    }
+  });
+  return return_intermediates ? output : output[-1];
+}
+
+std::vector<at::Tensor> butterfly_multiply_untied_svd_backward(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& output, bool increasing_stride) {
+  /* The twiddles uses SVD paramterization:
+     [cos theta, -sin theta; sin theta, cos theta] [sigma_1, 0; 0, sigma_2] [cos phi, -sin phi; sin phi, cos phi]
+     The order of storage is twiddle[2][2] = {{theta, phi}, {sigma_1, sigma_2}}.
+     Only support real, not complex.
+     Parameters:
+         grad: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
+         twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
+         output + untied_svd values for backward: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
+         increasing_stride: whether the forward pass multiply was with increasing stride (e.g. 1, 2, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 1).
+             Note that this only changes the order of multiplication, not how twiddle is stored.
+             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+     Return:
+         d_twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
+         d_input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
+  */
+  const auto batch_size = grad.size(0);
+  const auto nstack = grad.size(1);
+  const auto n = grad.size(2);
+  const int log_n = int(log2((double) n));
+  AT_CHECK((grad.dim() == 3 && twiddle.dim() == 5 && output.dim() == 4),
+           "butterfly_multiply_untied_svd_backward: grad, twiddle, and output must have dimension 3,5,4");
+  CHECK_DEVICE(grad);
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(output);
+  AT_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_svd_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  AT_CHECK(output.size(0) == log_n + 1 && output.size(1) == batch_size && output.size(2) == nstack && output.size(3) == n, "butterfly_multiply_untied_svd_backward: output must have shape (log n + 1, batch_size, nstack, n)");
+  auto d_input = grad.clone();
+  auto d_twiddle = torch::zeros_like(twiddle);
+  // if (output.is_cuda()) {
+  //   butterfly_multiply_untied_svd_backward_cuda(twiddle, output, d_twiddle, d_input, increasing_stride);
+  //   return {d_twiddle, d_input} ;
+  // }
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "butterfly_multiply_untied_svd_backward", [&] {
+    const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
+    auto output_a = output.accessor<scalar_t, 4>();
+    auto d_twiddle_a = d_twiddle.accessor<scalar_t, 5>();
+    auto d_input_a = d_input.accessor<scalar_t, 3>();
+    for (int64_t idx = log_n - 1; idx >= 0; --idx) {
+      int64_t log_stride = increasing_stride ? idx : log_n - 1 - idx;
+      int64_t stride = 1 << log_stride;
+      for (int64_t b = 0; b < batch_size; ++b) {
+        for (int64_t s = 0; s < nstack; ++s) {
+          for (int64_t i = 0; i < n / 2; ++i) {
+            int64_t low_order_bit = i % stride;
+            int64_t pos = 2 * (i - low_order_bit) + low_order_bit;
+            const scalar_t twiddle_val[2][2] = {{twiddle_a[s][log_stride][i][0][0], twiddle_a[s][log_stride][i][0][1]},
+                                                {twiddle_a[s][log_stride][i][1][0], twiddle_a[s][log_stride][i][1][1]}};
+            const scalar_t sin_theta = std::sin(twiddle_val[0][0]), cos_theta = std::cos(twiddle_val[0][0]);
+            const scalar_t sin_phi = std::sin(twiddle_val[0][1]), cos_phi = std::cos(twiddle_val[0][1]);
+            const scalar_t grad_val[2] = {d_input_a[b][s][pos], d_input_a[b][s][pos + stride]};
+            scalar_t grad_temp_theta[2];
+            std::tie(grad_temp_theta[0], grad_temp_theta[1])
+              = mult2x2(cos_theta, sin_theta, -sin_theta, cos_theta, grad_val[0], grad_val[1]);
+            const scalar_t grad_temp_diag[2] = {grad_temp_theta[0] * twiddle_val[1][0], grad_temp_theta[1] * twiddle_val[1][1]};
+            std::tie(d_input_a[b][s][pos], d_input_a[b][s][pos + stride])
+              = mult2x2(cos_phi, sin_phi, -sin_phi, cos_phi, grad_temp_diag[0], grad_temp_diag[1]);
+            const scalar_t input_val[2] = {output_a[idx][b][s][pos], output_a[idx][b][s][pos + stride]};
+            scalar_t input_temp_phi[2];
+            std::tie(input_temp_phi[0], input_temp_phi[1])
+              = mult2x2(cos_phi, -sin_phi, sin_phi, cos_phi, input_val[0], input_val[1]);
+            const scalar_t input_temp_diag[2] = {input_temp_phi[0] * twiddle_val[1][0], input_temp_phi[1] * twiddle_val[1][1]};
+            // d_theta
+            d_twiddle_a[s][log_stride][i][0][0]
+              += (grad_val[0] * input_temp_diag[0] + grad_val[1] * input_temp_diag[1]) * (-sin_theta)
+              + (-grad_val[0] * input_temp_diag[1] + grad_val[1] * input_temp_diag[0]) * cos_theta;
+            // d_sigma_1 and d_sigma_2
+            d_twiddle_a[s][log_stride][i][1][0] += grad_temp_theta[0] * input_temp_phi[0];
+            d_twiddle_a[s][log_stride][i][1][1] += grad_temp_theta[1] * input_temp_phi[1];
+            // d_phi
+            d_twiddle_a[s][log_stride][i][0][1]
+              += (grad_temp_diag[0] * input_val[0] + grad_temp_diag[1] * input_val[1]) * (-sin_phi)
+              + (-grad_temp_diag[0] * input_val[1] + grad_temp_diag[1] * input_val[0]) * cos_phi;
+          }
+        }
+      }
+    }
+  });
+  return {d_twiddle, d_input} ;
+}
+
 at::Tensor permutation_factor_even_odd_multiply(const at::Tensor& p, const at::Tensor& input) {
   /* Parameters:
          p: (1, )
@@ -1175,6 +1338,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_multiply_intermediate_backward", &butterfly_multiply_intermediate_backward, "Butterfly factor multiply intermediate backward");
   m.def("butterfly_multiply_untied", &butterfly_multiply_untied, "Butterfly factor multiply untied forward");
   m.def("butterfly_multiply_untied_backward", &butterfly_multiply_untied_backward, "Butterfly factor multiply untied backward");
+  m.def("butterfly_multiply_untied_svd", &butterfly_multiply_untied_svd, "Butterfly factor multiply untied SVD forward");
+  m.def("butterfly_multiply_untied_svd_backward", &butterfly_multiply_untied_svd_backward, "Butterfly factor multiply untied SVD backward");
   m.def("permutation_factor_even_odd_multiply", &permutation_factor_even_odd_multiply, "Permutation factor (even odd) multiply forward");
   m.def("permutation_factor_even_odd_multiply_backward", &permutation_factor_even_odd_multiply_backward, "Permutation factor (even odd) multiply backward");
   m.def("permutation_factor_reverse_multiply", &permutation_factor_reverse_multiply, "Permutation factor (reverse) multiply forward");

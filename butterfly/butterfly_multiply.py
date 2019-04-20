@@ -9,6 +9,7 @@ use_extension = True
 try:
     from factor_multiply import butterfly_multiply_intermediate, butterfly_multiply_intermediate_backward
     from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_backward
+    from factor_multiply import butterfly_multiply_untied_svd, butterfly_multiply_untied_svd_backward
     from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
     from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
 except:
@@ -181,6 +182,75 @@ class ButterflyMultUntied(torch.autograd.Function):
         return d_coefficients, d_input, None  # Autograd requires 3 gradients
 
 butterfly_mult_untied = ButterflyMultUntied.apply if use_extension else butterfly_mult_untied_torch
+
+
+def butterfly_mult_untied_svd_torch(twiddle, input, increasing_stride=True, return_intermediates=False):
+    """
+    Parameters:
+        twiddle: (nstack, log n, n / 2, 2, 2)
+        input: (batch_size, nstack, n) if real
+        increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+            decreasing stride (e.g., n/2, n/4, ..., 1).
+            Note that this only changes the order of multiplication, not how twiddle is stored.
+            In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+        return_intermediates: whether to return all the intermediate values computed, for debugging
+    Returns:
+        output: (batch_size, nstack, n)
+    """
+
+    cos_phi, sin_phi = torch.cos(twiddle[..., 0, 1]), torch.sin(twiddle[..., 0, 1])
+    cos_theta, sin_theta = torch.cos(twiddle[..., 0, 0]), torch.sin(twiddle[..., 0, 0])
+    sigmas = twiddle[..., 1, :]
+    twiddle_phi = torch.stack((torch.stack((cos_phi, -sin_phi), dim=-1),
+                               torch.stack((sin_phi, cos_phi), dim=-1)), dim=-2)
+    twiddle_theta = torch.stack((torch.stack((cos_theta, -sin_theta), dim=-1),
+                                 torch.stack((sin_theta, cos_theta), dim=-1)), dim=-2)
+    twiddle_prod = twiddle_theta @ (sigmas.unsqueeze(-1) * twiddle_phi)
+    return butterfly_mult_untied(twiddle_prod, input, increasing_stride)
+
+
+class ButterflyMultUntiedSvd(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, twiddle, input, increasing_stride=True):
+        """
+        Parameters:
+            twiddle: (nstack, log n, n / 2, 2, 2)
+            input: (batch_size, nstack, n)
+            increasing_stride: whether to multiply with increasing stride (e.g. 1, 4, ..., n/2) or
+                decreasing stride (e.g., n/2, n/4, ..., 1).
+                Note that this only changes the order of multiplication, not how twiddle is stored.
+                In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+        Returns:
+            output: (batch_size, nstack, n)
+        """
+        # output_and_intermediate = butterfly_multiply_untied_svd(twiddle, input, increasing_stride)
+        # ctx.save_for_backward(twiddle, output_and_intermediate)
+        output = butterfly_multiply_untied_svd(twiddle, input, increasing_stride, False)
+        ctx.save_for_backward(twiddle, input)
+        ctx._increasing_stride = increasing_stride
+        # return output_and_intermediate[-1]
+        return output
+
+    @staticmethod
+    def backward(ctx, grad):
+        """
+        Parameters:
+            grad: (batch_size, nstack, n)
+            twiddle: (nstack, log n, n / 2, 2, 2)
+            output + intermediate values for backward: (log n + 1, batch_size, nstack, n)
+        Return:
+            d_twiddle: (nstack, log n, n / 2, 2, 2)
+            d_input: (batch_size, nstack, n)
+        """
+        # twiddle, output_and_intermediate = ctx.saved_tensors
+        twiddle, input = ctx.saved_tensors
+        increasing_stride = ctx._increasing_stride
+        output_and_intermediate = butterfly_multiply_untied_svd(twiddle, input, increasing_stride, True)
+        d_coefficients, d_input = butterfly_multiply_untied_svd_backward(grad, twiddle, output_and_intermediate, increasing_stride)
+        return d_coefficients, d_input, None  # Autograd requires 3 gradients
+
+butterfly_mult_untied_svd = ButterflyMultUntiedSvd.apply if use_extension else butterfly_mult_untied_svd_torch
 
 
 class ButterflyMultInplace(torch.autograd.Function):

@@ -43,16 +43,18 @@ class ButterflyConv2d(ButterflyBmm):
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
+        param: The parameterization of the 2x2 butterfly factors, either 'regular' or 'ortho' or 'svd'.
+            'ortho' and 'svd' only support real, not complex.
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True, tied_weight=True, increasing_stride=True, ortho_init=False, ortho_param=False):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True, tied_weight=True, increasing_stride=True, ortho_init=False, param='regular'):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
         self.stride = (stride, stride) if isinstance(stride, int) else stride
         self.padding = (padding, padding) if isinstance(padding, int) else padding
         self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
-        super().__init__(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False, tied_weight, increasing_stride, ortho_init, ortho_param)
+        super().__init__(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False, tied_weight, increasing_stride, ortho_init, param)
 
     def forward(self, input):
         """
@@ -90,9 +92,11 @@ class ButterflyConv2dBBT(nn.Module):
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
+        param: The parameterization of the 2x2 butterfly factors, either 'regular' or 'ortho' or 'svd'.
+            'ortho' and 'svd' only support real, not complex.
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True, tied_weight=True, ortho_init=False, ortho_param=False):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True, tied_weight=True, ortho_init=False, param='regular'):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -101,8 +105,8 @@ class ButterflyConv2dBBT(nn.Module):
         self.padding = (padding, padding) if isinstance(padding, int) else padding
         self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
         self.layers = nn.Sequential(
-            ButterflyBmm(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], False, False, tied_weight, increasing_stride=False, ortho_init=ortho_init, ortho_param=ortho_param),
-            ButterflyBmm(out_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False, tied_weight, increasing_stride=True, ortho_init=ortho_init, ortho_param=ortho_param)
+            ButterflyBmm(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], False, False, tied_weight, increasing_stride=False, ortho_init=ortho_init, param=param),
+            ButterflyBmm(out_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False, tied_weight, increasing_stride=True, ortho_init=ortho_init, param=param)
             )
 
     def forward(self, input):
@@ -141,9 +145,11 @@ class ButterflyConv2dBBTBBT(nn.Module):
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
+        param: The parameterization of the 2x2 butterfly factors, either 'regular' or 'ortho' or 'svd'.
+            'ortho' and 'svd' only support real, not complex.
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True, tied_weight=True, ortho_init=False, ortho_param=False):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True, tied_weight=True, ortho_init=False, param='regular'):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -152,10 +158,10 @@ class ButterflyConv2dBBTBBT(nn.Module):
         self.padding = (padding, padding) if isinstance(padding, int) else padding
         self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
         self.layers = nn.Sequential(
-            ButterflyBmm(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], False, False, tied_weight, increasing_stride=False, ortho_init=ortho_init, ortho_param=ortho_param),
-            ButterflyBmm(out_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], False, False, tied_weight, increasing_stride=True, ortho_init=ortho_init, ortho_param=ortho_param),
-            ButterflyBmm(out_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], False, False, tied_weight, increasing_stride=False, ortho_init=ortho_init, ortho_param=ortho_param),
-            ButterflyBmm(out_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False, tied_weight, increasing_stride=True, ortho_init=ortho_init, ortho_param=ortho_param)
+            ButterflyBmm(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], False, False, tied_weight, increasing_stride=False, ortho_init=ortho_init, param=param),
+            ButterflyBmm(out_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], False, False, tied_weight, increasing_stride=True, ortho_init=ortho_init, param=param),
+            ButterflyBmm(out_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], False, False, tied_weight, increasing_stride=False, ortho_init=ortho_init, param=param),
+            ButterflyBmm(out_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False, tied_weight, increasing_stride=True, ortho_init=ortho_init, param=param)
             )
 
     def forward(self, input):
