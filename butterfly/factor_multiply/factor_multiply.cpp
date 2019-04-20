@@ -812,6 +812,8 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   const auto h = input.size(2);
   const auto w = input.size(3);
   const int log_n = int(log2((double) in_channels));
+  auto h_out = (h + 2 * padding - (kernel_size - 1) - 1) / stride + 1;
+  auto w_out = (h + 2 * padding - (kernel_size - 1) - 1) / stride + 1;
   // AT_CHECK((twiddle.dim() == 5 && input.dim() == 3) || (twiddle.dim() == 6 && input.dim() == 4),
   //          "butterfly_multiply_untied: twiddle and input must have dimension 5,3 or 6,4");
   CHECK_DEVICE(twiddle);
@@ -819,16 +821,14 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
   // AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
-  auto output = torch::empty({output_first_dim, batch_size*h*w, kernel_size*kernel_size, in_channels},
+  auto output = torch::empty({output_first_dim, batch_size*h_out*w_out, kernel_size*kernel_size, in_channels},
     torch::dtype(input.dtype()).device(input.device()));
   if (!return_intermediates) {
-    output = output.expand({log_n + 1, batch_size*h*w, kernel_size*kernel_size, in_channels});
+    output = output.expand({log_n + 1, batch_size*h_out*w_out, kernel_size*kernel_size, in_channels});
   }
-  auto h_out = (h + 2 * padding - (kernel_size - 1) - 1) / stride + 1;
-  auto w_out = (h + 2 * padding - (kernel_size - 1) - 1) / stride + 1;
   butterfly_conv2d_cuda(twiddle, input, output, kernel_size, stride,
     padding, h_out, w_out, return_intermediates);
-  return output;
+  return return_intermediates ? output : output[-1];
 }
 
 // std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& output) {
