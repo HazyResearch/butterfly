@@ -22,7 +22,9 @@ class ButterflyTest(unittest.TestCase):
                     for tied_weight in [True, False]:
                         for increasing_stride in [True, False]:
                             for ortho_init in [False, True]:
-                                for param in ['regular'] if complex else ['regular', 'ortho']:
+                                for param in ['regular'] if complex else ['regular', 'ortho', 'svd']:
+                                    if param == 'svd' and tied_weight:
+                                        continue
                                     b = Butterfly(in_size, out_size, True, complex, tied_weight, increasing_stride, ortho_init, param).to(device)
                                     input = torch.randn((batch_size, in_size) + (() if not complex else (2,)), device=device)
                                     output = b(input)
@@ -46,7 +48,9 @@ class ButterflyTest(unittest.TestCase):
                     for tied_weight in [True, False]:
                         for increasing_stride in [True, False]:
                             for ortho_init in [False, True]:
-                                for param in ['regular'] if complex else ['regular', 'ortho']:
+                                for param in ['regular'] if complex else ['regular', 'ortho', 'svd']:
+                                    if param == 'svd' and tied_weight:
+                                        continue
                                     b_bmm = ButterflyBmm(in_size, out_size, matrix_batch, True, complex, tied_weight, increasing_stride, ortho_init, param).to(device)
                                     input = torch.randn((batch_size, matrix_batch, in_size) + (() if not complex else (2,)), device=device)
                                     output = b_bmm(input)

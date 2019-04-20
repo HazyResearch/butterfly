@@ -3,7 +3,7 @@ import math
 import torch
 from torch import nn
 
-from .butterfly_multiply import butterfly_mult, butterfly_mult_untied
+from .butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_untied_svd
 
 
 class Butterfly(nn.Module):
@@ -25,10 +25,13 @@ class Butterfly(nn.Module):
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
         param: The parameterization of the 2x2 butterfly factors, either 'regular' or 'ortho' or 'svd'.
             'ortho' and 'svd' only support real, not complex.
+        max_gain: (only for svd parameterization) controls the maximum and minimum singular values
+            of the whole matrix (not of each factor).
+            For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
     """
 
     def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
-                 increasing_stride=True, ortho_init=False, param='regular'):
+                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0):
         super().__init__()
         self.in_size = in_size
         m = int(math.ceil(math.log2(in_size)))
@@ -41,6 +44,7 @@ class Butterfly(nn.Module):
         self.ortho_init = ortho_init
         assert param in ['regular', 'ortho', 'svd']
         self.param = param
+        self.max_gain_per_factor = max_gain ** (1 / m)
         twiddle_core_shape = (self.nstack, size - 1) if tied_weight else (self.nstack, m, size // 2)
         if param == 'regular':
             if not ortho_init:
@@ -51,7 +55,7 @@ class Butterfly(nn.Module):
                 if not complex:
                     theta = torch.rand(twiddle_core_shape) * math.pi * 2
                     c, s = torch.cos(theta), torch.sin(theta)
-                    det = torch.randint(0, 2, (twiddle_core_shape), dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
+                    det = torch.randint(0, 2, twiddle_core_shape, dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
                     self.twiddle = nn.Parameter(torch.stack((torch.stack((det * c, -det * s), dim=-1),
                                                              torch.stack((s, c), dim=-1)), dim=-2))
                 else:
@@ -73,8 +77,7 @@ class Butterfly(nn.Module):
             elif param == 'svd':
                 assert not tied_weight, 'svd parameterization is only implemented for non-tied weight'
                 theta_phi = torch.rand(twiddle_core_shape + (2, )) * math.pi * 2
-                sigmas = torch.randint(0, 2, (twiddle_core_shape + 2), dtype=theta_phi.dtype) * 2 - 1  # Singular values +1 or -1
-                self.register_buffer('original_sigmas', sigmas.clone())  # To do clamping later during projected SGD
+                sigmas = torch.ones(twiddle_core_shape + (2, ), dtype=theta_phi.dtype) # Singular values
                 self.twiddle = nn.Parameter(torch.stack((theta_phi, sigmas) , dim=-2))
         self.twiddle._is_structured = True  # Flag to avoid weight decay
         if bias:
@@ -112,7 +115,8 @@ class Butterfly(nn.Module):
                                    torch.stack((s, c), dim=-1)), dim=-2)
             output = butterfly_mult(twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(twiddle, output, self.increasing_stride)
         elif self.param == 'svd':
-            # TODO: clamp singular values here?
+            with torch.no_grad():  # Projected SGD
+                self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
             output = butterfly_mult_untied_svd(self.twiddle, output, self.increasing_stride)
         output = output.view((batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
@@ -151,14 +155,18 @@ class ButterflyBmm(Butterfly):
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
         param: whether to parameterize the twiddle to always be orthogonal 2x2 matrices.
             Only implemented for real, not complex, for now.
+        max_gain: (only for svd parameterization) controls the maximum and minimum singular values
+            of the whole matrix (not of each factor).
+            For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
     """
 
     def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False, tied_weight=True,
-                 increasing_stride=True, ortho_init=False, param='regular'):
+                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0):
         m = int(math.ceil(math.log2(in_size)))
         in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
         nstack = int(math.ceil(out_size / in_size_extended))
-        super().__init__(in_size_extended, in_size_extended * nstack * matrix_batch, bias, complex, tied_weight, increasing_stride, ortho_init, param)
+        super().__init__(in_size_extended, in_size_extended * nstack * matrix_batch, bias, complex,
+                         tied_weight, increasing_stride, ortho_init, param, max_gain)
         self.in_size = in_size
         self.out_size = out_size
         self.nstack = nstack
@@ -191,7 +199,8 @@ class ButterflyBmm(Butterfly):
                                    torch.stack((s, c), dim=-1)), dim=-2)
             output = butterfly_mult(twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(twiddle, output, self.increasing_stride)
         elif self.param == 'svd':
-            # TODO: clamp singular values here?
+            with torch.no_grad():  # Projected SGD
+                self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
             output = butterfly_mult_untied_svd(self.twiddle, output, self.increasing_stride)
         output = output.view((batch, self.matrix_batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
