@@ -66,12 +66,11 @@ class ButterflyMultTest(unittest.TestCase):
                                     (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(), device, complex, increasing_stride))
 
     def test_butterfly_untied_svd(self):
-        batch_size = 1
-        n = 2
+        batch_size = 10
+        n = 4096
         m = int(math.log2(n))
-        nstack = 1
-        # for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
-        for device in ['cpu']:
+        nstack = 2
+        for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
             for increasing_stride in [True, False]:
                 scaling = 1 / math.sqrt(2)
                 twiddle = torch.randn((nstack, m, n // 2, 2, 2), requires_grad=True, device=device) * scaling

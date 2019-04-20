@@ -15,6 +15,10 @@ void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, co
 void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& input, bool increasing_stride, bool return_intermediates);
 void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at::Tensor& output,
                                              at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
+void butterfly_multiply_untied_svd_cuda(const at::Tensor& twiddle, at::Tensor& input,
+                                        bool increasing_stride, bool return_intermediates);
+void butterfly_multiply_untied_svd_backward_cuda(const at::Tensor& twiddle, const at::Tensor& output,
+                                                 at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
 void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Tensor& input, at::Tensor& output);
 void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input,
                                                         at::Tensor& d_p_expanded, at::Tensor& d_input);
@@ -833,10 +837,10 @@ at::Tensor butterfly_multiply_untied_svd(const at::Tensor& twiddle, const at::Te
     output = output.expand({log_n + 1, batch_size, nstack, n});
   }
   output[0] = input;
-  // if (input.is_cuda()) {
-  //   butterfly_multiply_untied_svd_cuda(twiddle, output, increasing_stride, return_intermediates);
-  //   return return_intermediates ? output : output[-1];
-  // }
+  if (input.is_cuda()) {
+    butterfly_multiply_untied_svd_cuda(twiddle, output, increasing_stride, return_intermediates);
+    return return_intermediates ? output : output[-1];
+  }
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_untied_svd", [&] {
     const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
     auto output_a = output.accessor<scalar_t, 4>();
@@ -898,10 +902,10 @@ std::vector<at::Tensor> butterfly_multiply_untied_svd_backward(const at::Tensor&
   AT_CHECK(output.size(0) == log_n + 1 && output.size(1) == batch_size && output.size(2) == nstack && output.size(3) == n, "butterfly_multiply_untied_svd_backward: output must have shape (log n + 1, batch_size, nstack, n)");
   auto d_input = grad.clone();
   auto d_twiddle = torch::zeros_like(twiddle);
-  // if (output.is_cuda()) {
-  //   butterfly_multiply_untied_svd_backward_cuda(twiddle, output, d_twiddle, d_input, increasing_stride);
-  //   return {d_twiddle, d_input} ;
-  // }
+  if (output.is_cuda()) {
+    butterfly_multiply_untied_svd_backward_cuda(twiddle, output, d_twiddle, d_input, increasing_stride);
+    return {d_twiddle, d_input} ;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "butterfly_multiply_untied_svd_backward", [&] {
     const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
     auto output_a = output.accessor<scalar_t, 4>();
