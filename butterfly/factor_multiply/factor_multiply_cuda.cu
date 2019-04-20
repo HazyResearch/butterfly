@@ -1505,6 +1505,10 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
       atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + i][0][1], d_twiddle_val[0][1]);
       atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + i][1][0], d_twiddle_val[1][0]);
       atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + i][1][1], d_twiddle_val[1][1]);
+      // d_twiddle_a[s][log_stride][input_base_idx / 2 + i][0][0]+= d_twiddle_val[0][0];
+      // d_twiddle_a[s][log_stride][input_base_idx / 2 + i][0][1]+= d_twiddle_val[0][1];
+      // d_twiddle_a[s][log_stride][input_base_idx / 2 + i][1][0]+= d_twiddle_val[1][0];
+      // d_twiddle_a[s][log_stride][input_base_idx / 2 + i][1][1]+= d_twiddle_val[1][1];
     }
     __syncthreads();
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
@@ -1606,6 +1610,10 @@ __global__ void butterfly_multiply_untied_backward_onestep_cuda_kernel(const at:
   atomicAdd(&d_twiddle_a[s][log_stride][i][0][1], d_twiddle_val[0][1]);
   atomicAdd(&d_twiddle_a[s][log_stride][i][1][0], d_twiddle_val[1][0]);
   atomicAdd(&d_twiddle_a[s][log_stride][i][1][1], d_twiddle_val[1][1]);
+  // d_twiddle_a[s][log_stride][i][0][0] += d_twiddle_val[0][0];
+  // d_twiddle_a[s][log_stride][i][0][1] += d_twiddle_val[0][1];
+  // d_twiddle_a[s][log_stride][i][1][0] += d_twiddle_val[1][0];
+  // d_twiddle_a[s][log_stride][i][1][1] += d_twiddle_val[1][1];
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
@@ -1739,6 +1747,124 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
      "butterfly_multiply_untied_backward_cuda failed with error code ",
      cudaGetLastError());
 }
+
+template <typename scalar_t, bool increasing_stride, bool return_intermediates>
+__global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
+                                             at::PackedTensorAccessor<scalar_t, 4> output_a,
+                                             at::PackedTensorAccessor<scalar_t, 4> input_a,
+                                             int log_stride,
+                                             int log_n,
+                                             int kernel_size,
+                                             int stride,
+                                             int padding,
+                                             int h_out,
+                                             int w_out) {
+  const int batch_size = output_a.size(1);
+  const int stack = blockIdx.z;
+  const int max_stride = 1 << log_stride;
+  const int input_base_idx = blockIdx.x * blockDim.x * 2;
+  const int b_in = input_a.size(0);
+  const int c_in = input_a.size(1);
+  const int h_in = input_a.size(2);
+  const int w_in = input_a.size(3);
+  const int patch_idx = blockIdx.y / (b_in);
+  const int batch_idx = blockIdx.y / (h_in * w_in);
+
+  __shared__ scalar_t s_input[ELEMENTARY_SIZE * 2];
+  int b = blockIdx.y * blockDim.y + threadIdx.y;
+  if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
+    int first_idx = increasing_stride ? 0 : log_n - 1 - log_stride;
+    for (int t = threadIdx.x; t < max_stride * 2; t += blockDim.x) {
+      // get index into patch
+      auto k_i = stack / kernel_size;
+      auto k_j = stack & (kernel_size - 1); // stack % kernel_size
+
+      // get patch index into full matrix
+      auto p_i = (patch_idx * stride) / w_out;
+      auto p_j = (patch_idx * stride) & (w_out - 1); // (patch_idx * stride) % w_out
+
+      // combine indices and adjust for padding
+      auto i = k_i + p_i - padding;
+      auto j = k_j + p_j - padding;
+
+      if (i >= w_in or j >= h_in or i < 0 or j < 0) s_input[i] = 0;
+      else
+        s_input[t] = input_a[batch_idx][input_base_idx + t][i][j];
+    }
+    int i = threadIdx.x;
+    for (int idx = first_idx; idx <= first_idx + log_stride; ++idx) {
+      int log_stride = increasing_stride ? idx : log_n - 1 - idx;
+      int stride = 1 << log_stride;
+      int low_order_bits = i & (stride - 1);  // int low_order_bits = i % stride;
+      int pos = 2 * (i - low_order_bits) + low_order_bits;
+      const scalar_t twiddle_val[2][2] = {{twiddle_a[stack][log_stride][input_base_idx / 2 + i][0][0], twiddle_a[stack][log_stride][input_base_idx / 2 + i][0][1]},
+                                          {twiddle_a[stack][log_stride][input_base_idx / 2 + i][1][0], twiddle_a[stack][log_stride][input_base_idx / 2 + i][1][1]}};
+      __syncthreads();
+      const scalar_t input_val[2] = {s_input[pos], s_input[pos + stride]};
+      s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
+      s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
+      if (return_intermediates || idx == first_idx + log_stride) {
+        output_a[idx+1][b][stack][input_base_idx + pos] = s_input[pos];
+        output_a[idx+1][b][stack][input_base_idx + pos + stride] = s_input[pos + stride];
+      }
+    }
+  }
+}
+
+void butterfly_conv2d_cuda(const at::Tensor& twiddle,
+    const at::Tensor& input, const at::Tensor& output,
+    const int kernel_size, const int stride, const int padding,
+    const int h_out, const int w_out, bool return_intermediates)
+{
+  const int batch_size = input.size(0);
+  const int n = input.size(1); /*c*/
+  const int h = input.size(2);
+  const int w = input.size(3);
+  const int nstack = kernel_size * kernel_size;
+  const int log_n = int(log2((double) n));
+  const int log_stride = int(log2((double) n/2));
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.type(),
+    "butterfly_conv2d_cuda", [&] {
+      int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
+      int log_stride = int(log2((double) stride));
+      dim3 block(stride);
+      dim3 grid(div_up(n / 2, stride), batch_size, nstack);
+      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
+
+      // batch_size, c, h, w
+      const auto input_a = output.packed_accessor<scalar_t, 4>();
+
+      // log c, h*w*batch_size, nstack, c
+      auto output_a = output.packed_accessor<scalar_t, 4>();
+
+      return_intermediates ? butterfly_conv2d_cuda_kernel<scalar_t, true, true>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a,
+          output_a, log_stride, log_n, kernel_size, stride, padding, h_out, w_out)
+                           : butterfly_conv2d_cuda_kernel<scalar_t, true, false>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a,
+          output_a, log_stride, log_n, kernel_size, stride, padding, h_out, w_out);
+
+      for (log_stride++; log_stride <= log_n - 1; ++log_stride) {
+        dim3 block(MAX_BLOCK_SIZE / 2);
+        dim3 grid(div_up(n / 2, MAX_BLOCK_SIZE / 2), div_up(batch_size, WORK_PER_THREAD),
+          nstack);
+        butterfly_multiply_untied_onestep_cuda_kernel<scalar_t, true>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride,
+            log_n);
+      }
+  });
+  AT_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_conv2d_cuda failed with error code ",
+     cudaGetLastError());
+}
+
+// void butterfly_conv2d_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output) {
+//   AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.type(), "butterfly_conv2d_backward_cuda", [&] {
+//   });
+//   AT_CHECK(cudaGetLastError() == cudaSuccess,
+//      "butterfly_conv2d_backward_cuda failed with error code ",
+//      cudaGetLastError());
+// }
 
 template <typename scalar_t>
 __global__ void permutation_factor_even_odd_multiply_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 1> p_a,

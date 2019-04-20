@@ -13,6 +13,12 @@ void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, co
 void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& input, bool increasing_stride, bool return_intermediates);
 void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at::Tensor& output,
                                              at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
+
+void butterfly_conv2d_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output,
+    const int kernel_size, const int stride, const int padding,
+    const int h_out, const int w_out, bool return_intermediates);
+// void butterfly_conv2d_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output);
+
 void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Tensor& input, at::Tensor& output);
 void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input,
                                                         at::Tensor& d_p_expanded, at::Tensor& d_input);
@@ -787,6 +793,42 @@ std::vector<at::Tensor> butterfly_multiply_untied_backward(const at::Tensor& gra
   return {d_twiddle, d_input} ;
 }
 
+at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
+  const size_t kernel_size, const size_t padding, const size_t stride, bool return_intermediates) {
+  /* Parameters:
+        twiddle: (nstack, log n, n/2, 2, 2) if real or (nstack, log n, n/2, 2, 2, 2) if complex
+        input: (batch, c, h, w)
+        kernel_size: int
+
+     Returns:
+        output: (batch, c, h, w)
+  */
+
+  const auto batch_size = input.size(0);
+  const auto in_channels = input.size(1);
+  const auto h = input.size(2);
+  const auto w = input.size(3);
+  const int log_n = int(log2((double) in_channels));
+  // AT_CHECK((twiddle.dim() == 5 && input.dim() == 3) || (twiddle.dim() == 6 && input.dim() == 4),
+  //          "butterfly_multiply_untied: twiddle and input must have dimension 5,3 or 6,4");
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(input);
+  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  // AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
+  const int output_first_dim = return_intermediates ? log_n + 1 : 1;
+  auto output = torch::empty({output_first_dim, batch_size*h*w, kernel_size*kernel_size, in_channels},
+    torch::dtype(input.dtype()).device(input.device()));
+  auto h_out = (h + 2 * padding - (kernel_size - 1) - 1) / stride + 1;
+  auto w_out = (h + 2 * padding - (kernel_size - 1) - 1) / stride + 1;
+  butterfly_conv2d_cuda(twiddle, input, output, kernel_size, stride,
+    padding, h_out, w_out, return_intermediates);
+  return output;
+}
+
+// std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& output) {
+//   return;
+// }
+
 at::Tensor permutation_factor_even_odd_multiply(const at::Tensor& p, const at::Tensor& input) {
   /* Parameters:
          p: (1, )
@@ -1175,6 +1217,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_multiply_intermediate_backward", &butterfly_multiply_intermediate_backward, "Butterfly factor multiply intermediate backward");
   m.def("butterfly_multiply_untied", &butterfly_multiply_untied, "Butterfly factor multiply untied forward");
   m.def("butterfly_multiply_untied_backward", &butterfly_multiply_untied_backward, "Butterfly factor multiply untied backward");
+  m.def("butterfly_conv2d", &butterfly_conv2d, "Butterfly conv2d forward");
+  // m.def("butterfly_conv2d_backward", &butterfly_conv2d_backward, "Butterfly conv2d backward");
   m.def("permutation_factor_even_odd_multiply", &permutation_factor_even_odd_multiply, "Permutation factor (even odd) multiply forward");
   m.def("permutation_factor_even_odd_multiply_backward", &permutation_factor_even_odd_multiply_backward, "Permutation factor (even odd) multiply backward");
   m.def("permutation_factor_reverse_multiply", &permutation_factor_reverse_multiply, "Permutation factor (reverse) multiply forward");
