@@ -1812,7 +1812,7 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
 }
 
 void butterfly_conv2d_cuda(const at::Tensor& twiddle,
-    const at::Tensor& input, const at::Tensor& output,
+    const at::Tensor& input, at::Tensor& output,
     const int kernel_size, const int stride, const int padding,
     const int h_out, const int w_out, bool return_intermediates)
 {
