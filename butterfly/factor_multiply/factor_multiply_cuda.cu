@@ -1768,9 +1768,9 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
   const int h_in = input_a.size(2);
   const int w_in = input_a.size(3);
   const int patch_idx = blockIdx.y & (b_in - 1); // blockIdx.y % (b_in)
-  const int batch_idx = blockIdx.y / (h_in * w_in);
+  const int batch_idx = blockIdx.y / (h_in * w_in);                        
   __shared__ scalar_t s_input[ELEMENTARY_SIZE * 2];
-  int b = blockIdx.y * blockDim.y + threadIdx.y;
+  int b = blockIdx.y;
   if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
     int first_idx = increasing_stride ? 0 : log_n - 1 - log_stride;
     for (int t = threadIdx.x; t < max_stride * 2; t += blockDim.x) {
@@ -1818,19 +1818,20 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
     const int kernel_size, const int stride, const int padding,
     const int h_out, const int w_out, bool return_intermediates)
 {
-  const int batch_size = input.size(0);
+  const int b_in = input.size(0);
   const int n = input.size(1); /*c*/
   const int h = input.size(2);
   const int w = input.size(3);
   const int nstack = kernel_size * kernel_size;
   const int log_n = int(log2((double) n));
   const int log_stride = int(log2((double) n/2));
+  const int batch_size = b_in * h * w; 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.type(),
     "butterfly_conv2d_cuda", [&] {
       int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
       int log_stride = int(log2((double) stride));
       dim3 block(stride);
-      dim3 grid(div_up(n / 2, stride), batch_size*h*w, nstack);
+      dim3 grid(div_up(n / 2, stride), batch_size, nstack);
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
 
       // batch_size, c, h, w

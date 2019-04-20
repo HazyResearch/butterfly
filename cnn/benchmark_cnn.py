@@ -9,13 +9,13 @@ from butterfly.butterfly import ButterflyBmm
 from butterfly.butterfly_multiply import butterfly_conv2d
 
 import time
-nsteps = 1000
+nsteps = 1
 
 in_planes = 128
 out_planes = 128
 kernel_size = 3
 stride = 1
-batch_size = 1
+batch_size = 128
 f_dim = 16
 padding = 1
 

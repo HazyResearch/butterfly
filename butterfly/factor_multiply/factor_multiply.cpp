@@ -799,9 +799,12 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
         twiddle: (nstack, log n, n/2, 2, 2) if real or (nstack, log n, n/2, 2, 2, 2) if complex
         input: (batch, c, h, w)
         kernel_size: int
+        padding: int 
+        stride: int 
+        return_intermediates: bool
 
      Returns:
-        output: (batch, c, h, w)
+        output: 
   */
 
   const auto batch_size = input.size(0);
@@ -818,6 +821,9 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
   auto output = torch::empty({output_first_dim, batch_size*h*w, kernel_size*kernel_size, in_channels},
     torch::dtype(input.dtype()).device(input.device()));
+  if (!return_intermediates) {
+    output = output.expand({log_n + 1, batch_size*h*w, kernel_size*kernel_size, in_channels});
+  }
   auto h_out = (h + 2 * padding - (kernel_size - 1) - 1) / stride + 1;
   auto w_out = (h + 2 * padding - (kernel_size - 1) - 1) / stride + 1;
   butterfly_conv2d_cuda(twiddle, input, output, kernel_size, stride,
