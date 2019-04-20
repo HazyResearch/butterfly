@@ -1264,9 +1264,6 @@ __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAcce
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
   __shared__ scalar_t s_input[ELEMENTARY_SIZE * 2];
   int b = blockIdx.y * blockDim.y + threadIdx.y;
-  // # if __CUDA_ARCH__>=200
-  //   printf("untied id: %d\n", threadIdx.x);
-  // #endif
   if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
     int first_idx = increasing_stride ? 0 : log_n - 1 - log_max_stride;
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
@@ -1287,10 +1284,6 @@ __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAcce
       if (return_intermediates || idx == first_idx + log_max_stride) {
         output_a[idx+1][b][s][input_base_idx + pos] = s_input[pos];
         output_a[idx+1][b][s][input_base_idx + pos + stride] = s_input[pos + stride];
-        // # if __CUDA_ARCH__>=200
-        // printf("untied: (%d, %d, %d, %d) result: (%lf, %lf) (%d,%d)\n", 
-        //   idx+1, b, s, input_base_idx, s_input[pos], s_input[pos + stride], pos, pos+stride);
-      // #endif
       }
     }
   }
@@ -1406,16 +1399,13 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
       if (increasing_stride) {
         int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
         int log_stride = int(log2((double) stride));
-        std::cout << "stride:  " << stride << "\n";
         dim3 block(stride);
         dim3 grid(div_up(n / 2, stride), batch_size, nstack);
         return_intermediates ? butterfly_multiply_untied_cuda_kernel<scalar_t, true, true>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n)
                              : butterfly_multiply_untied_cuda_kernel<scalar_t, true, false>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n);
-        // // // std::cout << "untied: " << output_a[0][0][0][0] << "\n";
         for (log_stride++; log_stride <= log_n - 1; ++log_stride) {
-          std::cout << "entered second block untied\n";
           dim3 block(MAX_BLOCK_SIZE / 2);
           dim3 grid(div_up(n / 2, MAX_BLOCK_SIZE / 2), div_up(batch_size, WORK_PER_THREAD), nstack);
           butterfly_multiply_untied_onestep_cuda_kernel<scalar_t, true>
@@ -1776,9 +1766,6 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
   const int w_in = input_a.size(3);
   const int patch_idx = blockIdx.y % (h_out * w_out); 
   const int batch_idx = blockIdx.y / (h_out * w_out);    
-  // # if __CUDA_ARCH__>=200
-  //       printf("batch:%d patch:%d\n", batch_idx, patch_idx);
-  // #endif 
   __shared__ scalar_t s_input[ELEMENTARY_SIZE * 2];
   int b = blockIdx.y * blockDim.y + threadIdx.y;
   if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
@@ -1794,18 +1781,10 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
       int p_i = (patch_idx) / w_out;
       int p_j = (patch_idx) % (w_out); 
 
-      // #if __CUDA_ARCH__>=200
-      // printf("w_out: %d patch_idx:%d p_i:%d p_k:%d\n", w_out);
-      // #endif      
-      
       // combine indices and adjust for padding
       int i = k_i + p_i - padding;
       int j = k_j + p_j - padding;
 
-      // # if __CUDA_ARCH__>=200
-      //   printf("k:(i,j):%d, %d p:(i,j):%d, %d patch_idx:%d batch:%d c:%d h:%d w:%d\n", 
-      //     k_i, k_j, p_i, p_j, patch_idx, batch_idx, input_base_idx+t, i, j);
-      // #endif 
       if (i >= w_in or j >= h_in or i < 0 or j < 0) s_input[t] = 0;
       else
         s_input[t] = input_a[batch_idx][input_base_idx + t][i][j];
@@ -1825,10 +1804,6 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
       if (return_intermediates || idx == first_idx + log_max_stride) {
         output_a[idx+1][b][stack][input_base_idx + pos] = s_input[pos];
         output_a[idx+1][b][stack][input_base_idx + pos + stride] = s_input[pos + stride];
-        // # if __CUDA_ARCH__>=200
-        // printf("conv2d: (%d, %d, %d, %d) result: (%lf, %lf) (%d,%d) %d\n", 
-        // idx+1, b, stack, input_base_idx, s_input[pos], s_input[pos + stride], pos, pos+stride, patch_idx);
-        // #endif
       }
     }
   }
@@ -1849,7 +1824,6 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
       int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
       int log_stride = int(log2((double) stride));
       dim3 block(stride);
-      std::cout << "stride:  " << stride << "\n";
       dim3 grid(div_up(n / 2, stride), batch_size, nstack);
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
 
@@ -1866,9 +1840,7 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a,
           output_a, log_stride, log_n, kernel_size, padding, h_out, w_out);
 
-      // std::cout << "conv2d: " << output_a[0][0][0][0] << "\n";
       for (log_stride++; log_stride <= log_n - 1; ++log_stride) {
-        std::cout << "entered second block conv2d\n";
         dim3 block(MAX_BLOCK_SIZE / 2);
         dim3 grid(div_up(n / 2, MAX_BLOCK_SIZE / 2), div_up(batch_size, WORK_PER_THREAD),
           nstack);

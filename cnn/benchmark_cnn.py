@@ -9,7 +9,7 @@ from butterfly.butterfly import ButterflyBmm
 from butterfly.butterfly_multiply import butterfly_conv2d
 
 import time
-nsteps = 1
+nsteps = 1000
 
 in_planes = 128
 out_planes = 128
@@ -67,7 +67,6 @@ batched_grad = torch.randn_like(batched_x)
 # print(f'Conv2d together: {end - start}s {(mem2-mem1)/1e6}MB')
 
 # Butterfly Conv
-# output = bfly.forward(x)
 
 mem1 = torch.cuda.memory_allocated()
 torch.cuda.reset_max_memory_allocated()
@@ -80,12 +79,19 @@ end = time.perf_counter()
 mem2 = torch.cuda.max_memory_allocated()
 print(f'ButterflyConv2d forward: {end - start}s {(mem2-mem1)/1e6}MB')
 
+h_out = (f_dim + 2 * padding - (kernel_size - 1) - 1)  + 1
+w_out = (f_dim + 2 * padding - (kernel_size - 1) - 1)  + 1
 mem1 = torch.cuda.memory_allocated()
 torch.cuda.reset_max_memory_allocated()
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
-    output = butterfly_conv2d(bfly.twiddle, x, kernel_size, padding, stride, False)
+    # TODO: fuse folding into butterfly_conv2d? 
+    output = butterfly_conv2d(bfly.twiddle, x, kernel_size, padding, False).mean(dim=1)
+    output = output.view(
+                batch_size, 
+                h_out * w_out, out_planes).transpose(1, 2).view(batch_size, out_planes, 
+                h_out, w_out)
 torch.cuda.synchronize()
 end = time.perf_counter()
 mem2 = torch.cuda.max_memory_allocated()
