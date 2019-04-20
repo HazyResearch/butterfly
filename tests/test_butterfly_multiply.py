@@ -5,11 +5,13 @@ import math
 import unittest
 
 import torch
+import torch.nn.functional as F
 
 from butterfly import Butterfly
 from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
-
+from butterfly.butterfly_multiply import butterfly_conv2d
+from cnn.models.butterfly_conv import ButterflyConv2d
 
 class ButterflyMultTest(unittest.TestCase):
 
@@ -146,5 +148,38 @@ class ButterflyMultTest(unittest.TestCase):
                     self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
                                     (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(), device, complex, increasing_stride))
 
+    def test_butterfly_conv2d(self):
+        device = 'cuda'
+        complex = False 
+        in_planes = 4
+        out_planes = 4
+        kernel_size = 1
+        batch_size = 1
+        f_dim = 2
+        padding = 1
+        return_intermediates = False
+        dilation = 1
+        bfly = ButterflyConv2d(in_planes, out_planes, kernel_size=kernel_size, 
+            padding=padding, bias=False, tied_weight=False).to(device)
+        input_ = torch.randn(batch_size, in_planes, f_dim, f_dim, requires_grad=True).to(device)
+        # print(input_)
+        h_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
+        w_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
+        input_patches = F.unfold(input_, kernel_size, dilation, padding).view(batch_size, in_planes, kernel_size * kernel_size, h_out * w_out)
+        input_reshape = input_patches.permute(0, 3, 2, 1).reshape(batch_size * h_out * w_out, kernel_size * kernel_size, in_planes)
+        # print(input_reshape)
+        for increasing_stride in [True]:
+            output_torch = bfly.forward(input_)
+            output = butterfly_conv2d(bfly.twiddle, input_, kernel_size, padding, return_intermediates).mean(dim=1)
+            output = output.view(
+                batch_size, 
+                h_out * w_out, out_planes).transpose(1, 2).view(batch_size, out_planes, 
+                h_out, w_out)
+            print(output)
+            print(output_torch)
+            # print(output_torch.shape, output.shape)
+            self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
+                                    ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
+                                    
 if __name__ == "__main__":
     unittest.main()
