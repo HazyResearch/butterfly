@@ -1767,9 +1767,8 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
   const int c_in = input_a.size(1);
   const int h_in = input_a.size(2);
   const int w_in = input_a.size(3);
-  const int patch_idx = blockIdx.y / (b_in);
+  const int patch_idx = blockIdx.y & (b_in - 1); // blockIdx.y % (b_in)
   const int batch_idx = blockIdx.y / (h_in * w_in);
-
   __shared__ scalar_t s_input[ELEMENTARY_SIZE * 2];
   int b = blockIdx.y * blockDim.y + threadIdx.y;
   if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
@@ -1787,7 +1786,10 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
       auto i = k_i + p_i - padding;
       auto j = k_j + p_j - padding;
 
-      if (i >= w_in or j >= h_in or i < 0 or j < 0) s_input[i] = 0;
+      // # if __CUDA_ARCH__>=200
+      //   printf("thread:%d batch:%d c:%d h:%d w:%d\n", t, batch_idx, input_base_idx+t, i, j);
+      // #endif 
+      if (i >= w_in or j >= h_in or i < 0 or j < 0) s_input[t] = 0;
       else
         s_input[t] = input_a[batch_idx][input_base_idx + t][i][j];
     }
@@ -1828,7 +1830,7 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
       int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
       int log_stride = int(log2((double) stride));
       dim3 block(stride);
-      dim3 grid(div_up(n / 2, stride), batch_size, nstack);
+      dim3 grid(div_up(n / 2, stride), batch_size*h*w, nstack);
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
 
       // batch_size, c, h, w

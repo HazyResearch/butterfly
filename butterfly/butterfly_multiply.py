@@ -11,6 +11,7 @@ try:
     from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_backward
     from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
     from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
+    from factor_multiply import butterfly_conv2d
 except:
     use_extension = False
     import warnings
