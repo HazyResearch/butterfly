@@ -188,9 +188,9 @@ class ButterflyMultTest(unittest.TestCase):
         input_ = torch.randn(batch_size, in_planes, f_dim, f_dim, requires_grad=True).to(device)
         h_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
         w_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
-        for increasing_stride in [True]:
+        for increasing_stride in [True, False]:
             output_torch = bfly.forward(input_)
-            output = butterfly_conv2d(bfly.twiddle, input_, kernel_size, padding, return_intermediates).mean(dim=1)
+            output = butterfly_conv2d(bfly.twiddle, input_, kernel_size, padding, increasing_stride, return_intermediates).mean(dim=1)
             output = output.view(
                 batch_size, 
                 h_out * w_out, out_planes).transpose(1, 2).view(batch_size, out_planes, 

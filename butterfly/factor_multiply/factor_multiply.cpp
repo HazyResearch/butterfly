@@ -17,8 +17,8 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
                                              at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
 
 void butterfly_conv2d_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output,
-    const int kernel_size, const int padding,
-    const int h_out, const int w_out, bool return_intermediates);
+                           const int kernel_size, const int padding, const int h_out, 
+                           const int w_out, bool increasing_stride, bool return_intermediates);
 // void butterfly_conv2d_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output);
 
 void butterfly_multiply_untied_svd_cuda(const at::Tensor& twiddle, at::Tensor& input,
@@ -808,7 +808,8 @@ std::vector<at::Tensor> butterfly_multiply_untied_backward(const at::Tensor& gra
 }
 
 at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
-  const size_t kernel_size, const size_t padding, bool return_intermediates) {
+  const size_t kernel_size, const size_t padding, bool increasing_stride, 
+  bool return_intermediates) {
   /* Parameters:
         twiddle: (nstack, log n, n/2, 2, 2) if real or (nstack, log n, n/2, 2, 2, 2) if complex
         input: (batch, c, h, w)
@@ -840,7 +841,7 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   if (!return_intermediates) {
     output = output.expand({log_n + 1, batch_size*h_out*w_out, kernel_size*kernel_size, in_channels});
   }
-  butterfly_conv2d_cuda(twiddle, input, output, kernel_size, padding, h_out, w_out, return_intermediates);
+  butterfly_conv2d_cuda(twiddle, input, output, kernel_size, padding, h_out, w_out, increasing_stride, return_intermediates);
   return return_intermediates ? output : output[-1];
 }
 

@@ -1857,7 +1857,8 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
 void butterfly_conv2d_cuda(const at::Tensor& twiddle,
     const at::Tensor& input, at::Tensor& output,
     const int kernel_size, const int padding,
-    const int h_out, const int w_out, bool return_intermediates)
+    const int h_out, const int w_out, bool increasing_stride, 
+    bool return_intermediates)
 {
   const int b_in = input.size(0);
   const int n = input.size(1); /*c*/
@@ -1866,16 +1867,22 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
   const int batch_size = output.size(1); 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.type(),
     "butterfly_conv2d_cuda", [&] {
-      int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
-      int log_stride = int(log2((double) stride));
-      dim3 block(stride);
-      dim3 grid(batch_size, div_up(n / 2, stride), nstack);
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
       // batch_size, c, h, w
       const auto input_a = input.packed_accessor<scalar_t, 4>();
       // log c, h*w*batch_size, nstack, c
       auto output_a = output.packed_accessor<scalar_t, 4>();
       // assume in_channels <= 1024
+      int stride, log_stride; 
+      if (increasing_stride){
+        stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
+        log_stride = int(log2((double) stride));
+      } else {
+        log_stride = log_n - 1;
+        stride = 1 << log_stride;
+      }
+      dim3 block(stride);
+      dim3 grid(batch_size, div_up(n / 2, stride), nstack);
       return_intermediates ? butterfly_conv2d_cuda_kernel<scalar_t, true, true>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a,
           output_a, log_stride, log_n, kernel_size, padding, h_out, w_out)
