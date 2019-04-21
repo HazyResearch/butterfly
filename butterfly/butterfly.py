@@ -193,6 +193,7 @@ class ButterflyBmm(Butterfly):
         output = output.reshape((batch, self.matrix_batch * self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         if self.param == 'regular':
             output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
+            print("bmm output size: ", output.size())
         elif self.param == 'ortho':
             c, s = torch.cos(self.twiddle), torch.sin(self.twiddle)
             twiddle = torch.stack((torch.stack((c, -s), dim=-1),
@@ -204,6 +205,7 @@ class ButterflyBmm(Butterfly):
             output = butterfly_mult_untied_svd(self.twiddle, output, self.increasing_stride)
         output = output.view((batch, self.matrix_batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
+        print(out_size_extended, self.out_size, self.in_size_extended)
         if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
             if not self.complex:
                 output = output.view(batch, self.matrix_batch, self.in_size_extended // out_size_extended, out_size_extended).mean(dim=2)

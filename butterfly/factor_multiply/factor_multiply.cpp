@@ -824,11 +824,14 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   // TODO: currently assuming convolution stride is 1! support more strides
   const auto batch_size = input.size(0);
   const auto in_channels = input.size(1);
+  // twiddle nstack = out_channels/in_channels * matrix batach 
+  const auto out_channels = twiddle.size(0) / (kernel_size*kernel_size) * in_channels;
   const auto h = input.size(2);
   const auto w = input.size(3);
   const int log_n = int(log2((double) in_channels));
-  auto h_out = (h + 2 * padding - (kernel_size - 1) - 1) + 1;
-  auto w_out = (w + 2 * padding - (kernel_size - 1) - 1) + 1;
+  const auto nstack = twiddle.size(0);
+  auto h_out = h + 2 * padding - (kernel_size - 1);
+  auto w_out = w + 2 * padding - (kernel_size - 1);
   // AT_CHECK((twiddle.dim() == 5 && input.dim() == 3) || (twiddle.dim() == 6 && input.dim() == 4),
   //          "butterfly_multiply_untied: twiddle and input must have dimension 5,3 or 6,4");
   CHECK_DEVICE(twiddle);
@@ -836,10 +839,11 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
   // AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
-  auto output = torch::empty({output_first_dim, batch_size*h_out*w_out, kernel_size*kernel_size, in_channels},
+  // return unfolded output 
+  auto output = torch::empty({output_first_dim, batch_size*h_out*w_out, kernel_size*kernel_size, out_channels},
     torch::dtype(input.dtype()).device(input.device()));
   if (!return_intermediates) {
-    output = output.expand({log_n + 1, batch_size*h_out*w_out, kernel_size*kernel_size, in_channels});
+    output = output.expand({log_n + 1, batch_size*h_out*w_out, kernel_size*kernel_size, out_channels});
   }
   butterfly_conv2d_cuda(twiddle, input, output, kernel_size, padding, h_out, w_out, increasing_stride, return_intermediates);
   return return_intermediates ? output : output[-1];
