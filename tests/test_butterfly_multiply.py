@@ -179,7 +179,7 @@ class ButterflyMultTest(unittest.TestCase):
         out_planes = 128
         kernel_size = 3
         batch_size = 128
-        f_dim = 16
+        f_dim = 32
         padding = 1
         return_intermediates = False
         dilation = 1
