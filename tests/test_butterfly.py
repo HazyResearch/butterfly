@@ -66,7 +66,7 @@ class ButterflyTest(unittest.TestCase):
                                             output_loop.append(b(input[:, i]))
                                         output_loop = torch.stack(output_loop, dim=1)
                                         self.assertTrue(torch.allclose(output, output_loop),
-                                                        (output.shape, device, (in_size, out_size), complex, tied_weight, ortho_init))
+                                                        ((output - output_loop).abs().max().item(), output.shape, device, (in_size, out_size), complex, tied_weight, ortho_init))
                                     if ortho_init and param == 'regular':
                                         twiddle_np = b_bmm.twiddle.detach().to('cpu').numpy()
                                         if complex:

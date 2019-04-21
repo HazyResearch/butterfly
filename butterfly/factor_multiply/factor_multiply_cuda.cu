@@ -518,7 +518,7 @@ __device__ __forceinline__ void sum_strided_atomic(T (&val)[LENGTH], T *storage,
   __syncthreads();
 }
 
-/* Sum elements that are @stride apart by exchagning, using shared memory.
+/* Sum elements that are @stride apart by exchanging, using shared memory.
    After the function, threads with @tid < n_block_reductions * stride and @tid % n_block_reductions == 0
    contains the sums.
  */
@@ -1277,27 +1277,40 @@ __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAcce
   const int max_stride = 1 << log_max_stride;
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
   __shared__ scalar_t s_input[ELEMENTARY_SIZE * 2];
+  __shared__ scalar_t s_twiddle[ELEMENTARY_SIZE][2][2];
   int b = blockIdx.y * blockDim.y + threadIdx.y;
-  if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
-    int first_idx = increasing_stride ? 0 : log_n - 1 - log_max_stride;
+  int first_idx = increasing_stride ? 0 : log_n - 1 - log_max_stride;
+  if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
-      s_input[i] = output_a[first_idx][b][s][input_base_idx + i];
+      s_input[i + threadIdx.y * max_stride * 2] = output_a[first_idx][b][s][input_base_idx + i];
     }
-    int i = threadIdx.x;
-    for (int idx = first_idx; idx <= first_idx + log_max_stride; ++idx) {
-      int log_stride = increasing_stride ? idx : log_n - 1 - idx;
-      int stride = 1 << log_stride;
-      int low_order_bits = i & (stride - 1);  // int low_order_bits = i % stride;
-      int pos = 2 * (i - low_order_bits) + low_order_bits;
-      const scalar_t twiddle_val[2][2] = {{twiddle_a[s][log_stride][input_base_idx / 2 + i][0][0], twiddle_a[s][log_stride][input_base_idx / 2 + i][0][1]},
-                                          {twiddle_a[s][log_stride][input_base_idx / 2 + i][1][0], twiddle_a[s][log_stride][input_base_idx / 2 + i][1][1]}};
-      __syncthreads();
+  }
+  int tid_x = threadIdx.x;
+  int tid_y = threadIdx.y;
+  for (int idx = first_idx; idx <= first_idx + log_max_stride; ++idx) {
+    int log_stride = increasing_stride ? idx : log_n - 1 - idx;
+    int stride = 1 << log_stride;
+    if (tid_y == 0) {
+      s_twiddle[tid_x][0][0] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0];
+      s_twiddle[tid_x][0][1] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1];
+      s_twiddle[tid_x][1][0] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0];
+      s_twiddle[tid_x][1][1] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1];
+    }
+    int low_order_bits = tid_x & (stride - 1);  // int low_order_bits = tid_x % stride;
+    int pos_x = 2 * (tid_x - low_order_bits) + low_order_bits;
+    int pos_y = tid_y * max_stride * 2;
+    int pos = pos_x + pos_y;
+    __syncthreads();
+    const scalar_t twiddle_val[2][2] = {{s_twiddle[tid_x][0][0], s_twiddle[tid_x][0][1]},
+                                        {s_twiddle[tid_x][1][0], s_twiddle[tid_x][1][1]}};
+    __syncthreads();  // otherwise some thread might go back to writing to s_twiddle before other thread can read
+    if (b < batch_size) {
       const scalar_t input_val[2] = {s_input[pos], s_input[pos + stride]};
       s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
       s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
       if (return_intermediates || idx == first_idx + log_max_stride) {
-        output_a[idx+1][b][s][input_base_idx + pos] = s_input[pos];
-        output_a[idx+1][b][s][input_base_idx + pos + stride] = s_input[pos + stride];
+        output_a[idx+1][b][s][input_base_idx + pos_x] = s_input[pos];
+        output_a[idx+1][b][s][input_base_idx + pos_x + stride] = s_input[pos + stride];
       }
     }
   }
@@ -1413,8 +1426,8 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
       if (increasing_stride) {
         int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
         int log_stride = int(log2((double) stride));
-        dim3 block(stride);
-        dim3 grid(div_up(n / 2, stride), batch_size, nstack);
+        dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
+        dim3 grid(div_up(n / 2, stride), div_up(batch_size, block.y), nstack);
         return_intermediates ? butterfly_multiply_untied_cuda_kernel<scalar_t, true, true>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n)
                              : butterfly_multiply_untied_cuda_kernel<scalar_t, true, false>
@@ -1434,8 +1447,8 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n);
         }
         int stride = 1 << log_stride;
-        dim3 block(stride);
-        dim3 grid(div_up(n / 2, stride), batch_size, nstack);
+        dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
+        dim3 grid(div_up(n / 2, stride), div_up(batch_size, block.y), nstack);
         return_intermediates ? butterfly_multiply_untied_cuda_kernel<scalar_t, false, true>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n)
                              : butterfly_multiply_untied_cuda_kernel<scalar_t, false, false>
@@ -1494,35 +1507,62 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
   const int max_stride = 1 << log_max_stride;
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
   __shared__ scalar_t s_grad[ELEMENTARY_SIZE * 2];
+  __shared__ accscalar_t s_twiddle[ELEMENTARY_SIZE][2][2];  // Use accscalar_t instead of scalar_t since we'll reuse the storage for s_d_twiddle
+  // __shared__ scalar_t s_d_twiddle[ELEMENTARY_SIZE * 4];
+  // accscalar_t (* s_d_twiddle)[2][2] = (accscalar_t (*)[2][2])&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
+  accscalar_t* s_d_twiddle = (accscalar_t *)&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
   int b = blockIdx.y * blockDim.y + threadIdx.y;
-  if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
+  if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
-      s_grad[i] = d_input_a[b][s][input_base_idx + i];
+      s_grad[i + threadIdx.y * max_stride * 2] = d_input_a[b][s][input_base_idx + i];
     }
-    int i = threadIdx.x;
-    int first_idx = increasing_stride ? 0 : log_n - 1 - log_max_stride;
-    for (int idx = first_idx + log_max_stride; idx >= first_idx; --idx) {
-      int log_stride = increasing_stride ? idx : log_n - 1 - idx;
-      int stride = 1 << log_stride;
-      int low_order_bits = i & (stride - 1);  // int low_order_bits = i % stride;
-      int pos = 2 * (i - low_order_bits) + low_order_bits;
-      const scalar_t twiddle_val[2][2] = {{twiddle_a[s][log_stride][input_base_idx / 2 + i][0][0], twiddle_a[s][log_stride][input_base_idx / 2 + i][0][1]},
-                                          {twiddle_a[s][log_stride][input_base_idx / 2 + i][1][0], twiddle_a[s][log_stride][input_base_idx / 2 + i][1][1]}};
-      __syncthreads();
+  }
+  int tid_x = threadIdx.x;
+  int tid_y = threadIdx.y;
+  int first_idx = increasing_stride ? 0 : log_n - 1 - log_max_stride;
+  for (int idx = first_idx + log_max_stride; idx >= first_idx; --idx) {
+    int log_stride = increasing_stride ? idx : log_n - 1 - idx;
+    int stride = 1 << log_stride;
+    if (tid_y == 0) {
+      s_twiddle[tid_x][0][0] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0];
+      s_twiddle[tid_x][0][1] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1];
+      s_twiddle[tid_x][1][0] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0];
+      s_twiddle[tid_x][1][1] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1];
+    }
+    int low_order_bits = tid_x & (stride - 1);  // int low_order_bits = tid_x % stride;
+    int pos_x = 2 * (tid_x - low_order_bits) + low_order_bits;
+    int pos_y = tid_y * max_stride * 2;
+    int pos = pos_x + pos_y;
+    __syncthreads();
+    const scalar_t twiddle_val[2][2] = {{s_twiddle[tid_x][0][0], s_twiddle[tid_x][0][1]},
+                                        {s_twiddle[tid_x][1][0], s_twiddle[tid_x][1][1]}};
+    // Don't need to sync here since we sync later at sum_strided_atomic, so no writing to s_twiddle can occur until then
+    accscalar_t d_twiddle_val[2][2] = {{0, 0}, {0, 0}};
+    if (b < batch_size) {
       const scalar_t grad_val[2] = {s_grad[pos], s_grad[pos + stride]};
       s_grad[pos] = twiddle_val[0][0] * grad_val[0] + twiddle_val[1][0] * grad_val[1];
       s_grad[pos + stride] = twiddle_val[0][1] * grad_val[0] + twiddle_val[1][1] * grad_val[1];
-      const scalar_t input_val[2] = {output_a[idx][b][s][input_base_idx + pos], output_a[idx][b][s][input_base_idx + pos + stride]};
-      accscalar_t d_twiddle_val[2][2] = {{grad_val[0] * input_val[0], grad_val[0] * input_val[1]},
-                                         {grad_val[1] * input_val[0], grad_val[1] * input_val[1]}};
-      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + i][0][0], d_twiddle_val[0][0]);
-      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + i][0][1], d_twiddle_val[0][1]);
-      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + i][1][0], d_twiddle_val[1][0]);
-      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + i][1][1], d_twiddle_val[1][1]);
+      const scalar_t input_val[2] = {output_a[idx][b][s][input_base_idx + pos_x],
+                                     output_a[idx][b][s][input_base_idx + pos_x + stride]};
+      d_twiddle_val[0][0] = grad_val[0] * input_val[0];
+      d_twiddle_val[0][1] = grad_val[0] * input_val[1];
+      d_twiddle_val[1][0] = grad_val[1] * input_val[0];
+      d_twiddle_val[1][1] = grad_val[1] * input_val[1];
     }
-    __syncthreads();
+    int tid = threadIdx.x + threadIdx.y * blockDim.x;
+    int nthreads = blockDim.x * blockDim.y;
+    sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, max_stride, nthreads, tid);
+    if (tid_y == 0) {
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0], s_d_twiddle[tid_x]);
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1], s_d_twiddle[tid_x + max_stride]);
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0], s_d_twiddle[tid_x + 2 * max_stride]);
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1], s_d_twiddle[tid_x + 3 * max_stride]);
+    }
+  }
+  __syncthreads();
+  if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
-      d_input_a[b][s][input_base_idx + i] = s_grad[i];
+      d_input_a[b][s][input_base_idx + i] = s_grad[i + threadIdx.y * max_stride * 2];
     }
   }
 }
@@ -1697,15 +1737,15 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, d_twiddle_a, d_input_a, log_stride, log_n);
         }
         int stride = 1 << log_stride;
-        dim3 block(stride);
-        dim3 grid(div_up(n / 2, stride), batch_size, nstack);
+        dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
+        dim3 grid(div_up(n / 2, stride), div_up(batch_size, block.y), nstack);
         butterfly_multiply_untied_backward_cuda_kernel<scalar_t, accscalar_t, true>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, d_twiddle_a, d_input_a, log_stride, log_n);
       } else {
         int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
         int log_stride = int(log2((double) stride));
-        dim3 block(stride);
-        dim3 grid(div_up(n / 2, stride), batch_size, nstack);
+        dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
+        dim3 grid(div_up(n / 2, stride), div_up(batch_size, block.y), nstack);
         butterfly_multiply_untied_backward_cuda_kernel<scalar_t, accscalar_t, false>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, d_twiddle_a, d_input_a, log_stride, log_n);
         for (log_stride++; log_stride <= log_n - 1; ++log_stride) {
