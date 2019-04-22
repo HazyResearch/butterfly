@@ -8,10 +8,11 @@ import torch
 import torch.nn.functional as F
 
 from butterfly import Butterfly
+from cnn.models.butterfly_conv import ButterflyConv2d
+
 from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
-from butterfly.butterfly_multiply import butterfly_conv2d
-from cnn.models.butterfly_conv import ButterflyConv2d
+from butterfly.butterfly_multiply import butterfly_mult_conv2d
 from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
 
 
@@ -175,30 +176,45 @@ class ButterflyMultTest(unittest.TestCase):
     def test_butterfly_conv2d(self):
         device = 'cuda'
         complex = False 
-        in_planes = 128
-        out_planes = 256
+        in_planes = 2
+        out_planes = 2
         kernel_size = 3
-        batch_size = 128
+        batch_size = 2
         f_dim = 16
         padding = 1
         return_intermediates = False
         dilation = 1
         bfly = ButterflyConv2d(in_planes, out_planes, kernel_size=kernel_size, 
-            padding=padding, bias=False, tied_weight=False).to(device)
-        input_ = torch.randn(batch_size, in_planes, f_dim, f_dim, requires_grad=True).to(device)
+                               padding=padding, bias=False, 
+                               tied_weight=False).to(device)
+        input_ = torch.randn(batch_size, in_planes, f_dim, f_dim, 
+                             requires_grad=True).to(device)
         h_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
         w_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
+        twiddle = bfly.twiddle
         for increasing_stride in [True, False]:
+            # test forward pass
             output_torch = bfly.forward(input_)
-            output = butterfly_conv2d(bfly.twiddle, input_, kernel_size, padding, increasing_stride, return_intermediates).mean(dim=1)
+            output = butterfly_mult_conv2d(bfly.twiddle, input_, kernel_size, 
+                                      padding, increasing_stride)
             output = output.view(
                 batch_size, 
                 h_out * w_out, out_planes).transpose(1, 2).view(batch_size, out_planes, 
                 h_out, w_out)
-            # print(output)
-            # print(output_torch)
             self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
                                     ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
-                                    
+            # test backward pass
+            grad = torch.randn_like(output_torch)
+            d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input_), 
+                                                     grad, retain_graph=True)
+            d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch,
+                (twiddle, input_), grad, retain_graph=True)
+            self.assertTrue(torch.allclose(d_input, d_input_torch, 
+                            rtol=self.rtol, atol=self.atol),
+                            ((d_input - d_input_torch).abs().max().item(), device, complex, increasing_stride))
+            self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, 
+                            rtol=self.rtol, atol=self.atol),
+                            (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(), device, complex, increasing_stride))
+
 if __name__ == "__main__":
     unittest.main()
