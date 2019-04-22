@@ -26,10 +26,26 @@
 # done
 # wait
 
+# for numlayer in $(seq 2 2); do
+#     for structure in B BBT BBTBBT; do
+#         python cifar_experiment.py with model=ResNet18 model_args.num_structured_layers=$numlayer model_args.structure_type=$structure model_args.param='svd' optimizer=Adam lr_decay=True weight_decay=True &
+#         sleep 2h
+#     done
+# done
+# wait
+
 for numlayer in $(seq 2 2); do
-    for structure in B BBT BBTBBT; do
-        python cifar_experiment.py with model=ResNet18 model_args.num_structured_layers=$numlayer model_args.structure_type=$structure model_args.param='svd' optimizer=Adam lr_decay=True weight_decay=True &
-        sleep 2.5h
+    for nblocks in 3 4 5; do
+        python cifar_experiment.py with model=ResNet18 model_args.num_structured_layers=$numlayer model_args.structure_type=BBT model_args.nblocks=$nblocks model_args.param='regular' optimizer=Adam lr_decay=True weight_decay=True &
+        sleep 1.25h
+    done
+done
+sleep 1h
+
+for numlayer in $(seq 2 2); do
+    for nblocks in 3 4 5; do
+        python cifar_experiment.py with model=ResNet18 model_args.num_structured_layers=$numlayer model_args.structure_type=BBT model_args.nblocks=$nblocks model_args.param='svd' optimizer=Adam lr_decay=True weight_decay=True &
+        sleep 2.25h
     done
 done
 wait

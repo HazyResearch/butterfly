@@ -90,12 +90,13 @@ class ButterflyConv2dBBT(nn.Module):
         dilation: int or (int, int)
         bias: If set to False, the layer will not learn an additive bias.
                 Default: ``True``
+        nblocks: number of BBT blocks in the product
         tied_weight: whether the weights in the butterfly factors are tied.
             If True, will have 4N parameters, else will have 2 N log N parameters (not counting bias)
-         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
-             decreasing stride (e.g., n/2, n/4, ..., 1).
-             Note that this only changes the order of multiplication, not how twiddle is stored.
-             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+        increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+            decreasing stride (e.g., n/2, n/4, ..., 1).
+            Note that this only changes the order of multiplication, not how twiddle is stored.
+            In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
         param: The parameterization of the 2x2 butterfly factors, either 'regular' or 'ortho' or 'svd'.
             'ortho' and 'svd' only support real, not complex.
@@ -105,7 +106,7 @@ class ButterflyConv2dBBT(nn.Module):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True,
-                 tied_weight=True, ortho_init=False, param='regular', max_gain=10.0):
+                 tied_weight=True, nblocks=1, ortho_init=False, param='regular', max_gain=10.0):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -113,10 +114,23 @@ class ButterflyConv2dBBT(nn.Module):
         self.stride = (stride, stride) if isinstance(stride, int) else stride
         self.padding = (padding, padding) if isinstance(padding, int) else padding
         self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
-        self.layers = nn.Sequential(
-            ButterflyBmm(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], False, False, tied_weight, increasing_stride=False, ortho_init=ortho_init, param=param, max_gain=max_gain ** (1 / 2)),
-            ButterflyBmm(out_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False, tied_weight, increasing_stride=True, ortho_init=ortho_init, param=param, max_gain=max_gain ** (1 / 2))
-            )
+        self.nblocks = nblocks
+        max_gain_per_block = max_gain ** (1 / (2 * nblocks))
+        layers = []
+        for i in range(nblocks):
+            layers.append(ButterflyBmm(in_channels if i == 0 else out_channels,
+                                       out_channels, self.kernel_size[0] *
+                                       self.kernel_size[1], False, False,
+                                       tied_weight, increasing_stride=False,
+                                       ortho_init=ortho_init, param=param,
+                                       max_gain=max_gain_per_block))
+            layers.append(ButterflyBmm(out_channels, out_channels,
+                                       self.kernel_size[0] *
+                                       self.kernel_size[1], False, bias if i == nblocks - 1 else False,
+                                       tied_weight, increasing_stride=True,
+                                       ortho_init=ortho_init, param=param,
+                                       max_gain=max_gain_per_block))
+        self.layers = nn.Sequential(*layers)
 
     def forward(self, input):
         """
