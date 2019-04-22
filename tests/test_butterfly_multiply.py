@@ -9,7 +9,6 @@ import torch
 from butterfly import Butterfly
 from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
-from butterfly.butterfly_multiply import butterfly_mult_untied_specialized
 from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
 
 
