@@ -1519,7 +1519,7 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
   if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       s_grad[i + threadIdx.y * max_stride * 2] = d_input_a[b][s][input_base_idx + i];
-      // printf("untied grad idx: %d, val: %f\n", i + threadIdx.y * max_stride * 2, d_input_a[b][s][input_base_idx + i]);
+      // printf("untied s:%d grad idx: %d, val: %f\n", s, i + threadIdx.y * max_stride * 2, d_input_a[b][s][input_base_idx + i]);
     }
   }
   int tid_x = threadIdx.x;
@@ -1549,6 +1549,14 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
       s_grad[pos + stride] = twiddle_val[0][1] * grad_val[0] + twiddle_val[1][1] * grad_val[1];
       const scalar_t input_val[2] = {output_a[idx][b][s][input_base_idx + pos_x],
                                      output_a[idx][b][s][input_base_idx + pos_x + stride]};
+      
+      // if (input_val[0]!=0)
+      //   printf("untied idx:%d, input:%f threadIdx:(%d,%d) blockIdx:(%d,%d,%d), \n", idx, input_val[0], threadIdx.x, threadIdx.y,
+      //     blockIdx.x, blockIdx.y, blockIdx.z);
+      // if (input_val[1]!=0)
+      //   printf("untied idx:%d, input:%f threadIdx:(%d,%d) blockIdx:(%d,%d,%d), \n", idx, input_val[1], threadIdx.x, threadIdx.y,
+      //     blockIdx.x, blockIdx.y, blockIdx.z);
+
       d_twiddle_val[0][0] = grad_val[0] * input_val[0];
       d_twiddle_val[0][1] = grad_val[0] * input_val[1];
       d_twiddle_val[1][0] = grad_val[1] * input_val[0];
@@ -1562,14 +1570,13 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
       atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1], s_d_twiddle[tid_x + max_stride]);
       atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0], s_d_twiddle[tid_x + 2 * max_stride]);
       atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1], s_d_twiddle[tid_x + 3 * max_stride]);
-      // printf("twid: %lf")
     }
   }
   __syncthreads();
   if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       d_input_a[b][s][input_base_idx + i] = s_grad[i + threadIdx.y * max_stride * 2];
-      // printf("untied input: %d")
+      // printf("untied: (%d,%d,%d) %f\n", b, s, input_base_idx+i, d_input_a[b][s][input_base_idx + i]);
     }
   }
 }
@@ -1844,7 +1851,8 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
       if (i >= w_in or j >= h_in or i < 0 or j < 0) s_input[t] = 0;
       else{
         s_input[t] = input_a[batch_idx][input_base_idx + t][i][j];
-        // load input into first idx of output for backward pass 
+        // load input into first idx of output for backward pass
+        // we allocated this memory already when so shouldn't affect too much 
         output_a[0][b][stack][output_base_idx + t] = s_input[t];
       }
     }
@@ -1939,7 +1947,7 @@ __global__ void butterfly_conv2d_backward_cuda_kernel(
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       // read from output grad (dim: b_in * h_out * w_out, cin/cout * nstack, c_out) 
       s_grad[i + threadIdx.y * max_stride * 2] = grad_a[b][s][input_base_idx + i];
-      // printf("grad idx: %d, val: %f\n", i + threadIdx.y * max_stride * 2, grad_a[b][s][input_base_idx + i]);
+      // printf("s:%d grad idx: %d, val: %f\n", s, i + threadIdx.y * max_stride * 2, grad_a[b][s][input_base_idx + i]);
     }
   }
   int tid_x = threadIdx.x;
@@ -1971,7 +1979,12 @@ __global__ void butterfly_conv2d_backward_cuda_kernel(
       s_grad[pos + stride] = twiddle_val[0][1] * grad_val[0] + twiddle_val[1][1] * grad_val[1];
       const scalar_t input_val[2] = {output_a[idx][b][s][input_base_idx + pos_x],
                                      output_a[idx][b][s][input_base_idx + pos_x + stride]};
-      // printf("input:%f\n", input_val[0]);
+      // if (input_val[0]!=0)
+      //   printf("conv2d idx:%d, input:%f threadIdx:(%d,%d) blockIdx:(%d,%d,%d), \n", idx, input_val[0], threadIdx.x, threadIdx.y,
+      //   blockIdx.x, blockIdx.y, blockIdx.z);
+      // if (input_val[1]!=0)
+      //   printf("conv2d idx:%d, input:%f threadIdx:(%d,%d) blockIdx:(%d,%d,%d), \n", idx, input_val[1], threadIdx.x, threadIdx.y,
+      // blockIdx.x, blockIdx.y, blockIdx.z);
       d_twiddle_val[0][0] = grad_val[0] * input_val[0];
       d_twiddle_val[0][1] = grad_val[0] * input_val[1];
       d_twiddle_val[1][0] = grad_val[1] * input_val[0];
@@ -1994,7 +2007,7 @@ __global__ void butterfly_conv2d_backward_cuda_kernel(
   const int patch_idx = b % (h_out * w_out); 
   const int batch_idx = b / (h_out * w_out);
   // printf("hout:%d wout:%d paddng:%d kernel_size:%d\n", h_out, w_out, padding, kernel_size);
-  if (b < batch_size) {
+  if (b < batch_size) { 
     for (int t = threadIdx.x; t < max_stride * 2; t += blockDim.x) {
       // printf("%f\n", s_grad[t + threadIdx.y * max_stride * 2]);
       // map back to b, c, h, w
@@ -2009,9 +2022,12 @@ __global__ void butterfly_conv2d_backward_cuda_kernel(
       int j = k_j + p_j - padding;
       // this needs to be atomic because input is reused in forward pass 
       // with out_channels > in_channels and for each entry of the patch 
-      // printf("(%d,%d,%d,%d) %f\n", batch_idx, input_base_idx+t, i, j, d_input_a[batch_idx][input_base_idx + t][i][j]);
+      // printf("(%d,%d,%d,%d) %f\n", batch_idx, input_base_idx+t, i, j, s_grad[t + threadIdx.y * max_stride * 2]);
+
       if (i < w_in && j < h_in && i >= 0 && j >= 0) {
         atomicAdd(&d_input_a[batch_idx][input_base_idx + t][i][j], s_grad[t + threadIdx.y * max_stride * 2]);
+        // d_input_a[b][s][input_base_idx + i] = s_grad[i + threadIdx.y * max_stride * 2];
+        // s_input[t] = input_a[batch_idx][input_base_idx + t][i][j];
       }
     }
   }
@@ -2043,8 +2059,11 @@ void butterfly_conv2d_backward_cuda(const at::Tensor&grad, const at::Tensor& twi
       stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
       log_stride = int(log2((double) stride));
     }
-    dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
-    dim3 grid(div_up(n / 2, stride), div_up(batch_size, block.y), nstack);
+    // make more complicated/fine-grained later
+    // dim3 block(MAX_BLOCK_SIZE / 2);
+    // dim3 grid(div_up(n / 2, MAX_BLOCK_SIZE / 2), div_up(batch_size, WORK_PER_THREAD), nstack); 
+    dim3 block(stride);
+    dim3 grid(div_up(n / 2, stride), batch_size, nstack);
     butterfly_conv2d_backward_cuda_kernel<scalar_t, accscalar_t, true>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         grad_a, twiddle_a, output_a, d_twiddle_a, d_input_a, log_stride, 

@@ -176,23 +176,25 @@ class ButterflyMultTest(unittest.TestCase):
     def test_butterfly_conv2d(self):
         device = 'cuda'
         complex = False 
-        in_planes = 2
-        out_planes = 2
-        kernel_size = 2
-        batch_size = 1
-        f_dim = 1
+        in_planes = 128
+        out_planes = 128
+        kernel_size = 3
+        batch_size = 2
+        f_dim = 16
         padding = 1
         return_intermediates = False
         dilation = 1
-        bfly = ButterflyConv2d(in_planes, out_planes, kernel_size=kernel_size, 
+        for increasing_stride in [True]:
+            bfly = ButterflyConv2d(in_planes, out_planes, kernel_size=kernel_size, 
                                padding=padding, bias=False, 
                                tied_weight=False).to(device)
-        input_ = torch.randn(batch_size, in_planes, f_dim, f_dim, 
-                             requires_grad=True).to(device)
-        h_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
-        w_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
-        twiddle = bfly.twiddle
-        for increasing_stride in [True, False]:
+            input_ = torch.randn(batch_size, in_planes, f_dim, f_dim, 
+                                 requires_grad=True).to(device)
+            print(input_)
+            h_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
+            w_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
+            twiddle = bfly.twiddle
+
             # test forward pass
             output_torch = bfly.forward(input_)
             output = butterfly_mult_conv2d(bfly.twiddle, input_, kernel_size, 
@@ -210,13 +212,12 @@ class ButterflyMultTest(unittest.TestCase):
                                                      grad, retain_graph=True)
             d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch,
                 (twiddle, input_), grad, retain_graph=True)
-            # print(d_input)
-            # print(d_input_torch)
+
             self.assertTrue(torch.allclose(d_input, d_input_torch, 
                             rtol=self.rtol, atol=self.atol),
                             ((d_input - d_input_torch).abs().max().item(), device, complex, increasing_stride))
-            # print(d_twiddle)
-            # print(d_twiddle_torch)
+            print(d_twiddle)
+            print(d_twiddle_torch)
             self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, 
                             rtol=self.rtol, atol=self.atol),
                             (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(), device, complex, increasing_stride))
