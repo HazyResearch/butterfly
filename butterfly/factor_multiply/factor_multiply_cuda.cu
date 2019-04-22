@@ -1991,10 +1991,12 @@ __global__ void butterfly_conv2d_backward_cuda_kernel(
     // printf("conv2d: %f\n", d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0]);
   }
   __syncthreads();
-  const int patch_idx = blockIdx.x % (h_out * w_out); 
-  const int batch_idx = blockIdx.x / (h_out * w_out);
+  const int patch_idx = b % (h_out * w_out); 
+  const int batch_idx = b / (h_out * w_out);
+  // printf("hout:%d wout:%d paddng:%d kernel_size:%d\n", h_out, w_out, padding, kernel_size);
   if (b < batch_size) {
     for (int t = threadIdx.x; t < max_stride * 2; t += blockDim.x) {
+      // printf("%f\n", s_grad[t + threadIdx.y * max_stride * 2]);
       // map back to b, c, h, w
       // get index into patch
       int k_i = s / kernel_size; // stack / kernel_size
@@ -2007,7 +2009,8 @@ __global__ void butterfly_conv2d_backward_cuda_kernel(
       int j = k_j + p_j - padding;
       // this needs to be atomic because input is reused in forward pass 
       // with out_channels > in_channels and for each entry of the patch 
-      if (i < w_in or j < h_in or i >= 0 or j >= 0) {
+      // printf("(%d,%d,%d,%d) %f\n", batch_idx, input_base_idx+t, i, j, d_input_a[batch_idx][input_base_idx + t][i][j]);
+      if (i < w_in && j < h_in && i >= 0 && j >= 0) {
         atomicAdd(&d_input_a[batch_idx][input_base_idx + t][i][j], s_grad[t + threadIdx.y * max_stride * 2]);
       }
     }
