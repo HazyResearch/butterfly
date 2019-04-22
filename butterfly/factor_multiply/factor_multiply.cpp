@@ -896,7 +896,7 @@ std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const 
   butterfly_conv2d_backward_cuda(grad, twiddle, output, d_twiddle, d_input, 
                                  kernel_size, padding, h_out, w_out, 
                                  increasing_stride);
-  return {d_twiddle, d_input} ;
+  return {d_twiddle, d_input};
 }
 
 at::Tensor butterfly_multiply_untied_svd(const at::Tensor& twiddle, const at::Tensor& input, bool increasing_stride, bool return_intermediates) {
