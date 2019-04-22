@@ -177,7 +177,7 @@ class ButterflyMultTest(unittest.TestCase):
         complex = False 
         in_planes = 2
         out_planes = 4
-        kernel_size = 3
+        kernel_size = 2
         batch_size = 1
         f_dim = 1
         padding = 1
@@ -192,9 +192,8 @@ class ButterflyMultTest(unittest.TestCase):
         for increasing_stride in [True, False]:
             output_torch = bfly.forward(input_)
             output = butterfly_conv2d(bfly.twiddle, input_, kernel_size, padding, increasing_stride, return_intermediates)
-            output = output.view(batch_size, kernel_size*kernel_size, out_planes/in_planes)
-            output.mean(dim=1)
-            print(butterfly_conv2d(bfly.twiddle, input_, kernel_size, padding, increasing_stride, return_intermediates).size())
+            print(output.size())
+            output = output.view((batch_size*h_out*w_out, kernel_size*kernel_size, out_planes//in_planes*in_planes)).mean(dim=1)
             output = output.view(
                 batch_size, 
                 h_out * w_out, out_planes).transpose(1, 2).view(batch_size, out_planes, 

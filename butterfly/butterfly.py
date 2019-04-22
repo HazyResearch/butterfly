@@ -213,6 +213,7 @@ class ButterflyBmm(Butterfly):
                 output = output.view(batch, self.matrix_batch, self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=2)
         if self.out_size != out_size_extended:  # Take top rows
             output = output[:, :, :self.out_size]
+        print("bmm size: ", output.size())
         return output if self.bias is None else output + self.bias
 
     def extra_repr(self):
