@@ -858,7 +858,8 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
 
 std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const at::Tensor& twiddle, 
   const at::Tensor& output, const size_t kernel_size, const size_t padding, 
-  bool increasing_stride) {
+  bool increasing_stride, const int b_in, const int c_in, 
+  const int h_in, const int w_in) {
     /* Parameters:
          grad: (b_in * h_out * w_out, cin/cout * nstack, c_out) 
          twiddle: (nstack, log n, n / 2, 2, 2) where n = c_in
@@ -877,7 +878,6 @@ std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const 
   */
   const int batch_size = grad.size(0);
   const int c_out = grad.size(2);
-  const int b_in, c_in, h_in, w_in;
   const int nstack = grad.size(1) * c_out/c_in; // includes matrix batch
   const int cstack = grad.size(1); // does not include matrix batch 
   const int n = c_in; // rename to be consistent with dimension of butterfly
@@ -888,15 +888,15 @@ std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const 
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(output);
   AT_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
-  AT_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_backward: twiddle must have shape (nstack, log n, n/2, 2, 2) where n=c_in");
-  AT_CHECK(output.size(0) == log_n + 1 && output.size(1) == batch_size && output.size(2) == cstack && output.size(3) == c_out, "butterfly_multiply_untied_backward: output must have shape (log n + 1, batch_size, nstack, n) or (log n + 1, batch_size, nstack, n, 2)");
+  AT_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_conv2d_backward: twiddle must have shape (nstack, log n, n/2, 2, 2) where n=c_in");
+  AT_CHECK(output.size(0) == log_n + 1&& output.size(1) == batch_size && output.size(2) == cstack && output.size(3) == c_out, "butterfly_conv2d_backward: output must have shape (log n + 1, batch_size, nstack, n)");
   auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::empty({b_in, c_in, h_in, w_in},
     torch::dtype(grad.dtype()).device(grad.device()));
   butterfly_conv2d_backward_cuda(grad, twiddle, output, d_twiddle, d_input, 
                                  kernel_size, padding, h_out, w_out, 
                                  increasing_stride);
-  return {d_twiddle, d_input};
+  return {d_twiddle, d_input} ;
 }
 
 at::Tensor butterfly_multiply_untied_svd(const at::Tensor& twiddle, const at::Tensor& input, bool increasing_stride, bool return_intermediates) {

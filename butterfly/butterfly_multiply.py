@@ -179,6 +179,7 @@ class ButterflyMultUntied(torch.autograd.Function):
         twiddle, input = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
         output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride, True)
+        # print('untied: ', output_and_intermediate)
         d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate, increasing_stride)
         return d_coefficients, d_input, None  # Autograd requires 3 gradients
 
@@ -304,13 +305,17 @@ class ButterflyMultConv2d(torch.autograd.Function):
             output: (b_in * h_out * w_out, nstack, c_out)
         """
         output = butterfly_conv2d(twiddle, input, kernel_size, 
-                                  padding, increasing_stride, False).mean(dim=1)
+                                  padding, increasing_stride, False)
         ctx.save_for_backward(twiddle, input)
         ctx._kernel_size = kernel_size
         ctx._padding = padding 
         ctx._increasing_stride = increasing_stride
         ctx._input_size = input.size()
-        batch_size = input.size(0)
+        ctx._b_in= input.size(0)
+        ctx._c_in = input.size(1)
+        ctx._h_in = input.size(2)
+        ctx._w_in = input.size(3)
+        # print(output)
         return output
 
     @staticmethod
@@ -326,13 +331,17 @@ class ButterflyMultConv2d(torch.autograd.Function):
             d_input: (b_in, c_in, h_in, w_in) 
         """
         twiddle, input = ctx.saved_tensors
-        output_and_intermediate = butterfly_conv2d(twiddle, input, ctx._kernel_size, 
-                                  ctx._padding, ctx._increasing_stride, False)        
+        # Save intermediates for backward pass
+        output_and_intermediate = butterfly_conv2d(twiddle, input, 
+            ctx._kernel_size, ctx._padding, ctx._increasing_stride, True)        
+        # print(output_and_intermediate)
         # TODO: simplify/reduce these args if possible 
+        # print(output_and_intermediate.size(), grad.size())
         d_coefficients, d_input = butterfly_conv2d_backward(grad, twiddle, 
             output_and_intermediate, ctx._kernel_size, ctx._padding, 
-            ctx._increasing_stride)
-        return d_coefficients, d_input, None  # Autograd requires 3 gradients
+            ctx._increasing_stride, ctx._b_in, ctx._c_in, ctx._h_in, ctx._w_in)
+        return d_coefficients, d_input, None, None, None 
+        # Autograd requires 5 gradients
 
 butterfly_mult_conv2d = ButterflyMultConv2d.apply
 
