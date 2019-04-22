@@ -21,6 +21,8 @@ void butterfly_multiply_untied_svd_cuda(const at::Tensor& twiddle, at::Tensor& i
                                         bool increasing_stride, bool return_intermediates);
 void butterfly_multiply_untied_svd_backward_cuda(const at::Tensor& twiddle, const at::Tensor& output,
                                                  at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
+void butterfly_multiply_untied_svd_forward_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input,
+                                                         at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
 void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Tensor& input, at::Tensor& output);
 void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input,
                                                         at::Tensor& d_p_expanded, at::Tensor& d_input);
@@ -993,6 +995,46 @@ std::vector<at::Tensor> butterfly_multiply_untied_svd_backward(const at::Tensor&
   return {d_twiddle, d_input} ;
 }
 
+std::vector<at::Tensor> butterfly_multiply_untied_svd_forward_backward(const at::Tensor& twiddle, const at::Tensor& input,
+                                                                       const at::Tensor& grad, bool increasing_stride) {
+  /* The twiddles uses SVD paramterization:
+         [cos theta, -sin theta; sin theta, cos theta] [sigma_1, 0; 0, sigma_2] [cos phi, -sin phi; sin phi, cos phi]
+     The order of storage is twiddle[2][2] = {{theta, phi}, {sigma_1, sigma_2}}.
+     Specialized implementation for n <= 1024, CUDA only, real only, probably float only (no double, not sure).
+     Do both the forward and the backward pass.
+     Hopefully this is the fastest implementation.
+     Parameters:
+         twiddle: (nstack, log n, n/2, 2, 2)
+         input: (batch_size, nstack, n)
+         grad: (batch_size, nstack, n)
+         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 1).
+             Note that this only changes the order of multiplication, not how twiddle is stored.
+             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+     Returns:
+         d_twiddle: (nstack, log n, n / 2, 2, 2)
+         d_input: (batch_size, nstack, n)
+  */
+  const auto batch_size = input.size(0);
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
+  AT_CHECK(n <= 1024, "butterfly_multiply_untied_svd_forward_backward: only supports n <= 1024");
+  const int log_n = int(log2((double) n));
+  AT_CHECK(twiddle.dim() == 5 && input.dim() == 3 && grad.dim() == 3,
+           "butterfly_multiply_untied_svd_forward_backward: twiddle, input, and grad must have dimension 5,3,3");
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(input);
+  CHECK_DEVICE(grad);
+  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_svd_forward_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "butterfly_multiply_untied_svd_forward_backward: grad must have shape (batch_size, nstack, n)");
+  auto d_input = grad.clone();
+  auto d_twiddle = torch::zeros_like(twiddle);
+  AT_CHECK(input.is_cuda(), "butterfly_multiply_untied_svd_forward_backward: only supports CUDA");
+  butterfly_multiply_untied_svd_forward_backward_cuda(twiddle, input, d_twiddle, d_input, increasing_stride);
+  return {d_twiddle, d_input} ;
+}
+
 at::Tensor permutation_factor_even_odd_multiply(const at::Tensor& p, const at::Tensor& input) {
   /* Parameters:
          p: (1, )
@@ -1384,6 +1426,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_multiply_untied_forward_backward", &butterfly_multiply_untied_forward_backward, "Butterfly factor multiply untied forward+backward");
   m.def("butterfly_multiply_untied_svd", &butterfly_multiply_untied_svd, "Butterfly factor multiply untied SVD forward");
   m.def("butterfly_multiply_untied_svd_backward", &butterfly_multiply_untied_svd_backward, "Butterfly factor multiply untied SVD backward");
+  m.def("butterfly_multiply_untied_svd_forward_backward", &butterfly_multiply_untied_svd_forward_backward, "Butterfly factor multiply untied SVD forward+backward");
   m.def("permutation_factor_even_odd_multiply", &permutation_factor_even_odd_multiply, "Permutation factor (even odd) multiply forward");
   m.def("permutation_factor_even_odd_multiply_backward", &permutation_factor_even_odd_multiply_backward, "Permutation factor (even odd) multiply backward");
   m.def("permutation_factor_reverse_multiply", &permutation_factor_reverse_multiply, "Permutation factor (reverse) multiply forward");

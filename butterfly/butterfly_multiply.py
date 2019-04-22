@@ -11,6 +11,7 @@ try:
     from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_backward
     from factor_multiply import butterfly_multiply_untied_forward_backward
     from factor_multiply import butterfly_multiply_untied_svd, butterfly_multiply_untied_svd_backward
+    from factor_multiply import butterfly_multiply_untied_svd_forward_backward
     from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
     from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
 except:
@@ -251,8 +252,12 @@ class ButterflyMultUntiedSvd(torch.autograd.Function):
         # twiddle, output_and_intermediate = ctx.saved_tensors
         twiddle, input = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
-        output_and_intermediate = butterfly_multiply_untied_svd(twiddle, input, increasing_stride, True)
-        d_coefficients, d_input = butterfly_multiply_untied_svd_backward(grad, twiddle, output_and_intermediate, increasing_stride)
+        n = input.shape[2]
+        if input.dim() == 3 and n <= 1024 and input.is_cuda:
+            d_coefficients, d_input = butterfly_multiply_untied_svd_forward_backward(twiddle, input, grad, increasing_stride)
+        else:
+            output_and_intermediate = butterfly_multiply_untied_svd(twiddle, input, increasing_stride, True)
+            d_coefficients, d_input = butterfly_multiply_untied_svd_backward(grad, twiddle, output_and_intermediate, increasing_stride)
         return d_coefficients, d_input, None  # Autograd requires 3 gradients
 
 butterfly_mult_untied_svd = ButterflyMultUntiedSvd.apply if use_extension else butterfly_mult_untied_svd_torch
