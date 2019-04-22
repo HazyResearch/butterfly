@@ -1902,7 +1902,6 @@ __global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const Cud
   }
 }
 
-
 void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input,
                                                      at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride) {
   const int batch_size = input.size(0);

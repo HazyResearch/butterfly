@@ -178,54 +178,15 @@ class ButterflyMultUntied(torch.autograd.Function):
         # twiddle, output_and_intermediate = ctx.saved_tensors
         twiddle, input = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
-        output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride, True)
-        d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate, increasing_stride)
+        n = input.shape[2]
+        if input.dim() == 3 and n <= 1024 and input.is_cuda:
+            d_coefficients, d_input = butterfly_multiply_untied_forward_backward(twiddle, input, grad, increasing_stride)
+        else:
+            output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride, True)
+            d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate, increasing_stride)
         return d_coefficients, d_input, None  # Autograd requires 3 gradients
 
 butterfly_mult_untied = ButterflyMultUntied.apply if use_extension else butterfly_mult_untied_torch
-
-
-class ButterflyMultUntiedSpecialized(torch.autograd.Function):
-    # Specialized implementation for n <= 1024, CUDA only, real only, possibly float only.
-    # This is done by combining the forward and backward pass into one kernel.
-    # Hopefully this is fast.
-
-    @staticmethod
-    def forward(ctx, twiddle, input, increasing_stride=True):
-        """
-        Parameters:
-            twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
-            input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
-            increasing_stride: whether to multiply with increasing stride (e.g. 1, 4, ..., n/2) or
-                decreasing stride (e.g., n/2, n/4, ..., 1).
-                Note that this only changes the order of multiplication, not how twiddle is stored.
-                In other words, twiddle[@log_stride] always stores the twiddle for @stride.
-        Returns:
-            output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
-        """
-        output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
-        ctx.save_for_backward(twiddle, input)
-        ctx._increasing_stride = increasing_stride
-        return output
-
-    @staticmethod
-    def backward(ctx, grad):
-        """
-        Parameters:
-            grad: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
-            twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
-            output + intermediate values for backward: (log n + 1, batch_size, nstack, n) if real or (log n + 1, batch_size, nstack, n, 2) if complex
-        Return:
-            d_twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
-            d_input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
-        """
-        # twiddle, output_and_intermediate = ctx.saved_tensors
-        twiddle, input = ctx.saved_tensors
-        increasing_stride = ctx._increasing_stride
-        d_coefficients, d_input = butterfly_multiply_untied_forward_backward(twiddle, input, grad, increasing_stride)
-        return d_coefficients, d_input, None  # Autograd requires 3 gradients
-
-butterfly_mult_untied_specialized = ButterflyMultUntiedSpecialized.apply
 
 
 def butterfly_mult_untied_svd_torch(twiddle, input, increasing_stride=True, return_intermediates=False):
