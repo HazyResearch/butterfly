@@ -17,6 +17,9 @@ static constexpr int WORK_PER_THREAD = 16;
 static constexpr int ELEMENTARY_SIZE = MAX_BLOCK_SIZE / 2;
 static constexpr int MAX_N_FACTORS = 10;
 
+template <typename T, size_t N>
+using CudaAcsr = at::PackedTensorAccessor<T, N, at::RestrictPtrTraits, int32_t>;
+
 __host__ __device__ static inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
 }
@@ -1796,10 +1799,10 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                                       const at::PackedTensorAccessor<scalar_t, 3> input_a,
-                                                                       at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-                                                                       at::PackedTensorAccessor<scalar_t, 3> d_input_a,
+__global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const CudaAcsr<scalar_t, 5> twiddle_a,
+                                                                       const CudaAcsr<scalar_t, 3> input_a,
+                                                                       CudaAcsr<scalar_t, 5> d_twiddle_a,
+                                                                       CudaAcsr<scalar_t, 3> d_input_a,
                                                                        int log_max_stride,
                                                                        int log_n) {
   const int batch_size = input_a.size(0);
@@ -1908,10 +1911,10 @@ void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, 
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_untied_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
-    const auto input_a = input.packed_accessor<scalar_t, 3>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 3>();
+    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
+    const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
+    auto d_input_a = d_input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
