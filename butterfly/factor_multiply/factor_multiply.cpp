@@ -858,8 +858,7 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
 
 std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const at::Tensor& twiddle, 
   const at::Tensor& output, const size_t kernel_size, const size_t padding, 
-  bool increasing_stride, const int b_in, const int c_in, 
-  const int h_in, const int w_in) {
+  bool increasing_stride) {
     /* Parameters:
          grad: (b_in * h_out * w_out, cin/cout * nstack, c_out) 
          twiddle: (nstack, log n, n / 2, 2, 2) where n = c_in
@@ -878,6 +877,7 @@ std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const 
   */
   const int batch_size = grad.size(0);
   const int c_out = grad.size(2);
+  const int b_in, c_in, h_in, w_in;
   const int nstack = grad.size(1) * c_out/c_in; // includes matrix batch
   const int cstack = grad.size(1); // does not include matrix batch 
   const int n = c_in; // rename to be consistent with dimension of butterfly

@@ -329,14 +329,9 @@ class ButterflyMultConv2d(torch.autograd.Function):
         output_and_intermediate = butterfly_conv2d(twiddle, input, ctx._kernel_size, 
                                   ctx._padding, ctx._increasing_stride, False)        
         # TODO: simplify/reduce these args if possible 
-        print(ctx._input_size[0])
-        print(ctx._input_size[1])
-        print(ctx._input_size[2])
-        print(ctx._input_size[3])
         d_coefficients, d_input = butterfly_conv2d_backward(grad, twiddle, 
             output_and_intermediate, ctx._kernel_size, ctx._padding, 
-            ctx._increasing_stride, ctx._input_size[0], 
-            ctx._input_size[1], ctx._input_size[2], ctx._input_size[3])
+            ctx._increasing_stride)
         return d_coefficients, d_input, None  # Autograd requires 3 gradients
 
 butterfly_mult_conv2d = ButterflyMultConv2d.apply
