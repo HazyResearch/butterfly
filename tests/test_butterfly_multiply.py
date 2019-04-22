@@ -176,11 +176,11 @@ class ButterflyMultTest(unittest.TestCase):
     def test_butterfly_conv2d(self):
         device = 'cuda'
         complex = False 
-        in_planes = 128
-        out_planes = 128
-        kernel_size = 3
-        batch_size = 2
-        f_dim = 16
+        in_planes = 2
+        out_planes = 4
+        kernel_size = 1
+        batch_size = 1
+        f_dim = 1
         padding = 1
         return_intermediates = False
         dilation = 1
