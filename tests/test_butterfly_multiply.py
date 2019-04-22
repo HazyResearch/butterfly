@@ -175,31 +175,28 @@ class ButterflyMultTest(unittest.TestCase):
     def test_butterfly_conv2d(self):
         device = 'cuda'
         complex = False 
-        in_planes = 2
-        out_planes = 4
-        kernel_size = 2
-        batch_size = 1
-        f_dim = 1
+        in_planes = 128
+        out_planes = 256
+        kernel_size = 3
+        batch_size = 128
+        f_dim = 16
         padding = 1
         return_intermediates = False
         dilation = 1
         bfly = ButterflyConv2d(in_planes, out_planes, kernel_size=kernel_size, 
             padding=padding, bias=False, tied_weight=False).to(device)
         input_ = torch.randn(batch_size, in_planes, f_dim, f_dim, requires_grad=True).to(device)
-        print(input_)
         h_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
         w_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
         for increasing_stride in [True, False]:
             output_torch = bfly.forward(input_)
-            output = butterfly_conv2d(bfly.twiddle, input_, kernel_size, padding, increasing_stride, return_intermediates)
-            print(output.size())
-            output = output.view((batch_size*h_out*w_out, kernel_size*kernel_size, out_planes//in_planes*in_planes)).mean(dim=1)
+            output = butterfly_conv2d(bfly.twiddle, input_, kernel_size, padding, increasing_stride, return_intermediates).mean(dim=1)
             output = output.view(
                 batch_size, 
                 h_out * w_out, out_planes).transpose(1, 2).view(batch_size, out_planes, 
                 h_out, w_out)
-            print(output)
-            print(output_torch)
+            # print(output)
+            # print(output_torch)
             self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
                                     ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
                                     
