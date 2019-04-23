@@ -74,50 +74,9 @@ class ButterflyConv2d(ButterflyBmm):
         w_out = (h + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
         input_patches = F.unfold(input, self.kernel_size, self.dilation, self.padding, self.stride).view(batch, c, self.kernel_size[0] * self.kernel_size[1], h_out * w_out)
         input_reshape = input_patches.permute(0, 3, 2, 1).reshape(batch * h_out * w_out, self.kernel_size[0] * self.kernel_size[1], c)
+        print("input: ", input.size())
         output = super().forward(input_reshape).mean(dim=1)
         return output.view(batch, h_out * w_out, self.out_channels).transpose(1, 2).view(batch, self.out_channels, h_out, w_out)
-
-
-class ButterflyConv2dCuda(torch.autograd.Function):
-
-    @staticmethod
-    def forward(ctx, twiddle, input, increasing_stride=True):
-        """
-        Parameters:
-            twiddle: (nstack, log n, n / 2, 2, 2)
-            input: (batch_size, nstack, n)
-            increasing_stride: whether to multiply with increasing stride (e.g. 1, 4, ..., n/2) or
-                decreasing stride (e.g., n/2, n/4, ..., 1).
-                Note that this only changes the order of multiplication, not how twiddle is stored.
-                In other words, twiddle[@log_stride] always stores the twiddle for @stride.
-        Returns:
-            output: (batch_size, nstack, n)
-        """
-        # output_and_intermediate = butterfly_multiply_untied_svd(twiddle, input, increasing_stride)
-        # ctx.save_for_backward(twiddle, output_and_intermediate)
-        output = butterfly_conv2d_svd(twiddle, input, increasing_stride, False)
-        ctx.save_for_backward(twiddle, input)
-        ctx._increasing_stride = increasing_stride
-        # return output_and_intermediate[-1]
-        return output
-
-    @staticmethod
-    def backward(ctx, grad):
-        """
-        Parameters:
-            grad: (batch_size, nstack, n)
-            twiddle: (nstack, log n, n / 2, 2, 2)
-            output + intermediate values for backward: (log n + 1, batch_size, nstack, n)
-        Return:
-            d_twiddle: (nstack, log n, n / 2, 2, 2)
-            d_input: (batch_size, nstack, n)
-        """
-        # twiddle, output_and_intermediate = ctx.saved_tensors
-        twiddle, input = ctx.saved_tensors
-        increasing_stride = ctx._increasing_stride
-        output_and_intermediate = butterfly_multiply_untied_svd(twiddle, input, increasing_stride, True)
-        d_coefficients, d_input = butterfly_multiply_untied_svd_backward(grad, twiddle, output_and_intermediate, increasing_stride)
-        return d_coefficients, d_input, None  # Autograd requires 3 gradients
 
 
 class ButterflyConv2dBBT(nn.Module):

@@ -847,10 +847,10 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   // AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
   // return unfolded output 
-  auto output = torch::zeros({output_first_dim, batch_size*h_out*w_out, stack, out_channels},
+  auto output = torch::zeros({output_first_dim, batch_size*h_out*w_out, bstack, in_channels},
     torch::dtype(input.dtype()).device(input.device()));
   if (!return_intermediates) {
-    output = output.expand({log_n + 1, batch_size*h_out*w_out, stack, out_channels});
+    output = output.expand({log_n + 1, batch_size*h_out*w_out, bstack, in_channels});
   }
   butterfly_conv2d_cuda(twiddle, input, output, kernel_size, padding, h_out, w_out, increasing_stride, return_intermediates);
   return return_intermediates ? output : output[-1];
@@ -889,7 +889,7 @@ std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const 
   CHECK_DEVICE(output);
   AT_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
   AT_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_conv2d_backward: twiddle must have shape (nstack, log n, n/2, 2, 2) where n=c_in");
-  AT_CHECK(output.size(0) == log_n + 1&& output.size(1) == batch_size && output.size(2) == cstack && output.size(3) == c_out, "butterfly_conv2d_backward: output must have shape (log n + 1, batch_size, nstack, n)");
+  AT_CHECK(output.size(0) == log_n + 1&& output.size(1) == batch_size && output.size(2) == nstack && output.size(3) == c_in, "butterfly_conv2d_backward: output must have shape (log n + 1, batch_size, nstack, n)");
   auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::zeros({b_in, c_in, h_in, w_in},
     torch::dtype(grad.dtype()).device(grad.device()));

@@ -12,8 +12,8 @@ from cnn.models.butterfly_conv import ButterflyConv2d
 
 from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
-from butterfly.butterfly_multiply import butterfly_mult_conv2d
-from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
+from butterfly.butterfly_multiply import butterfly_mult_conv2d, butterfly_conv2d
+from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd, butterfly_multiply_untied
 
 
 class ButterflyMultTest(unittest.TestCase):
@@ -179,31 +179,32 @@ class ButterflyMultTest(unittest.TestCase):
         in_planes = 128
         out_planes = 256
         kernel_size = 3
-        batch_size = 128
+        batch_size = 32
         f_dim = 2
         padding = 1
         return_intermediates = False
         dilation = 1
-        for increasing_stride in [False]:
+        for increasing_stride in [True]:
             bfly = ButterflyConv2d(in_planes, out_planes, kernel_size=kernel_size, 
                                padding=padding, bias=False, 
                                tied_weight=False).to(device)
             input_ = torch.randn(batch_size, in_planes, f_dim, f_dim, 
                                  requires_grad=True).to(device)
-            print(input_)
             h_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
             w_out = (f_dim + 2 * padding - dilation * (kernel_size - 1) - 1)  + 1
             twiddle = bfly.twiddle
 
             # test forward pass
             output_torch = bfly.forward(input_)
+            print(output_torch.size())
             output = butterfly_mult_conv2d(bfly.twiddle, input_, kernel_size, 
-                                      padding, increasing_stride).mean(dim=1)
+                                      padding, increasing_stride)
+            output = output.view(batch_size*w_out*h_out, kernel_size*kernel_size, out_planes)
+            output = output.mean(dim=1)
             output = output.view(
                 batch_size, 
                 h_out * w_out, out_planes).transpose(1, 2).view(batch_size, out_planes, 
                 h_out, w_out)
-            # print(output)
             self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
                                     ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
             # test backward pass
@@ -212,12 +213,29 @@ class ButterflyMultTest(unittest.TestCase):
                                                      grad, retain_graph=True)
             d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch,
                 (twiddle, input_), grad, retain_graph=True)
+            # d_twiddle_torch, d_input_torch = torch.autograd.grad(output, (twiddle, input_), 
+            #                                          grad, retain_graph=True)
+             # d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch,
+            #     (twiddle, input_), grad, retain_graph=True)
+            
+            # compare intermediates 
+            output_and_intermediate = butterfly_conv2d(twiddle, input_, kernel_size, padding, increasing_stride, True) 
 
-            # self.assertTrue(torch.allclose(d_input, d_input_torch, 
-            #                 rtol=self.rtol, atol=self.atol),
-            #                 ((d_input - d_input_torch).abs().max().item(), device, complex, increasing_stride))
-            print(d_twiddle)
-            print(d_twiddle_torch)
+            input_patches = F.unfold(input_, kernel_size, dilation, padding, 1).view(batch_size, in_planes, kernel_size * kernel_size, h_out * w_out)
+            input_reshape = input_patches.permute(0, 3, 2, 1).reshape(batch_size * h_out * w_out, kernel_size * kernel_size, in_planes)
+            input_reshape = input_reshape.unsqueeze(2).expand(batch_size * h_out * w_out, kernel_size * kernel_size, out_planes//in_planes, in_planes) 
+            input_reshape = input_reshape.reshape(batch_size * h_out * w_out, kernel_size * kernel_size * out_planes//in_planes, in_planes)
+            output_and_intermediate_torch = butterfly_multiply_untied(twiddle, input_reshape, increasing_stride, True)
+
+            self.assertTrue(torch.allclose(output_and_intermediate, output_and_intermediate_torch, 
+                            rtol=self.rtol, atol=self.atol),
+                            ((output_and_intermediate - output_and_intermediate_torch).abs().max().item(), device, complex, increasing_stride))
+
+            self.assertTrue(torch.allclose(d_input, d_input_torch, 
+                            rtol=self.rtol, atol=self.atol),
+                            ((d_input - d_input_torch).abs().max().item(), device, complex, increasing_stride))
+            # print(d_twiddle)
+            # print(d_twiddle_torch)
             self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, 
                             rtol=self.rtol, atol=self.atol),
                             (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(), device, complex, increasing_stride))

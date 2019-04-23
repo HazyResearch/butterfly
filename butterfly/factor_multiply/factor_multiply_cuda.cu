@@ -1829,8 +1829,6 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
   const int max_stride = 1 << log_max_stride;
   // base index always 0 
   const int input_base_idx = 0;
-  // index into output channels 
-  const int output_base_idx = blockIdx.y * blockDim.x * 2;
   const int h_in = input_a.size(2);
   const int w_in = input_a.size(3);
   const int patch_idx = blockIdx.x % (h_out * w_out); 
@@ -1854,7 +1852,7 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
         s_input[t] = input_a[batch_idx][input_base_idx + t][i][j];
         // load input into first idx of output for backward pass
         // we allocated this memory already when so shouldn't affect too much 
-        output_a[0][b][stack][output_base_idx + t] = s_input[t];
+        output_a[0][b][bstack][input_base_idx + t] = s_input[t];
       }
     }
     int i = threadIdx.x;
@@ -1870,8 +1868,9 @@ __global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scal
       s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
       s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
       if (return_intermediates || idx == first_idx + log_max_stride) {
-        output_a[idx+1][b][stack][output_base_idx + pos] = s_input[pos];
-        output_a[idx+1][b][stack][output_base_idx + pos + stride] = s_input[pos + stride];
+        // write to separate outputs to avoid combinining intermediates
+        output_a[idx+1][b][bstack][input_base_idx + pos] = s_input[pos];
+        output_a[idx+1][b][bstack][input_base_idx + pos + stride] = s_input[pos + stride];
       }
     }
   }
@@ -1923,97 +1922,56 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
 __global__ void butterfly_conv2d_backward_cuda_kernel(
-    const at::PackedTensorAccessor<scalar_t, 3> grad_a,
-    const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-    const at::PackedTensorAccessor<scalar_t, 4> output_a,
-    at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-    at::PackedTensorAccessor<scalar_t, 4> d_input_a,
-    int log_max_stride,
-    int log_n, 
-    int kernel_size, 
-    int padding,
-    int h_out,
-    int w_out) {
+      const at::PackedTensorAccessor<scalar_t, 3> grad_a,
+      const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
+      const at::PackedTensorAccessor<scalar_t, 4> output_a,
+      at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
+      at::PackedTensorAccessor<scalar_t, 4> d_input_a,
+      int log_max_stride,
+      int log_n, 
+      int kernel_size, 
+      int padding,
+      int h_out,
+      int w_out) {
   const int batch_size = output_a.size(1);
   const int stack = blockIdx.z;
   const int bstack = blockIdx.y + gridDim.y * stack;
   const int max_stride = 1 << log_max_stride;
   // base index always 0 
   const int input_base_idx = 0;
-  // index into output channels 
-  const int output_base_idx = blockIdx.y * blockDim.x * 2;
   const int h_in = d_input_a.size(2);
   const int w_in = d_input_a.size(3);
   __shared__ scalar_t s_grad[ELEMENTARY_SIZE * 2];
-  __shared__ accscalar_t s_twiddle[ELEMENTARY_SIZE][2][2];  // Use accscalar_t instead of scalar_t since we'll reuse the storage for s_d_twiddle
-  accscalar_t* s_d_twiddle = (accscalar_t *)&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implementation.
   int b = blockIdx.x * blockDim.y + threadIdx.y;
-  if (b < batch_size) {
+  if (b < batch_size) {  // Currently we assume 1 batch per thread block, so all threads in the block should enter (otherwise deadlock)
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
-      // read from output grad (dim: b_in * h_out * w_out, cin/cout * nstack, c_out) 
-      s_grad[i + threadIdx.y * max_stride * 2] = grad_a[b][stack][output_base_idx + i];
-      // if (grad_a[b][stack][output_base_idx + i] != 0) printf("conv2d: (%d,%d) %f\n", threadIdx.x, threadIdx.y, grad_a[b][stack][output_base_idx + i]);
+      s_grad[i + threadIdx.y * max_stride * 2] = grad_a[b][bstack][input_base_idx + i];
     }
-  }
-  int tid_x = threadIdx.x;
-  int tid_y = threadIdx.y;
-  int first_idx = increasing_stride ? 0 : log_n - 1 - log_max_stride;
-  // printf("conv2d log: %d first_idx: %d\n", log_max_stride, first_idx);
-  for (int idx = first_idx + log_max_stride; idx >= first_idx; --idx) {
-    int log_stride = increasing_stride ? idx : log_n - 1 - idx;
-    int stride = 1 << log_stride;
-    if (tid_y == 0) {
-      s_twiddle[tid_x][0][0] = twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][0][0];
-      s_twiddle[tid_x][0][1] = twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][0][1];
-      s_twiddle[tid_x][1][0] = twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][1][0];
-      s_twiddle[tid_x][1][1] = twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][1][1];
-    }
-    int low_order_bits = tid_x & (stride - 1);  // int low_order_bits = tid_x % stride;
-    int pos_x = 2 * (tid_x - low_order_bits) + low_order_bits;
-    int pos_y = tid_y * max_stride * 2;
-    int pos = pos_x + pos_y;
-    // printf("%d\n", pos_y);
-    __syncthreads();
-    const scalar_t twiddle_val[2][2] = {{s_twiddle[tid_x][0][0], s_twiddle[tid_x][0][1]},
-                                        {s_twiddle[tid_x][1][0], s_twiddle[tid_x][1][1]}};
-    // Don't need to sync here since we sync later at sum_strided_atomic, so no writing to s_twiddle can occur until then
-    accscalar_t d_twiddle_val[2][2] = {{0, 0}, {0, 0}};
-    if (b < batch_size) {
+    int i = threadIdx.x;
+    int first_idx = increasing_stride ? 0 : log_n - 1 - log_max_stride;
+    for (int idx = first_idx + log_max_stride; idx >= first_idx; --idx) {
+      int log_stride = increasing_stride ? idx : log_n - 1 - idx;
+      int stride = 1 << log_stride;
+      int low_order_bits = i & (stride - 1);  // int low_order_bits = i % stride;
+      int pos = 2 * (i - low_order_bits) + low_order_bits;
+      const scalar_t twiddle_val[2][2] = {{twiddle_a[bstack][log_stride][input_base_idx / 2 + i][0][0], twiddle_a[bstack][log_stride][input_base_idx / 2 + i][0][1]},
+                                          {twiddle_a[bstack][log_stride][input_base_idx / 2 + i][1][0], twiddle_a[bstack][log_stride][input_base_idx / 2 + i][1][1]}};
+      __syncthreads();
       const scalar_t grad_val[2] = {s_grad[pos], s_grad[pos + stride]};
       s_grad[pos] = twiddle_val[0][0] * grad_val[0] + twiddle_val[1][0] * grad_val[1];
       s_grad[pos + stride] = twiddle_val[0][1] * grad_val[0] + twiddle_val[1][1] * grad_val[1];
-      // if (output_a[idx][b][stack][output_base_idx + pos_x]!=0) printf("%f idx: %d b:%d stack:%d out:%d\n", output_a[idx][b][stack][output_base_idx + pos_x], idx, b, stack, output_base_idx + pos_x);
-      // if (output_a[idx][b][stack][output_base_idx + pos_x +stride]!=0) printf("%f idx: %d b:%d stack:%d out:%d\n", output_a[idx][b][stack][output_base_idx + pos_x + stride], idx, b, stack, output_base_idx + pos_x + stride);
-      const scalar_t input_val[2] = {output_a[idx][b][stack][output_base_idx + pos_x],
-                                     output_a[idx][b][stack][output_base_idx + pos_x + stride]};
-      d_twiddle_val[0][0] = grad_val[0] * input_val[0];
-      d_twiddle_val[0][1] = grad_val[0] * input_val[1];
-      d_twiddle_val[1][0] = grad_val[1] * input_val[0];
-      d_twiddle_val[1][1] = grad_val[1] * input_val[1];
-      // if (input_val[0]!=0)
-      //   printf("conv2d idx:%d, input:%f threadIdx:(%d,%d) blockIdx:(%d,%d,%d), \n", idx, input_val[0], threadIdx.x, threadIdx.y,
-      //     blockIdx.x, blockIdx.y, blockIdx.z);
-      // if (input_val[1]!=0)
-      //   printf("conv2d idx:%d, input:%f threadIdx:(%d,%d) blockIdx:(%d,%d,%d), \n", idx, input_val[1], threadIdx.x, threadIdx.y,
-      //     blockIdx.x, blockIdx.y, blockIdx.z);
+      const scalar_t input_val[2] = {output_a[idx][b][bstack][input_base_idx + pos], output_a[idx][b][bstack][input_base_idx + pos + stride]};
+      accscalar_t d_twiddle_val[2][2] = {{grad_val[0] * input_val[0], grad_val[0] * input_val[1]},
+                                         {grad_val[1] * input_val[0], grad_val[1] * input_val[1]}};
+      atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + i][0][0], d_twiddle_val[0][0]);
+      atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + i][0][1], d_twiddle_val[0][1]);
+      atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + i][1][0], d_twiddle_val[1][0]);
+      atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + i][1][1], d_twiddle_val[1][1]);
     }
-    int tid = threadIdx.x + threadIdx.y * blockDim.x;
-    int nthreads = blockDim.x * blockDim.y;
-    sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, max_stride, nthreads, tid);
-    if (tid_y == 0) {
-      atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][0][0], s_d_twiddle[tid_x]);
-      atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][0][1], s_d_twiddle[tid_x + max_stride]);
-      atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][1][0], s_d_twiddle[tid_x + 2 * max_stride]);
-      atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][1][1], s_d_twiddle[tid_x + 3 * max_stride]);
-    }
-  }
-  __syncthreads();
-  const int patch_idx = b % (h_out * w_out); 
-  const int batch_idx = b / (h_out * w_out);
-  // printf("hout:%d wout:%d paddng:%d kernel_size:%d\n", h_out, w_out, padding, kernel_size);
-  if (b < batch_size) { 
+    __syncthreads();
+    const int patch_idx = b % (h_out * w_out); 
+    const int batch_idx = b / (h_out * w_out);
     for (int t = threadIdx.x; t < max_stride * 2; t += blockDim.x) {
-      // printf("%f\n", s_grad[t + threadIdx.y * max_stride * 2]);
       // map back to b, c, h, w
       // get index into patch
       int k_i = stack / kernel_size; // stack / kernel_size
@@ -2026,17 +1984,115 @@ __global__ void butterfly_conv2d_backward_cuda_kernel(
       int j = k_j + p_j - padding;
       // this needs to be atomic because input is reused in forward pass 
       // with out_channels > in_channels and for each entry of the patch 
-      // printf("(%d,%d,%d,%d) %f\n", batch_idx, input_base_idx+t, i, j, s_grad[t + threadIdx.y * max_stride * 2]);
-
       if (i < w_in && j < h_in && i >= 0 && j >= 0) {
         atomicAdd(&d_input_a[batch_idx][input_base_idx + t][i][j], s_grad[t + threadIdx.y * max_stride * 2]);
-        // d_input_a[b][s][input_base_idx + i] = s_grad[i + threadIdx.y * max_stride * 2];
-        // s_input[t] = input_a[batch_idx][input_base_idx + t][i][j];
-        // if (s_grad[t + threadIdx.y * max_stride * 2] != 0) printf("(%d,%d,%d,%d) %f\n", batch_idx, input_base_idx+t, i, j, s_grad[t + threadIdx.y * max_stride * 2]);
-    }
+      }
     }
   }
 }
+
+// template <typename scalar_t, typename accscalar_t, bool increasing_stride>
+// __global__ void butterfly_conv2d_backward_cuda_kernel(
+//     const at::PackedTensorAccessor<scalar_t, 3> grad_a,
+//     const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
+//     const at::PackedTensorAccessor<scalar_t, 4> output_a,
+//     at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
+//     at::PackedTensorAccessor<scalar_t, 4> d_input_a,
+//     int log_max_stride,
+//     int log_n, 
+//     int kernel_size, 
+//     int padding,
+//     int h_out,
+//     int w_out) {
+//   const int batch_size = output_a.size(1);
+//   const int stack = blockIdx.z;
+//   const int bstack = blockIdx.y + gridDim.y * stack;
+//   const int max_stride = 1 << log_max_stride;
+//   // base index always 0 
+//   const int input_base_idx = 0;
+//   const int h_in = d_input_a.size(2);
+//   const int w_in = d_input_a.size(3);
+//   __shared__ scalar_t s_grad[ELEMENTARY_SIZE * 2];
+//   __shared__ accscalar_t s_twiddle[ELEMENTARY_SIZE][2][2];  // Use accscalar_t instead of scalar_t since we'll reuse the storage for s_d_twiddle
+//   accscalar_t* s_d_twiddle = (accscalar_t *)&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implementation.
+//   int b = blockIdx.x * blockDim.y + threadIdx.y;
+//   if (b < batch_size) {
+//     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
+//       // read from output grad (dim: b_in * h_out * w_out, cin/cout * nstack, c_out) 
+//       s_grad[i + threadIdx.y * max_stride * 2] = grad_a[b][bstack][input_base_idx + i];
+//     }
+//   }
+//   __syncthreads();
+//   int tid_x = threadIdx.x;
+//   int tid_y = threadIdx.y;
+//   int first_idx = increasing_stride ? 0 : log_n - 1 - log_max_stride;
+//   // printf("conv2d log: %d first_idx: %d\n", log_max_stride, first_idx);
+//   for (int idx = first_idx + log_max_stride; idx >= first_idx; --idx) {
+//     int log_stride = increasing_stride ? idx : log_n - 1 - idx;
+//     int stride = 1 << log_stride;
+//     if (tid_y == 0) {
+//       s_twiddle[tid_x][0][0] = twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][0][0];
+//       s_twiddle[tid_x][0][1] = twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][0][1];
+//       s_twiddle[tid_x][1][0] = twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][1][0];
+//       s_twiddle[tid_x][1][1] = twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][1][1];
+//     }
+//     int low_order_bits = tid_x & (stride - 1);  // int low_order_bits = tid_x % stride;
+//     int pos_x = 2 * (tid_x - low_order_bits) + low_order_bits;
+//     int pos_y = tid_y * max_stride * 2;
+//     int pos = pos_x + pos_y;
+//     __syncthreads();
+//     const scalar_t twiddle_val[2][2] = {{s_twiddle[tid_x][0][0], s_twiddle[tid_x][0][1]},
+//                                         {s_twiddle[tid_x][1][0], s_twiddle[tid_x][1][1]}};
+//     // Don't need to sync here since we sync later at sum_strided_atomic, so no writing to s_twiddle can occur until then
+//     accscalar_t d_twiddle_val[2][2] = {{0, 0}, {0, 0}};
+//     if (b < batch_size) {
+//       const scalar_t grad_val[2] = {s_grad[pos], s_grad[pos + stride]};
+//       s_grad[pos] = twiddle_val[0][0] * grad_val[0] + twiddle_val[1][0] * grad_val[1];
+//       s_grad[pos + stride] = twiddle_val[0][1] * grad_val[0] + twiddle_val[1][1] * grad_val[1];
+//       const scalar_t input_val[2] = {output_a[idx][b][bstack][input_base_idx + pos_x],
+//                                      output_a[idx][b][bstack][input_base_idx + pos_x + stride]};
+//       d_twiddle_val[0][0] = grad_val[0] * input_val[0];
+//       d_twiddle_val[0][1] = grad_val[0] * input_val[1];
+//       d_twiddle_val[1][0] = grad_val[1] * input_val[0];
+//       d_twiddle_val[1][1] = grad_val[1] * input_val[1];
+//     }
+//     int tid = threadIdx.x + threadIdx.y * blockDim.x;
+//     int nthreads = blockDim.x * blockDim.y;
+//     __syncthreads();
+//     sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, max_stride, nthreads, tid);
+//     if (tid_y == 0) {
+//       atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][0][0], s_d_twiddle[tid_x]);
+//       atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][0][1], s_d_twiddle[tid_x + max_stride]);
+//       atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][1][0], s_d_twiddle[tid_x + 2 * max_stride]);
+//       atomicAdd(&d_twiddle_a[bstack][log_stride][input_base_idx / 2 + tid_x][1][1], s_d_twiddle[tid_x + 3 * max_stride]);
+//     }
+//     __syncthreads();
+//   }
+//   __syncthreads();
+//   const int patch_idx = b % (h_out * w_out); 
+//   const int batch_idx = b / (h_out * w_out);
+//   if (b < batch_size) { 
+//     for (int t = threadIdx.x; t < max_stride * 2; t += blockDim.x) {
+//       // map back to b, c, h, w
+//       // get index into patch
+//       int k_i = stack / kernel_size; // stack / kernel_size
+//       int k_j = stack % kernel_size; // stack % kernel_size
+//       // get patch index into full matrix
+//       int p_i = (patch_idx) / w_out;
+//       int p_j = (patch_idx) % (w_out); 
+//       // combine indices and adjust for padding
+//       int i = k_i + p_i - padding;
+//       int j = k_j + p_j - padding;
+//       // this needs to be atomic because input is reused in forward pass 
+//       // with out_channels > in_channels and for each entry of the patch 
+//       if (i < w_in && j < h_in && i >= 0 && j >= 0) {
+//         atomicAdd(&d_input_a[batch_idx][input_base_idx + t][i][j], s_grad[t + threadIdx.y * max_stride * 2]);
+//         // d_input_a[b][s][input_base_idx + i] = s_grad[i + threadIdx.y * max_stride * 2];
+//         // s_input[t] = input_a[batch_idx][input_base_idx + t][i][j];
+//       }
+//     }
+//   }
+// }
 
 void butterfly_conv2d_backward_cuda(const at::Tensor&grad, const at::Tensor& twiddle, 
   const at::Tensor& output, at::Tensor& d_twiddle, at::Tensor& d_input, 
