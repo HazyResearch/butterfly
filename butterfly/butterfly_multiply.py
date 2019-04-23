@@ -179,6 +179,8 @@ class ButterflyMultUntied(torch.autograd.Function):
         twiddle, input = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
         output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride, True)
+        # print("untied: ", output_and_intermediate.size())
+        # print("untied: ", output_and_intermediate)
         d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate, increasing_stride)
         return d_coefficients, d_input, None  # Autograd requires 3 gradients
 
@@ -333,6 +335,8 @@ class ButterflyMultConv2d(torch.autograd.Function):
         output_and_intermediate = butterfly_conv2d(twiddle, input, 
             ctx._kernel_size, ctx._padding, ctx._increasing_stride, True)        
         # TODO: simplify/reduce these args if possible 
+        # print("conv2d: ", output_and_intermediate.size())
+        # print("conv2d: ", output_and_intermediate)
         # print(output_and_intermediate.size(), grad.size())
         d_coefficients, d_input = butterfly_conv2d_backward(grad, twiddle, 
             output_and_intermediate, ctx._kernel_size, ctx._padding, 

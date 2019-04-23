@@ -176,15 +176,15 @@ class ButterflyMultTest(unittest.TestCase):
     def test_butterfly_conv2d(self):
         device = 'cuda'
         complex = False 
-        in_planes = 2
-        out_planes = 4
-        kernel_size = 1
-        batch_size = 1
-        f_dim = 1
+        in_planes = 128
+        out_planes = 256
+        kernel_size = 3
+        batch_size = 128
+        f_dim = 2
         padding = 1
         return_intermediates = False
         dilation = 1
-        for increasing_stride in [True]:
+        for increasing_stride in [False]:
             bfly = ButterflyConv2d(in_planes, out_planes, kernel_size=kernel_size, 
                                padding=padding, bias=False, 
                                tied_weight=False).to(device)
@@ -213,9 +213,9 @@ class ButterflyMultTest(unittest.TestCase):
             d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch,
                 (twiddle, input_), grad, retain_graph=True)
 
-            self.assertTrue(torch.allclose(d_input, d_input_torch, 
-                            rtol=self.rtol, atol=self.atol),
-                            ((d_input - d_input_torch).abs().max().item(), device, complex, increasing_stride))
+            # self.assertTrue(torch.allclose(d_input, d_input_torch, 
+            #                 rtol=self.rtol, atol=self.atol),
+            #                 ((d_input - d_input_torch).abs().max().item(), device, complex, increasing_stride))
             print(d_twiddle)
             print(d_twiddle_torch)
             self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, 
