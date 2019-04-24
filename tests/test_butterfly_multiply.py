@@ -12,7 +12,7 @@ from cnn.models.butterfly_conv import ButterflyConv2d
 
 from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
-from butterfly.butterfly_multiply import butterfly_mult_conv2d, butterfly_conv2d, butterfly_mult_conv2d_torch
+from butterfly.butterfly_multiply import butterfly_mult_conv2d_torch, butterfly_mult_conv2d
 from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
 
 
@@ -180,7 +180,7 @@ class ButterflyMultTest(unittest.TestCase):
         batch_size = 2
         f_dim = 2
         padding = 1
-        for c_out in [4,8]:
+        for c_out in [4, 8]:
             for increasing_stride in [True, False]:
                 bfly = ButterflyConv2d(c_in, c_out, kernel_size=kernel_size, 
                                padding=padding, bias=False, 
