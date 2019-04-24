@@ -6,6 +6,8 @@ from butterfly import Butterfly
 from butterfly.butterfly import ButterflyBmm
 from butterfly.butterfly_multiply import butterfly_mult_conv2d
 
+import math 
+
 class Butterfly1x1Conv(Butterfly):
     """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
     """
@@ -80,10 +82,14 @@ class ButterflyConv2d(ButterflyBmm):
             input_patches = F.unfold(input, self.kernel_size, self.dilation, self.padding, self.stride).view(
                 batch, c, self.kernel_size[0] * self.kernel_size[1], h_out * w_out)
             input = input_patches.permute(0, 3, 2, 1).reshape(batch * h_out * w_out, self.kernel_size[0] * self.kernel_size[1], c)
-            output = super().forward(input).mean(dim=1)
+            output = super().forward(input)
         else: 
+            batch_out = batch * h_out * w_out 
             output = butterfly_mult_conv2d(self.twiddle, input, self.kernel_size[0], 
-                self.padding[0], self.increasing_stride).mean(dim=1)
+                self.padding[0], self.increasing_stride)
+            output = super().post_process(output, batch_out)
+        # combine matrix batches 
+        output = output.mean(dim=1)
         return output.view(batch, h_out * w_out, self.out_channels).transpose(1, 2).view(batch, self.out_channels, h_out, w_out)
 
 
