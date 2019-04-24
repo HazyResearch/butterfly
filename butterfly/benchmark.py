@@ -5,10 +5,10 @@ sys.path.insert(0, project_root)
 import torch
 
 from butterfly import Butterfly
-from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_factors, butterfly_mult_inplace
+from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_untied_svd, butterfly_mult_factors, butterfly_mult_inplace
 
-batch_size = 256
-n = 1024
+batch_size = 32768
+n = 128
 B = Butterfly(n, n, bias=False).to('cuda')
 L = torch.nn.Linear(n, n, bias=False).to('cuda')
 x = torch.randn(batch_size, n, requires_grad=True).to('cuda')
@@ -73,17 +73,40 @@ print(f'Butterfly mult in-place together: {end - start}s')
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
-    output = butterfly_mult_untied(twiddle_untied, x.unsqueeze(1))
+    output = butterfly_mult(twiddle, x.unsqueeze(1))
 torch.cuda.synchronize()
 end = time.perf_counter()
 print(f'Butterfly mult intermediate forward: {end - start}s')
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
-    torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1), retain_graph=True)
+    torch.autograd.grad(output, (twiddle, x), grad.unsqueeze(1), retain_graph=True)
 torch.cuda.synchronize()
 end = time.perf_counter()
 print(f'Butterfly mult intermediate backward: {end - start}s')
+torch.cuda.synchronize()
+start = time.perf_counter()
+for _ in range(nsteps):
+    output = butterfly_mult(twiddle, x.unsqueeze(1))
+    torch.autograd.grad(output, (twiddle, x), grad.unsqueeze(1))
+torch.cuda.synchronize()
+end = time.perf_counter()
+print(f'Butterfly mult intermediate together: {end - start}s')
+
+torch.cuda.synchronize()
+start = time.perf_counter()
+for _ in range(nsteps):
+    output = butterfly_mult_untied(twiddle_untied, x.unsqueeze(1))
+torch.cuda.synchronize()
+end = time.perf_counter()
+print(f'Butterfly mult untied forward: {end - start}s')
+torch.cuda.synchronize()
+start = time.perf_counter()
+for _ in range(nsteps):
+    torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1), retain_graph=True)
+torch.cuda.synchronize()
+end = time.perf_counter()
+print(f'Butterfly mult untied backward: {end - start}s')
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
@@ -91,7 +114,30 @@ for _ in range(nsteps):
     torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1))
 torch.cuda.synchronize()
 end = time.perf_counter()
-print(f'Butterfly mult intermediate together: {end - start}s')
+print(f'Butterfly mult untied together: {end - start}s')
+
+torch.cuda.synchronize()
+start = time.perf_counter()
+for _ in range(nsteps):
+    output = butterfly_mult_untied_svd(twiddle_untied, x.unsqueeze(1))
+torch.cuda.synchronize()
+end = time.perf_counter()
+print(f'Butterfly mult untied_svd forward: {end - start}s')
+torch.cuda.synchronize()
+start = time.perf_counter()
+for _ in range(nsteps):
+    torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1), retain_graph=True)
+torch.cuda.synchronize()
+end = time.perf_counter()
+print(f'Butterfly mult untied_svd backward: {end - start}s')
+torch.cuda.synchronize()
+start = time.perf_counter()
+for _ in range(nsteps):
+    output = butterfly_mult_untied_svd(twiddle_untied, x.unsqueeze(1))
+    torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1))
+torch.cuda.synchronize()
+end = time.perf_counter()
+print(f'Butterfly mult untied_svd together: {end - start}s')
 
 # output = x @ W.t()  # Do it once so that cuBlas handles are initialized, etc.
 output = L(x)
@@ -148,15 +194,19 @@ print(f'CuFFT together: {end - start}s')
 
 # # output = B(x)
 # # output.backward(gradient=grad)
-# output = L(x)
-# output.backward(gradient=grad)
+# # output = L(x)
+# # output.backward(gradient=grad)
 # # output = torch.rfft(x, 1)
-# output = butterfly_mult_inplace(twiddle.squeeze(0), x)
-# output.backward(gradient=grad)
+# # output = butterfly_mult_inplace(twiddle.squeeze(0), x)
+# # output.backward(gradient=grad)
+# # output = butterfly_mult(twiddle, x.unsqueeze(1))
+# # torch.autograd.grad(output, (twiddle, x), grad.unsqueeze(1), retain_graph=True)
+# # output = butterfly_mult_untied(twiddle_untied, x.unsqueeze(1))
+# # torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1), retain_graph=True)
 # output = butterfly_mult_untied(twiddle_untied, x.unsqueeze(1))
 # torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1), retain_graph=True)
-# output = butterfly_mult(twiddle, x.unsqueeze(1))
-# torch.autograd.grad(output, (twiddle, x), grad.unsqueeze(1), retain_graph=True)
+# output = butterfly_mult_untied(twiddle_untied, x.unsqueeze(1))
+# torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1), retain_graph=True)
 # # output.backward(gradient=grad)
 # # B = Block2x2DiagProduct(n, complex=True).to('cuda')
 # # x = torch.randn(batch_size, n, 2, requires_grad=True).to('cuda')
