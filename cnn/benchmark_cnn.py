@@ -87,7 +87,7 @@ torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
     # TODO: fuse folding into butterfly_conv2d? 
-    output = butterfly_conv2d(bfly.twiddle, x, kernel_size, padding, False).mean(dim=1)
+    output = butterfly_conv2d(bfly.twiddle, x, kernel_size, padding, True, False).mean(dim=1)
     output = output.view(
                 batch_size, 
                 h_out * w_out, out_planes).transpose(1, 2).view(batch_size, out_planes, 
@@ -97,28 +97,28 @@ end = time.perf_counter()
 mem2 = torch.cuda.max_memory_allocated()
 print(f'ButterflyConv2d cuda forward: {end - start}s {(mem2-mem1)/1e6}MB')
 
-# mem1 = torch.cuda.memory_allocated()
-# torch.cuda.reset_max_memory_allocated()
-# torch.cuda.synchronize()
-# start = time.perf_counter()
-# for _ in range(nsteps):
-# 	torch.autograd.grad(output, (bfly.twiddle, x), grad, retain_graph=True)
-# torch.cuda.synchronize()
-# end = time.perf_counter()
-# mem2 = torch.cuda.max_memory_allocated()
-# print(f'ButterflyConv2d backward: {end - start}s {(mem2-mem1)/1e6}MB')
+mem1 = torch.cuda.memory_allocated()
+torch.cuda.reset_max_memory_allocated()
+torch.cuda.synchronize()
+start = time.perf_counter()
+for _ in range(nsteps):
+	torch.autograd.grad(output, (bfly.twiddle, x), grad, retain_graph=True)
+torch.cuda.synchronize()
+end = time.perf_counter()
+mem2 = torch.cuda.max_memory_allocated()
+print(f'ButterflyConv2d backward: {end - start}s {(mem2-mem1)/1e6}MB')
 
-# mem1 = torch.cuda.memory_allocated()
-# torch.cuda.reset_max_memory_allocated()
-# torch.cuda.synchronize()
-# start = time.perf_counter()
-# for _ in range(nsteps):
-# 	output = bfly.forward(x)
-# 	torch.autograd.grad(output, (bfly.twiddle, x), grad)
-# torch.cuda.synchronize()
-# end = time.perf_counter()
-# mem2 = torch.cuda.max_memory_allocated()
-# print(f'ButterflyConv2d together: {end - start}s {(mem2-mem1)/1e6}MB')
+mem1 = torch.cuda.memory_allocated()
+torch.cuda.reset_max_memory_allocated()
+torch.cuda.synchronize()
+start = time.perf_counter()
+for _ in range(nsteps):
+	output = bfly.forward(x)
+	torch.autograd.grad(output, (bfly.twiddle, x), grad)
+torch.cuda.synchronize()
+end = time.perf_counter()
+mem2 = torch.cuda.max_memory_allocated()
+print(f'ButterflyConv2d together: {end - start}s {(mem2-mem1)/1e6}MB')
 
 # Butterfly BMM
 # mem1 = torch.cuda.memory_allocated()

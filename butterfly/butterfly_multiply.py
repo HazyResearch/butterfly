@@ -13,7 +13,7 @@ try:
     from factor_multiply import butterfly_multiply_untied_svd, butterfly_multiply_untied_svd_backward
     from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
     from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
-    from factor_multiply import butterfly_conv2d, butterfly_conv2d_backward
+    from factor_multiply import butterfly_conv2d, butterfly_conv2d_backward, butterfly_conv2d_forward_backward
 except:
     use_extension = False
     import warnings
@@ -366,12 +366,14 @@ class ButterflyMultConv2d(torch.autograd.Function):
         """
         twiddle, input = ctx.saved_tensors
         # Save intermediates for backward pass
-        output_and_intermediate = butterfly_conv2d(twiddle, input, 
-            ctx._kernel_size, ctx._padding, ctx._increasing_stride, True) 
-        # TODO: simplify/reduce these args if possible 
-        d_coefficients, d_input = butterfly_conv2d_backward(grad, twiddle, 
-            output_and_intermediate, ctx._kernel_size, ctx._padding, 
-            ctx._increasing_stride, ctx._b_in, ctx._c_in, ctx._h_in, ctx._w_in)
+        # output_and_intermediate = butterfly_conv2d(twiddle, input, 
+        #     ctx._kernel_size, ctx._padding, ctx._increasing_stride, True) 
+        # # TODO: simplify/reduce these args if possible 
+        # d_coefficients, d_input = butterfly_conv2d_backward(grad, twiddle, 
+        #     output_and_intermediate, ctx._kernel_size, ctx._padding, 
+        #     ctx._increasing_stride, ctx._b_in, ctx._c_in, ctx._h_in, ctx._w_in)
+        d_coefficients, d_input = butterfly_conv2d_forward_backward(twiddle, 
+            input, grad, ctx._kernel_size, ctx._padding, ctx._increasing_stride)
         return d_coefficients, d_input, None, None, None 
         # Autograd requires 5 gradients
 
