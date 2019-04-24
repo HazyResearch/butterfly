@@ -1908,12 +1908,22 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
       int c_out_ratio = bstack / stack;
       dim3 block(stride);
       dim3 grid(batch_size, c_out_ratio, stack);
-      return_intermediates ? butterfly_conv2d_cuda_kernel<scalar_t, true, true>
+      if (increasing_stride) {
+        return_intermediates ? butterfly_conv2d_cuda_kernel<scalar_t, true, true>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a,
           output_a, log_stride, log_n, kernel_size, padding, h_out, w_out)
                            : butterfly_conv2d_cuda_kernel<scalar_t, true, false>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a,
           output_a, log_stride, log_n, kernel_size, padding, h_out, w_out);
+      } 
+      else {
+        return_intermediates ? butterfly_conv2d_cuda_kernel<scalar_t, false, true>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a,
+          output_a, log_stride, log_n, kernel_size, padding, h_out, w_out)
+                           : butterfly_conv2d_cuda_kernel<scalar_t, false, false>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a,
+          output_a, log_stride, log_n, kernel_size, padding, h_out, w_out);
+      }
   });
   AT_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_conv2d_cuda failed with error code ",
@@ -2128,10 +2138,15 @@ void butterfly_conv2d_backward_cuda(const at::Tensor&grad, const at::Tensor& twi
     int c_out_ratio = bstack / stack;
     dim3 block(stride);
     dim3 grid(batch_size, c_out_ratio, stack);
-    butterfly_conv2d_backward_cuda_kernel<scalar_t, accscalar_t, true>
+    increasing_stride ? 
+      butterfly_conv2d_backward_cuda_kernel<scalar_t, accscalar_t, true>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         grad_a, twiddle_a, output_a, d_twiddle_a, d_input_a, log_stride, 
-        log_n, kernel_size, padding, h_out, w_out); 
+        log_n, kernel_size, padding, h_out, w_out) : 
+      butterfly_conv2d_backward_cuda_kernel<scalar_t, accscalar_t, false>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+          grad_a, twiddle_a, output_a, d_twiddle_a, d_input_a, log_stride, 
+          log_n, kernel_size, padding, h_out, w_out);
   });
   AT_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_conv2d_backward_cuda failed with error code ",
