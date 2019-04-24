@@ -175,10 +175,10 @@ class ButterflyMultTest(unittest.TestCase):
 
     def test_butterfly_conv2d(self):
         device = 'cuda'
-        c_in = 2
-        kernel_size = 1
-        batch_size = 1
-        f_dim = 1
+        c_in = 4
+        kernel_size = 3
+        batch_size = 16
+        f_dim = 2
         padding = 1
         for c_out in [4, 8]:
             for increasing_stride in [True, False]:
@@ -186,7 +186,6 @@ class ButterflyMultTest(unittest.TestCase):
                                padding=padding, bias=False, 
                                tied_weight=False).to(device)
                 twiddle = bfly.twiddle 
-                print(input_)
                 input_ = torch.randn(batch_size, c_in, f_dim, f_dim, 
                                     requires_grad=True).to(device)
                 # test forward pass

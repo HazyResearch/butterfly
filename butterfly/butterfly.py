@@ -4,7 +4,7 @@ import torch
 from torch import nn
 
 from .butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_untied_svd
-
+from .butterfly_multiply import butterfly_mult_conv2d
 
 class Butterfly(nn.Module):
     """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
@@ -161,7 +161,8 @@ class ButterflyBmm(Butterfly):
     """
 
     def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False, tied_weight=True,
-                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0):
+                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0, 
+                 fused_unfold=False, kernel_size=3, padding=1):
         m = int(math.ceil(math.log2(in_size)))
         in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
         nstack = int(math.ceil(out_size / in_size_extended))
@@ -192,7 +193,12 @@ class ButterflyBmm(Butterfly):
         output = output.unsqueeze(2).expand((batch, self.matrix_batch, self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         output = output.reshape((batch, self.matrix_batch * self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         if self.param == 'regular':
-            output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
+            if self.fused_unfold and not self.tied_weight: 
+                assert len(output) == 4, "Input must be 4-D for fused unfold."
+                output = butterfly_mult_conv2d(self.twiddle, output, self.kernel_size, 
+                    self.padding, self.increasing_stride) 
+            else: 
+                output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
         elif self.param == 'ortho':
             c, s = torch.cos(self.twiddle), torch.sin(self.twiddle)
             twiddle = torch.stack((torch.stack((c, -s), dim=-1),

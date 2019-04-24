@@ -317,7 +317,7 @@ def butterfly_mult_conv2d_torch(twiddle, input, kernel_size, padding, increasing
     input_reshape = input_reshape.unsqueeze(2).expand(b_in * h_out * w_out, matrix_batch, c_out_ratio, c_in) 
     input_reshape = input_reshape.reshape(b_in * h_out * w_out, matrix_batch * c_out_ratio, c_in)
     # perform matrix multiply 
-    return butterfly_mult_untied_torch(twiddle, input_reshape, increasing_stride, return_intermediates) 
+    return butterfly_mult_untied(twiddle, input_reshape, increasing_stride) 
 
 class ButterflyMultConv2d(torch.autograd.Function):
     # For fused unfolding, n <= 1024, CUDA only, real only
@@ -372,6 +372,7 @@ class ButterflyMultConv2d(torch.autograd.Function):
         # d_coefficients, d_input = butterfly_conv2d_backward(grad, twiddle, 
         #     output_and_intermediate, ctx._kernel_size, ctx._padding, 
         #     ctx._increasing_stride, ctx._b_in, ctx._c_in, ctx._h_in, ctx._w_in)
+        print(twiddle.size())
         d_coefficients, d_input = butterfly_conv2d_forward_backward(twiddle, 
             input, grad, ctx._kernel_size, ctx._padding, ctx._increasing_stride)
         return d_coefficients, d_input, None, None, None 
