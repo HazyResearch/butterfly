@@ -2,6 +2,7 @@ import math
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from .complex_utils import complex_mul
 
@@ -284,6 +285,43 @@ class ButterflyMultInplace(torch.autograd.Function):
         return d_coefficients, d_input
 
 butterfly_mult_inplace = ButterflyMultInplace.apply
+
+def butterfly_mult_conv2d_torch(twiddle, input, kernel_size, padding, increasing_stride=True, return_intermediates=False):
+    """
+    Parameters:
+        twiddle: (nstack, log n, n/2, 2, 2) where n = c_in  
+        input: (b_in, c_in, h_in, w_in)
+        kernel_size: int, size of convolution kernel, currently only supports square kernels 
+        padding: amount of zero-padding around border of input  
+        increasing_stride: whether to multiply with increasing stride (e.g. 1, 4, ..., n/2) or
+                decreasing stride (e.g., n/2, n/4, ..., 1).
+                Note that this only changes the order of multiplication, not how twiddle is stored.
+                In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+        return_intermediates: whether to return all the intermediate values computed
+    Returns:
+        output: (b_in * h_out * w_out, nstack, c_in)
+    """
+    # unfold input to form the patches 
+    b_in = input.size(0) 
+    c_in = input.size(1)
+    h_in = input.size(2)
+    w_in = input.size(3)
+    c_out = twiddle.size(0) // (kernel_size * kernel_size) * c_in
+    assert c_in == 1 << int(math.log2(c_in)), "currently requires c_in to be a power of 2"
+    assert c_out == 1 << int(math.log2(c_out)), "currently requires c_out to be a power of 2"
+    h_out = h_in + 2 * padding - (kernel_size - 1)
+    w_out = w_in + 2 * padding - (kernel_size - 1)
+    matrix_batch = kernel_size * kernel_size
+    c_out_ratio = c_out // c_in
+    assert c_out_ratio >= 1, "only tested for c_out >= c_in"
+    input_patches = F.unfold(input, kernel_size=kernel_size, dilation=1, padding=padding, stride=1).view(
+        b_in, c_in, kernel_size * kernel_size, h_out * w_out)
+    input_reshape = input_patches.permute(0, 3, 2, 1).reshape(b_in * h_out * w_out, matrix_batch, c_in)
+    input_reshape = input_reshape.unsqueeze(2).expand(b_in * h_out * w_out, matrix_batch, c_out_ratio, c_in) 
+    input_reshape = input_reshape.reshape(b_in * h_out * w_out, matrix_batch * c_out_ratio, c_in)
+
+    # perform matrix multiply 
+    return butterfly_mult_untied_torch(twiddle, input_reshape, increasing_stride, return_intermediates) 
 
 class ButterflyMultConv2d(torch.autograd.Function):
     # For n <= 1024, CUDA only, real only
