@@ -180,11 +180,13 @@ class ButterflyMultUntied(torch.autograd.Function):
         twiddle, input = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
         n = input.shape[2]
-        if input.dim() == 3 and n <= 1024 and input.is_cuda:
-            d_coefficients, d_input = butterfly_multiply_untied_forward_backward(twiddle, input, grad, increasing_stride)
-        else:
-            output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride, True)
-            d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate, increasing_stride)
+        # if input.dim() == 3 and n <= 1024 and input.is_cuda:
+            # d_coefficients, d_input = butterfly_multiply_untied_forward_backward(twiddle, input, grad, increasing_stride)
+        # else:
+            # output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride, True)
+            # d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate, increasing_stride)
+        output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride, True)
+        d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate, increasing_stride)
         return d_coefficients, d_input, None  # Autograd requires 3 gradients
 
 butterfly_mult_untied = ButterflyMultUntied.apply if use_extension else butterfly_mult_untied_torch
