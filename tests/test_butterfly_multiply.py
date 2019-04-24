@@ -177,7 +177,7 @@ class ButterflyMultTest(unittest.TestCase):
         device = 'cuda'
         c_in = 4
         kernel_size = 3
-        batch_size = 3
+        batch_size = 2
         f_dim = 2
         padding = 1
         for c_out in [4, 8]:
