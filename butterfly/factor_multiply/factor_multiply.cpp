@@ -814,7 +814,7 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   const size_t kernel_size, const size_t padding, bool increasing_stride, 
   bool return_intermediates) {
   /* Parameters:
-        twiddle: (nstack, log n, n/2, 2, 2) if real or (nstack, log n, n/2, 2, 2, 2) if complex
+        twiddle: (nstack, log n, n/2, 2, 2) where n = c_in  
         input: (b_in, c_in, h_in, w_in)
         kernel_size: int, size of convolution kernel, currently only supports square kernels 
         padding: amount of zero-padding around border of input  
@@ -823,34 +823,34 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
                 Note that this only changes the order of multiplication, not how twiddle is stored.
                 In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         return_intermediates: whether to return all the intermediate values computed
-
-     Returns:
-        output: (b_in * h_out * w_out, nstack, c_out)
+    Returns:
+        output: (b_in * h_out * w_out, nstack, c_in)
   */
   // Currently assuming convolution stride is 1
-  const auto batch_size = input.size(0);
-  const auto in_channels = input.size(1);
-  // twiddle nstack = out_channels/in_channels * matrix batach 
-  const auto out_channels = twiddle.size(0) / (kernel_size*kernel_size) * in_channels;
-  const auto h = input.size(2);
-  const auto w = input.size(3);
-  const int log_n = int(log2((double) in_channels));
+  const int b_in = input.size(0);
+  const int c_in = input.size(1);
+  // twiddle nstack = c_out/c_in * matrix batach 
+  const int n = c_in; // rename to be consistent with dimension of butterfly
+  const int c_out = twiddle.size(0) / (kernel_size*kernel_size) * c_in;
+  const int h = input.size(2);
+  const int w = input.size(3);
+  const int log_n = int(log2((double) c_in)); 
   const auto bstack = twiddle.size(0);
   const int stack = kernel_size * kernel_size; 
   auto h_out = h + 2 * padding - (kernel_size - 1);
   auto w_out = w + 2 * padding - (kernel_size - 1);
-  // AT_CHECK((twiddle.dim() == 5 && input.dim() == 3) || (twiddle.dim() == 6 && input.dim() == 4),
-  //          "butterfly_multiply_untied: twiddle and input must have dimension 5,3 or 6,4");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
+  AT_CHECK((twiddle.dim() == 5 && input.dim() == 4),
+            "butterfly_conv2d: twiddle and input must have dimension 5,4");
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  // AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
+  AT_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_conv2d: twiddle must have shape (nstack, log n, n/2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
   // return unfolded output 
-  auto output = torch::zeros({output_first_dim, batch_size*h_out*w_out, bstack, in_channels},
+  auto output = torch::zeros({output_first_dim, b_in*h_out*w_out, bstack, c_in},
     torch::dtype(input.dtype()).device(input.device()));
   if (!return_intermediates) {
-    output = output.expand({log_n + 1, batch_size*h_out*w_out, bstack, in_channels});
+    output = output.expand({log_n + 1, b_in*h_out*w_out, bstack, c_in});
   }
   butterfly_conv2d_cuda(twiddle, input, output, kernel_size, padding, h_out, w_out, increasing_stride, return_intermediates);
   return return_intermediates ? output : output[-1];
@@ -869,17 +869,16 @@ std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const 
              decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
-          b_in: int
-          h_in: int
-          w_in: int
+          b_in: int, batch_size of input data 
+          h_in: int, height of input data 
+          w_in: int, width of input data
      Return:
          d_twiddle: (nstack, log n, n / 2, 2, 2) 
          d_input: (b_in, c_in, h_in, w_in) 
   */
   const int batch_size = grad.size(0);
   const int c_out = grad.size(2);
-  const int nstack = grad.size(1) * c_out/c_in; // includes matrix batch
-  const int cstack = grad.size(1); // does not include matrix batch 
+  const int bstack = grad.size(1) * c_out/c_in; 
   const int n = c_in; // rename to be consistent with dimension of butterfly
   const int log_n = int(log2((double) n));
   const int h_out = h_in + 2 * padding - (kernel_size - 1);
@@ -889,7 +888,7 @@ std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const 
   CHECK_DEVICE(output);
   AT_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
   AT_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_conv2d_backward: twiddle must have shape (nstack, log n, n/2, 2, 2) where n=c_in");
-  AT_CHECK(output.size(0) == log_n + 1&& output.size(1) == batch_size && output.size(2) == nstack && output.size(3) == c_in, "butterfly_conv2d_backward: output must have shape (log n + 1, batch_size, nstack, n)");
+  AT_CHECK(output.size(0) == log_n + 1&& output.size(1) == batch_size && output.size(2) == bstack && output.size(3) == c_in, "butterfly_conv2d_backward: output must have shape (log n + 1, batch_size, nstack, n)");
   auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::zeros({b_in, c_in, h_in, w_in},
     torch::dtype(grad.dtype()).device(grad.device()));

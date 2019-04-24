@@ -192,7 +192,6 @@ class ButterflyBmm(Butterfly):
         output = output.unsqueeze(2).expand((batch, self.matrix_batch, self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         output = output.reshape((batch, self.matrix_batch * self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         if self.param == 'regular':
-            print("actual input: ", output.size())
             output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
         elif self.param == 'ortho':
             c, s = torch.cos(self.twiddle), torch.sin(self.twiddle)
