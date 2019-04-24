@@ -59,7 +59,7 @@ class ButterflyConv2d(ButterflyBmm):
         self.stride = (stride, stride) if isinstance(stride, int) else stride
         self.padding = (padding, padding) if isinstance(padding, int) else padding
         self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
-        self.fused_unfold = False
+        self.fused_unfold = fused_unfold
         super().__init__(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False,
                          tied_weight, increasing_stride, ortho_init, param, max_gain, 
                          fused_unfold=fused_unfold, kernel_size=kernel_size, padding=padding)
@@ -73,17 +73,17 @@ class ButterflyConv2d(ButterflyBmm):
         """
         # TODO: Only doing real for now
         batch, c, h, w = input.shape
-        if not self.fused_unfold or batch > 1024 or not input.is_cuda():
+        h_out = (h + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) // self.stride[0] + 1
+        w_out = (h + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
+        if not self.fused_unfold or c > 1024 or not input.is_cuda:
             # unfold input into patches and call batch matrix multiply 
-            h_out = (h + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) // self.stride[0] + 1
-            w_out = (h + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
             input_patches = F.unfold(input, self.kernel_size, self.dilation, self.padding, self.stride).view(
                 batch, c, self.kernel_size[0] * self.kernel_size[1], h_out * w_out)
             input = input_patches.permute(0, 3, 2, 1).reshape(batch * h_out * w_out, self.kernel_size[0] * self.kernel_size[1], c)
             output = super().forward(input).mean(dim=1)
         else: 
-            output = butterfly_mult_conv2d(self.twiddle, input, self.kernel_size, 
-                self.padding, self.increasing_stride) 
+            output = butterfly_mult_conv2d(self.twiddle, input, self.kernel_size[0], 
+                self.padding[0], self.increasing_stride).mean(dim=1)
         return output.view(batch, h_out * w_out, self.out_channels).transpose(1, 2).view(batch, self.out_channels, h_out, w_out)
 
 

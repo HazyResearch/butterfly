@@ -1287,7 +1287,6 @@ __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAcce
   if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       s_input[i + threadIdx.y * max_stride * 2] = output_a[first_idx][b][s][input_base_idx + i];
-      // if (s_input[i + threadIdx.y * max_stride * 2] != 0) printf("untied %f b:%d s:%d\n", s_input[i + threadIdx.y * max_stride * 2], b, blockIdx.z);
     }
   }
   int tid_x = threadIdx.x;
@@ -1316,9 +1315,6 @@ __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAcce
       if (return_intermediates || idx == first_idx + log_max_stride) {
         output_a[idx+1][b][s][input_base_idx + pos_x] = s_input[pos];
         output_a[idx+1][b][s][input_base_idx + pos_x + stride] = s_input[pos + stride];
-        // if (s_input[pos] != 0) printf("untied %f (%d, %d, %d)\n", s_input[pos], b, s, input_base_idx + pos_x); 
-        // if (s_input[pos + stride] != 0) printf("untied %f (%d, %d, %d)\n", s_input[pos+stride], 
-        //  b, s, input_base_idx + pos_x + stride);
       }
     }
   }
@@ -1516,20 +1512,16 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
   __shared__ scalar_t s_grad[ELEMENTARY_SIZE * 2];
   __shared__ accscalar_t s_twiddle[ELEMENTARY_SIZE][2][2];  // Use accscalar_t instead of scalar_t since we'll reuse the storage for s_d_twiddle
-  // __shared__ scalar_t s_d_twiddle[ELEMENTARY_SIZE * 4];
-  // accscalar_t (* s_d_twiddle)[2][2] = (accscalar_t (*)[2][2])&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
   accscalar_t* s_d_twiddle = (accscalar_t *)&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
   int b = blockIdx.y * blockDim.y + threadIdx.y;
   if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       s_grad[i + threadIdx.y * max_stride * 2] = d_input_a[b][s][input_base_idx + i];
-      // printf("untied %f\n", s_grad[i + threadIdx.y * max_stride * 2]);
     }
   }
   int tid_x = threadIdx.x;
   int tid_y = threadIdx.y;
   int first_idx = increasing_stride ? 0 : log_n - 1 - log_max_stride;
-  // printf("untied log: %d first_idx: %d\n", log_max_stride, first_idx);
   for (int idx = first_idx + log_max_stride; idx >= first_idx; --idx) {
     int log_stride = increasing_stride ? idx : log_n - 1 - idx;
     int stride = 1 << log_stride;
@@ -1554,19 +1546,10 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
       s_grad[pos + stride] = twiddle_val[0][1] * grad_val[0] + twiddle_val[1][1] * grad_val[1];
       const scalar_t input_val[2] = {output_a[idx][b][s][input_base_idx + pos_x],
                                      output_a[idx][b][s][input_base_idx + pos_x + stride]};
-      
-      // if (input_val[0]!=0)
-      //   printf("untied idx:%d, input:%f threadIdx:(%d,%d) blockIdx:(%d,%d,%d), out:%d\n", idx, input_val[0], threadIdx.x, threadIdx.y,
-      //     blockIdx.x, blockIdx.y, blockIdx.z, input_base_idx + pos_x);
-      // if (input_val[1]!=0)
-      //   printf("untied idx:%d, input:%f threadIdx:(%d,%d) blockIdx:(%d,%d,%d), out:%d\n", idx, input_val[1], threadIdx.x, threadIdx.y,
-          // blockIdx.x, blockIdx.y, blockIdx.z, input_base_idx + pos_x + stride);
-
       d_twiddle_val[0][0] = grad_val[0] * input_val[0];
       d_twiddle_val[0][1] = grad_val[0] * input_val[1];
       d_twiddle_val[1][0] = grad_val[1] * input_val[0];
       d_twiddle_val[1][1] = grad_val[1] * input_val[1];
-      // printf("untied %f %f %f %f\n", grad_val[0], grad_val[1], input_val[0], input_val[1]);
     }
     int tid = threadIdx.x + threadIdx.y * blockDim.x;
     int nthreads = blockDim.x * blockDim.y;
@@ -1582,7 +1565,6 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
   if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       d_input_a[b][s][input_base_idx + i] = s_grad[i + threadIdx.y * max_stride * 2];
-      // printf("untied: (%d,%d,%d) %f\n", b, s, input_base_idx+i, d_input_a[b][s][input_base_idx + i]);
     }
   }
 }
@@ -1874,7 +1856,6 @@ __global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const Cud
   if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       s_grad[i + threadIdx.y * max_stride * 2] = d_input_a[b][s][input_base_idx + i];
-      // printf("untied: %f\n", s_grad[i + threadIdx.y * max_stride * 2]);
     }
   }
   for (int idx = first_idx + log_max_stride; idx >= first_idx; --idx) {
@@ -2216,7 +2197,6 @@ __global__ void butterfly_conv2d_forward_backward_cuda_kernel(const at::PackedTe
       // combine indices and adjust for padding
       int i = k_i + p_i - padding;
       int j = k_j + p_j - padding;
-      // printf("s: %d, ks: %d, (k_i, k_j): %d,%d (i,j): %d,%d\n", s, kernel_size, k_i, k_j, i, j);
       if (i >= w_in or j >= h_in or i < 0 or j < 0) s_input[t] = 0;
       else{
         s_input[t + threadIdx.y * max_stride * 2] = input_a[batch_idx][input_base_idx + t][i][j];
@@ -2247,10 +2227,8 @@ __global__ void butterfly_conv2d_forward_backward_cuda_kernel(const at::PackedTe
       input_val_storage[idx - first_idx][0] = s_input[pos];
       input_val_storage[idx - first_idx][1] = s_input[pos + stride];
       const scalar_t input_val[2] = {s_input[pos], s_input[pos + stride]};
-      // printf("first input: %d %f %f\n", b, input_val[0], input_val[1]);
       s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
       s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
-      // printf("updated input: %d %f %f, %f %f\n", b, input_val[0], input_val[1], s_input[pos], s_input[pos+stride]);
     }
   }
   // Backward pass
@@ -2260,7 +2238,6 @@ __global__ void butterfly_conv2d_forward_backward_cuda_kernel(const at::PackedTe
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       s_grad[i + threadIdx.y * max_stride * 2] = grad_a[b][s][input_base_idx + i];
       if (s_grad[i + threadIdx.y * max_stride * 2] != 0){
-        // printf("%f\n", s_grad[i + threadIdx.y * max_stride * 2]);
       }
     }
   }
@@ -2291,7 +2268,6 @@ __global__ void butterfly_conv2d_forward_backward_cuda_kernel(const at::PackedTe
       d_twiddle_val[0][1] = grad_val[0] * input_val[1];
       d_twiddle_val[1][0] = grad_val[1] * input_val[0];
       d_twiddle_val[1][1] = grad_val[1] * input_val[1];
-      // printf("grad:(%f %f) input:(%f %f)\n", grad_val[0], grad_val[1], input_val[0], input_val[1]);
     }
     int tid = threadIdx.x + threadIdx.y * blockDim.x;
     int nthreads = blockDim.x * blockDim.y;
@@ -2347,7 +2323,6 @@ void butterfly_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
-    std::cout << "ratio: " << c_out_ratio << "\n";
     dim3 grid(c_out_ratio, div_up(batch_size, block.y), stack);
     increasing_stride ? 
       butterfly_conv2d_forward_backward_cuda_kernel<scalar_t, accscalar_t, true>
