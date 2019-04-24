@@ -193,7 +193,6 @@ class ButterflyMultTest(unittest.TestCase):
                                         padding, increasing_stride)
                 output = butterfly_mult_conv2d(twiddle, input_, kernel_size, 
                                         padding, increasing_stride)
-                print(output, output_torch)
                 self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
                                         ((output - output_torch).abs().max().item(), device, c_out, increasing_stride))
 
