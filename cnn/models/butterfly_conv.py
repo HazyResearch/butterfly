@@ -63,8 +63,7 @@ class ButterflyConv2d(ButterflyBmm):
         self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
         self.fused_unfold = fused_unfold
         super().__init__(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False,
-                         tied_weight, increasing_stride, ortho_init, param, max_gain, 
-                         fused_unfold=fused_unfold, kernel_size=kernel_size, padding=padding)
+                         tied_weight, increasing_stride, ortho_init, param, max_gain)
 
     def forward(self, input):
         """

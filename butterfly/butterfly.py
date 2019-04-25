@@ -4,7 +4,6 @@ import torch
 from torch import nn
 
 from .butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_untied_svd
-from .butterfly_multiply import butterfly_mult_conv2d
 
 class Butterfly(nn.Module):
     """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
@@ -161,8 +160,7 @@ class ButterflyBmm(Butterfly):
     """
 
     def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False, tied_weight=True,
-                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0, 
-                 fused_unfold=False, kernel_size=3, padding=1):
+                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0):
         m = int(math.ceil(math.log2(in_size)))
         in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
         nstack = int(math.ceil(out_size / in_size_extended))

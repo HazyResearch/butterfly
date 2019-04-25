@@ -9,7 +9,7 @@ from butterfly.butterfly import ButterflyBmm
 from butterfly.butterfly_multiply import butterfly_conv2d
 
 import time
-nsteps = 500
+nsteps = 1000
 
 in_planes = 128
 out_planes = 128
