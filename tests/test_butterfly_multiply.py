@@ -174,17 +174,17 @@ class ButterflyMultTest(unittest.TestCase):
 
     def test_butterfly_conv2d(self):
         device = 'cuda'
-        c_in = 4
+        c_in = 16
         kernel_size = 3
-        batch_size = 2
+        batch_size = 4
         f_dim = 2
         padding = 1
-        for c_out in [4, 8]:
+        for c_out in [c_in, 2*c_in]:
+            nstack = c_out // c_in * kernel_size * kernel_size 
+            m = int(math.log2(c_in))
             for increasing_stride in [True, False]:
-                bfly = ButterflyConv2d(c_in, c_out, kernel_size=kernel_size, 
-                               padding=padding, bias=False, 
-                               tied_weight=False).to(device)
-                twiddle = bfly.twiddle 
+                scaling = 1 / math.sqrt(2)
+                twiddle = torch.randn((nstack, m, c_in // 2, 2, 2), requires_grad=True, device=device) * scaling
                 input_ = torch.randn(batch_size, c_in, f_dim, f_dim, 
                                     requires_grad=True).to(device)
                 # test forward pass
@@ -194,7 +194,6 @@ class ButterflyMultTest(unittest.TestCase):
                                         padding, increasing_stride)
                 self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
                                         ((output - output_torch).abs().max().item(), device, c_out, increasing_stride))
-
                 # test backward pass
                 grad = torch.randn_like(output_torch)
                 d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input_), 
