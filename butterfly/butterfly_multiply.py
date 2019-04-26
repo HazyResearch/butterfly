@@ -297,10 +297,10 @@ butterfly_mult_inplace = ButterflyMultInplace.apply
 def butterfly_mult_conv2d_torch(twiddle, input, kernel_size, padding, increasing_stride=True, return_intermediates=False):
     """
     Parameters:
-        twiddle: (nstack, log n, n/2, 2, 2) where n = c_in  
+        twiddle: (nstack, log n, n/2, 2, 2) where n = c_in
         input: (b_in, c_in, h_in, w_in)
-        kernel_size: int, size of convolution kernel, currently only supports square kernels 
-        padding: amount of zero-padding around border of input  
+        kernel_size: int, size of convolution kernel, currently only supports square kernels
+        padding: amount of zero-padding around border of input
         increasing_stride: whether to multiply with increasing stride (e.g. 1, 4, ..., n/2) or
                 decreasing stride (e.g., n/2, n/4, ..., 1).
                 Note that this only changes the order of multiplication, not how twiddle is stored.
@@ -309,7 +309,7 @@ def butterfly_mult_conv2d_torch(twiddle, input, kernel_size, padding, increasing
     Returns:
         output: (b_in * h_out * w_out, nstack, c_in)
     """
-    # unfold input to form the patches 
+    # unfold input to form the patches
     b_in, c_in, h_in, w_in = input.shape
     c_out = twiddle.size(0) // (kernel_size * kernel_size) * c_in
     assert c_in == 1 << int(math.log2(c_in)), "currently requires c_in to be a power of 2"
@@ -322,10 +322,10 @@ def butterfly_mult_conv2d_torch(twiddle, input, kernel_size, padding, increasing
     input_patches = F.unfold(input, kernel_size=kernel_size, dilation=1, padding=padding, stride=1).view(
         b_in, c_in, kernel_size * kernel_size, h_out * w_out)
     input_reshape = input_patches.permute(0, 3, 2, 1).reshape(b_in * h_out * w_out, matrix_batch, c_in)
-    input_reshape = input_reshape.unsqueeze(2).expand(b_in * h_out * w_out, matrix_batch, c_out_ratio, c_in) 
+    input_reshape = input_reshape.unsqueeze(2).expand(b_in * h_out * w_out, matrix_batch, c_out_ratio, c_in)
     input_reshape = input_reshape.reshape(b_in * h_out * w_out, matrix_batch * c_out_ratio, c_in)
-    # perform matrix multiply 
-    return butterfly_mult_untied_torch(twiddle, input_reshape, increasing_stride=increasing_stride) 
+    # perform matrix multiply
+    return butterfly_mult_untied_torch(twiddle, input_reshape, increasing_stride=increasing_stride)
 
 class ButterflyMultConv2d(torch.autograd.Function):
     # For fused unfolding, n <= 1024, CUDA only, real only
@@ -335,10 +335,10 @@ class ButterflyMultConv2d(torch.autograd.Function):
     def forward(ctx, twiddle, input, kernel_size, padding, increasing_stride=True):
         """
         Parameters:
-            twiddle: (nstack, log n, n/2, 2, 2) where n = c_in  
+            twiddle: (nstack, log n, n/2, 2, 2) where n = c_in
             input: (b_in, c_in, h_in, w_in)
-            kernel_size: int, size of convolution kernel, currently only supports square kernels 
-            padding: amount of zero-padding around border of input  
+            kernel_size: int, size of convolution kernel, currently only supports square kernels
+            padding: amount of zero-padding around border of input
             increasing_stride: whether to multiply with increasing stride (e.g. 1, 4, ..., n/2) or
                     decreasing stride (e.g., n/2, n/4, ..., 1).
                     Note that this only changes the order of multiplication, not how twiddle is stored.
@@ -347,11 +347,11 @@ class ButterflyMultConv2d(torch.autograd.Function):
         Returns:
             output: (b_in * h_out * w_out, nstack, c_in)
         """
-        output = butterfly_conv2d(twiddle, input, kernel_size, 
+        output = butterfly_conv2d(twiddle, input, kernel_size,
                                   padding, increasing_stride, False)
         ctx.save_for_backward(twiddle, input)
         ctx._kernel_size = kernel_size
-        ctx._padding = padding 
+        ctx._padding = padding
         ctx._increasing_stride = increasing_stride
         ctx._input_size = input.size()
         ctx._b_in= input.size(0)
@@ -364,24 +364,24 @@ class ButterflyMultConv2d(torch.autograd.Function):
     def backward(ctx, grad):
         """
         Parameters:
-            grad: (b_in * h_out * w_out, cin/cout * nstack, c_out) 
+            grad: (b_in * h_out * w_out, cin/cout * nstack, c_out)
             twiddle: (nstack, log n, n / 2, 2, 2) where n = c_in
             output + intermediate values for backward: (log n + 1, b_in * h_out * w_out,
-                                                cin/cout * nstack, c_out) 
+                                                cin/cout * nstack, c_out)
         Return:
-            d_twiddle: (nstack, log n, n / 2, 2, 2) 
-            d_input: (b_in, c_in, h_in, w_in) 
+            d_twiddle: (nstack, log n, n / 2, 2, 2)
+            d_input: (b_in, c_in, h_in, w_in)
         """
         twiddle, input = ctx.saved_tensors
         # Save intermediates for backward pass
-        output_and_intermediate = butterfly_conv2d(twiddle, input, 
-            ctx._kernel_size, ctx._padding, ctx._increasing_stride, True) 
-        d_coefficients, d_input = butterfly_conv2d_backward(grad, twiddle, 
-            output_and_intermediate, ctx._kernel_size, ctx._padding, 
-            ctx._increasing_stride, ctx._b_in, ctx._c_in, ctx._h_in, ctx._w_in)
-        # d_coefficients, d_input = butterfly_conv2d_forward_backward(twiddle, 
-        #     input, grad, ctx._kernel_size, ctx._padding, ctx._increasing_stride)
-        return d_coefficients, d_input, None, None, None 
+        # output_and_intermediate = butterfly_conv2d(twiddle, input,
+            # ctx._kernel_size, ctx._padding, ctx._increasing_stride, True)
+        # d_coefficients, d_input = butterfly_conv2d_backward(grad, twiddle,
+            # output_and_intermediate, ctx._kernel_size, ctx._padding,
+            # ctx._increasing_stride, ctx._b_in, ctx._c_in, ctx._h_in, ctx._w_in)
+        d_coefficients, d_input = butterfly_conv2d_forward_backward(twiddle,
+            input, grad, ctx._kernel_size, ctx._padding, ctx._increasing_stride)
+        return d_coefficients, d_input, None, None, None
         # Autograd requires 5 gradients
 
 butterfly_mult_conv2d = ButterflyMultConv2d.apply if use_extension else butterfly_mult_conv2d_torch

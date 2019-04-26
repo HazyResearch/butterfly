@@ -18,16 +18,16 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
 void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input,
                                                      at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
 void butterfly_conv2d_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output,
-                           const int kernel_size, const int padding, const int h_out, 
+                           const int kernel_size, const int padding, const int h_out,
                            const int w_out, bool increasing_stride, bool return_intermediates);
-void butterfly_conv2d_backward_cuda(const at::Tensor& grad, const at::Tensor& twiddle, 
-                                    const at::Tensor& output, at::Tensor& d_twiddle, 
+void butterfly_conv2d_backward_cuda(const at::Tensor& grad, const at::Tensor& twiddle,
+                                    const at::Tensor& output, at::Tensor& d_twiddle,
                                     at::Tensor& d_input, const int kernel_size, const int padding,
                                     const int h_out, const int w_out,
                                     bool increasing_stride);
-void butterfly_conv2d_forward_backward_cuda(const at::Tensor& twiddle, 
-  const at::Tensor& input, const at::Tensor& grad, 
-  at::Tensor& d_twiddle, at::Tensor& d_input, 
+void butterfly_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
+  const at::Tensor& input, const at::Tensor& grad,
+  at::Tensor& d_twiddle, at::Tensor& d_input,
   const int kernel_size, const int padding,
   const int h_out, const int w_out,
   bool increasing_stride);
@@ -858,13 +858,13 @@ std::vector<at::Tensor> butterfly_multiply_untied_forward_backward(const at::Ten
 }
 
 at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
-  const size_t kernel_size, const size_t padding, bool increasing_stride, 
+  const size_t kernel_size, const size_t padding, bool increasing_stride,
   bool return_intermediates) {
   /* Parameters:
-        twiddle: (nstack, log n, n/2, 2, 2) where n = c_in  
+        twiddle: (nstack, log n, n/2, 2, 2) where n = c_in
         input: (b_in, c_in, h_in, w_in)
-        kernel_size: int, size of convolution kernel, currently only supports square kernels 
-        padding: amount of zero-padding around border of input  
+        kernel_size: int, size of convolution kernel, currently only supports square kernels
+        padding: amount of zero-padding around border of input
         increasing_stride: whether to multiply with increasing stride (e.g. 1, 4, ..., n/2) or
                 decreasing stride (e.g., n/2, n/4, ..., 1).
                 Note that this only changes the order of multiplication, not how twiddle is stored.
@@ -876,12 +876,12 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   // Currently assuming convolution stride is 1
   const int b_in = input.size(0);
   const int c_in = input.size(1);
-  // twiddle nstack = c_out/c_in * matrix batach 
+  // twiddle nstack = c_out/c_in * matrix batach
   const int n = c_in; // rename to be consistent with dimension of butterfly
   const int c_out = twiddle.size(0) / (kernel_size*kernel_size) * c_in;
   const int h = input.size(2);
   const int w = input.size(3);
-  const int log_n = int(log2((double) c_in)); 
+  const int log_n = int(log2((double) c_in));
   const auto bstack = twiddle.size(0);
   auto h_out = h + 2 * padding - (kernel_size - 1);
   auto w_out = w + 2 * padding - (kernel_size - 1);
@@ -892,7 +892,7 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
   AT_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_conv2d: twiddle must have shape (nstack, log n, n/2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
-  // return unfolded output 
+  // return unfolded output
   auto output = torch::zeros({output_first_dim, b_in*h_out*w_out, bstack, c_in},
     torch::dtype(input.dtype()).device(input.device()));
   if (!return_intermediates) {
@@ -902,27 +902,27 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   return return_intermediates ? output : output[-1];
 }
 
-std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const at::Tensor& twiddle, 
-  const at::Tensor& output, const size_t kernel_size, const size_t padding, 
-  bool increasing_stride, const int b_in, const int c_in, 
+std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const at::Tensor& twiddle,
+  const at::Tensor& output, const size_t kernel_size, const size_t padding,
+  bool increasing_stride, const int b_in, const int c_in,
   const int h_in, const int w_in) {
     /* Parameters:
          grad: (b_in * h_out * w_out, nstack, n) where n = c_in
          twiddle: (nstack, log n, n / 2, 2, 2) where n = c_in
-         output + intermediate values for backward: (log n + 1, b_in * h_out * w_out, nstack, n) 
+         output + intermediate values for backward: (log n + 1, b_in * h_out * w_out, nstack, n)
          increasing_stride: whether the forward pass multiply was with increasing stride (e.g. 1, 2, ..., n/2) or
              decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
-          b_in: int, batch_size of input data 
-          h_in: int, height of input data 
+          b_in: int, batch_size of input data
+          h_in: int, height of input data
           w_in: int, width of input data
      Return:
-         d_twiddle: (nstack, log n, n / 2, 2, 2) 
-         d_input: (b_in, c_in, h_in, w_in) 
+         d_twiddle: (nstack, log n, n / 2, 2, 2)
+         d_input: (b_in, c_in, h_in, w_in)
   */
   const int batch_size = grad.size(0);
-  const int bstack = grad.size(1); 
+  const int bstack = grad.size(1);
   const int n = c_in; // rename to be consistent with dimension of butterfly
   const int log_n = int(log2((double) n));
   const int h_out = h_in + 2 * padding - (kernel_size - 1);
@@ -936,8 +936,8 @@ std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const 
   auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::zeros({b_in, c_in, h_in, w_in},
     torch::dtype(grad.dtype()).device(grad.device()));
-  butterfly_conv2d_backward_cuda(grad, twiddle, output, d_twiddle, d_input, 
-                                 kernel_size, padding, h_out, w_out, 
+  butterfly_conv2d_backward_cuda(grad, twiddle, output, d_twiddle, d_input,
+                                 kernel_size, padding, h_out, w_out,
                                  increasing_stride);
   return {d_twiddle, d_input};
 }
@@ -945,7 +945,7 @@ std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const 
 
 std::vector<at::Tensor> butterfly_conv2d_forward_backward(
   const at::Tensor& twiddle, const at::Tensor& input,
-  const at::Tensor& grad, const size_t kernel_size, const size_t padding, 
+  const at::Tensor& grad, const size_t kernel_size, const size_t padding,
   bool increasing_stride) {
   /* Specialized implementation for n <= 1024, CUDA only, real only, probably float only (no double, not sure).
      Do both the forward and the backward pass. //
@@ -954,15 +954,15 @@ std::vector<at::Tensor> butterfly_conv2d_forward_backward(
          twiddle: (nstack, log n, n / 2, 2, 2) where n = c_in
          input: (b_in, c_in, h_in, w_in)
          grad: (batch_size, nstack, n) where b_in * h_out * w_out, n = c_in
-         kernel_size: int, size of convolution kernel, currently only supports square kernels 
-         padding: amount of zero-padding around border of input  
+         kernel_size: int, size of convolution kernel, currently only supports square kernels
+         padding: amount of zero-padding around border of input
          increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
              decreasing stride (e.g., n/2, n/4, ..., 1).
              Note that this only changes the order of multiplication, not how twiddle is stored.
              In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Returns:
          d_twiddle: (nstack, log n, n / 2, 2, 2)
-         d_input: (b_in, c_in, h_in, w_in) 
+         d_input: (b_in, c_in, h_in, w_in)
   */
   const int b_in = input.size(0);
   const int c_in = input.size(1);
@@ -971,7 +971,7 @@ std::vector<at::Tensor> butterfly_conv2d_forward_backward(
   const int w_in = input.size(3);
   const int h_out = h_in + 2 * padding - (kernel_size - 1);
   const int w_out = w_in + 2 * padding - (kernel_size - 1);
-  const int b_out = b_in * h_out * w_out; 
+  const int b_out = b_in * h_out * w_out;
   const int nstack = grad.size(1);
   AT_CHECK(n <= 1024, "butterfly_conv2d_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
@@ -980,19 +980,19 @@ std::vector<at::Tensor> butterfly_conv2d_forward_backward(
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
-  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), 
+  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(),
     "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n 
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n
     && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
      "butterfly_conv2d_forward_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
-  // AT_CHECK(grad.size(0) == b_out && grad.size(2) == n, 
+  // AT_CHECK(grad.size(0) == b_out && grad.size(2) == n,
   //   "butterfly_conv2d_forward_backward: grad must have shape (batch_size, nstack, n)");
   auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::zeros({b_in, c_in, h_in, w_in},
     torch::dtype(grad.dtype()).device(grad.device()));
   AT_CHECK(input.is_cuda(), "butterfly_conv2d_forward_backward: only supports CUDA");
-  butterfly_conv2d_forward_backward_cuda(twiddle, input, grad, d_twiddle, 
-                                         d_input, kernel_size, 
+  butterfly_conv2d_forward_backward_cuda(twiddle, input, grad, d_twiddle,
+                                         d_input, kernel_size,
                                          padding, h_out, w_out, increasing_stride);
   return {d_twiddle, d_input} ;
 }

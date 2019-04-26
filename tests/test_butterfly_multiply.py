@@ -185,37 +185,37 @@ class ButterflyMultTest(unittest.TestCase):
 
     def test_butterfly_conv2d(self):
         device = 'cuda'
-        c_in = 16
+        c_in = 256
         kernel_size = 3
-        batch_size = 4
-        f_dim = 2
+        batch_size = 128
+        f_dim = 8
         padding = 1
         for c_out in [c_in, 2*c_in]:
-            nstack = c_out // c_in * kernel_size * kernel_size 
+            nstack = c_out // c_in * kernel_size * kernel_size
             m = int(math.log2(c_in))
             for increasing_stride in [True, False]:
                 scaling = 1 / math.sqrt(2)
                 twiddle = torch.randn((nstack, m, c_in // 2, 2, 2), requires_grad=True, device=device) * scaling
-                input_ = torch.randn(batch_size, c_in, f_dim, f_dim, 
+                input_ = torch.randn(batch_size, c_in, f_dim, f_dim,
                                     requires_grad=True).to(device)
                 # test forward pass
-                output_torch = butterfly_mult_conv2d_torch(twiddle, input_, kernel_size, 
+                output_torch = butterfly_mult_conv2d_torch(twiddle, input_, kernel_size,
                                         padding, increasing_stride)
-                output = butterfly_mult_conv2d(twiddle, input_, kernel_size, 
+                output = butterfly_mult_conv2d(twiddle, input_, kernel_size,
                                         padding, increasing_stride)
                 self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
                                         ((output - output_torch).abs().max().item(), device, c_out, increasing_stride))
                 # test backward pass
                 grad = torch.randn_like(output_torch)
-                d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input_), 
+                d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input_),
                                                         grad, retain_graph=True)
                 d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch,
                     (twiddle, input_), grad, retain_graph=True)
-                self.assertTrue(torch.allclose(d_input, d_input_torch, 
-                                rtol=self.rtol, atol=self.atol),
+                self.assertTrue(torch.allclose(d_input, d_input_torch,
+                                               rtol=self.rtol, atol=self.atol),
                                 ((d_input - d_input_torch).abs().max().item(), device, c_out, increasing_stride))
-                self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, 
-                                rtol=self.rtol, atol=self.atol),
+                self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch,
+                                               rtol=self.rtol * 10, atol=self.atol * 10),
                                 (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(), device, c_out, increasing_stride))
 
 if __name__ == "__main__":

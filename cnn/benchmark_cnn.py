@@ -30,7 +30,8 @@ grad = torch.randn_like(x)
 
 # Conv2d
 mem1 = torch.cuda.memory_allocated()
-torch.cuda.reset_max_memory_allocated()
+# torch.cuda.reset_max_memory_allocated()
+output = conv1.forward(x)  # Do it once to initialize cuDNN handle and such
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
@@ -41,7 +42,8 @@ mem2 = torch.cuda.max_memory_allocated()
 print(f'Conv2d forward: {end - start}s {(mem2-mem1)/1e6}MB')
 
 mem1 = torch.cuda.memory_allocated()
-torch.cuda.reset_max_memory_allocated()
+# torch.cuda.reset_max_memory_allocated()
+torch.autograd.grad(output, (conv1.weight, x), grad, retain_graph=True)  # Do it once
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
@@ -52,7 +54,9 @@ mem2 = torch.cuda.max_memory_allocated()
 print(f'Conv2d backward: {end - start}s {(mem2-mem1)/1e6}MB')
 
 mem1 = torch.cuda.memory_allocated()
-torch.cuda.reset_max_memory_allocated()
+# torch.cuda.reset_max_memory_allocated()
+output = conv1.forward(x)
+torch.autograd.grad(output, (conv1.weight, x), grad)
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
@@ -66,7 +70,7 @@ print(f'Conv2d together: {end - start}s {(mem2-mem1)/1e6}MB')
 # Butterfly Conv
 
 mem1 = torch.cuda.memory_allocated()
-torch.cuda.reset_max_memory_allocated()
+# torch.cuda.reset_max_memory_allocated()
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
@@ -77,7 +81,7 @@ mem2 = torch.cuda.max_memory_allocated()
 print(f'ButterflyConv2d forward: {end - start}s {(mem2-mem1)/1e6}MB')
 
 mem1 = torch.cuda.memory_allocated()
-torch.cuda.reset_max_memory_allocated()
+# torch.cuda.reset_max_memory_allocated()
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
@@ -88,7 +92,7 @@ mem2 = torch.cuda.max_memory_allocated()
 print(f'ButterflyConv2d backward: {end - start}s {(mem2-mem1)/1e6}MB')
 
 mem1 = torch.cuda.memory_allocated()
-torch.cuda.reset_max_memory_allocated()
+# torch.cuda.reset_max_memory_allocated()
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
@@ -99,10 +103,10 @@ end = time.perf_counter()
 mem2 = torch.cuda.max_memory_allocated()
 print(f'ButterflyConv2d together: {end - start}s {(mem2-mem1)/1e6}MB')
 
-# Fused-unfold butterfly 
+# Fused-unfold butterfly
 
 mem1 = torch.cuda.memory_allocated()
-torch.cuda.reset_max_memory_allocated()
+# torch.cuda.reset_max_memory_allocated()
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
@@ -113,7 +117,7 @@ mem2 = torch.cuda.max_memory_allocated()
 print(f'ButterflyConv2d fused-unfold forward: {end - start}s {(mem2-mem1)/1e6}MB')
 
 mem1 = torch.cuda.memory_allocated()
-torch.cuda.reset_max_memory_allocated()
+# torch.cuda.reset_max_memory_allocated()
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
@@ -124,7 +128,7 @@ mem2 = torch.cuda.max_memory_allocated()
 print(f'ButterflyConv2d fused-unfold backward: {end - start}s {(mem2-mem1)/1e6}MB')
 
 mem1 = torch.cuda.memory_allocated()
-torch.cuda.reset_max_memory_allocated()
+# torch.cuda.reset_max_memory_allocated()
 torch.cuda.synchronize()
 start = time.perf_counter()
 for _ in range(nsteps):
