@@ -620,7 +620,8 @@ at::Tensor butterfly_multiply_untied(const at::Tensor& twiddle, const at::Tensor
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
+           "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
   auto output = input.dim() == 3 ?
     torch::empty({output_first_dim, batch_size, nstack, n}, torch::dtype(input.dtype()).device(input.device())) :

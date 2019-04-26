@@ -618,8 +618,8 @@ __global__ void butterfly_multiply_inplace_backward_cuda_kernel(const at::Packed
         atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][0], s_d_twiddle[twiddle_idx + 2 * stride]);
         atomicAdd(&d_twiddle_a[twiddle_start_idx + twiddle_idx][1][1], s_d_twiddle[twiddle_idx + 3 * stride]);
       }
+      __syncthreads();  // Otherwise s_d_twiddle will be overwritten with s_twiddle before some thread can read
     }
-    __syncthreads();
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       d_input_a[b][input_base_idx + i] = s_grad[i];
     }
@@ -1001,6 +1001,7 @@ __global__ void butterfly_multiply_intermediate_backward_cuda_kernel(const at::P
         atomicAdd(&d_twiddle_a[s][twiddle_start_idx + twiddle_idx][1][0], s_d_twiddle[twiddle_idx + 2 * stride]);
         atomicAdd(&d_twiddle_a[s][twiddle_start_idx + twiddle_idx][1][1], s_d_twiddle[twiddle_idx + 3 * stride]);
       }
+      __syncthreads();  // Otherwise s_d_twiddle will be overwritten with s_twiddle before some thread can read
       // sum_strided_exchange(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, log_stride, nthreads, tid);
       // int block_reduction_stride = max(warpSize, stride);
       // // int n_block_reductions = div_up(nthreads, block_reduction_stride);
@@ -1016,7 +1017,6 @@ __global__ void butterfly_multiply_intermediate_backward_cuda_kernel(const at::P
       //   atomicAdd(&d_twiddle_a[s][twiddle_start_idx + (tid >> log_n_block_reductions)][1][1], d_twiddle_val[1][1]);
       // }
     }
-    __syncthreads();
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       d_input_a[b][s][input_base_idx + i] = s_grad[i];
     }
@@ -1091,8 +1091,8 @@ __global__ void butterfly_multiply_intermediate_backward_complex_cuda_kernel(con
         atomicAdd(&d_twiddle_a[s][twiddle_start_idx + twiddle_idx][1][1][0], s_d_twiddle[twiddle_idx + 3 * stride].real());
         atomicAdd(&d_twiddle_a[s][twiddle_start_idx + twiddle_idx][1][1][1], s_d_twiddle[twiddle_idx + 3 * stride].imag());
       }
+      __syncthreads();  // Otherwise s_d_twiddle will be overwritten with s_twiddle before some thread can read
     }
-    __syncthreads();
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       d_input_a[b][s][input_base_idx + i][0] = s_grad[i].real();
       d_input_a[b][s][input_base_idx + i][1] = s_grad[i].imag();
@@ -1541,7 +1541,6 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
     const scalar_t twiddle_val[2][2] = {{s_twiddle[tid_x][0][0], s_twiddle[tid_x][0][1]},
                                         {s_twiddle[tid_x][1][0], s_twiddle[tid_x][1][1]}};
     // Don't need to sync here since we sync later at sum_strided_atomic, so no writing to s_twiddle can occur until then
-    __syncthreads();
     accscalar_t d_twiddle_val[2][2] = {{0, 0}, {0, 0}};
     if (b < batch_size) {
       const scalar_t grad_val[2] = {s_grad[pos], s_grad[pos + stride]};
@@ -1556,19 +1555,15 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
     }
     int tid = threadIdx.x + threadIdx.y * blockDim.x;
     int nthreads = blockDim.x * blockDim.y;
-    // sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, max_stride, nthreads, tid);
-    // if (tid_y == 0) {
-    //   atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0], s_d_twiddle[tid_x]);
-    //   atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1], s_d_twiddle[tid_x + max_stride]);
-    //   atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0], s_d_twiddle[tid_x + 2 * max_stride]);
-    //   atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1], s_d_twiddle[tid_x + 3 * max_stride]);
-    // }
-    atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0], d_twiddle_val[0][0]);
-    atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1], d_twiddle_val[0][1]);
-    atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0], d_twiddle_val[1][0]);
-    atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1], d_twiddle_val[1][1]);
+    sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, max_stride, nthreads, tid);
+    if (tid_y == 0) {
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0], s_d_twiddle[tid_x]);
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1], s_d_twiddle[tid_x + max_stride]);
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0], s_d_twiddle[tid_x + 2 * max_stride]);
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1], s_d_twiddle[tid_x + 3 * max_stride]);
+    }
+    __syncthreads();  // Otherwise s_d_twiddle will be overwritten with s_twiddle before some thread can read
   }
-  __syncthreads();
   if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       d_input_a[b][s][input_base_idx + i] = s_grad[i + threadIdx.y * max_stride * 2];
@@ -1853,6 +1848,7 @@ __global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const Cud
       s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
     }
   }
+  __syncthreads(); // Otherwise s_input will be overwritten with s_grad before some thread can read
   // Backward pass
   scalar_t* s_grad = &s_input[0]; // Reusing the same storage as s_input
   accscalar_t* s_d_twiddle = (accscalar_t *)&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
@@ -1892,19 +1888,15 @@ __global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const Cud
     }
     int tid = threadIdx.x + threadIdx.y * blockDim.x;
     int nthreads = blockDim.x * blockDim.y;
-    // sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, max_stride, nthreads, tid);
-    // if (tid_y == 0) {
-    //   atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0], s_d_twiddle[tid_x]);
-    //   atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1], s_d_twiddle[tid_x + max_stride]);
-    //   atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0], s_d_twiddle[tid_x + 2 * max_stride]);
-    //   atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1], s_d_twiddle[tid_x + 3 * max_stride]);
-    // }
-    atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0], d_twiddle_val[0][0]);
-    atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1], d_twiddle_val[0][1]);
-    atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0], d_twiddle_val[1][0]);
-    atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1], d_twiddle_val[1][1]);
+    sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, max_stride, nthreads, tid);
+    if (tid_y == 0) {
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0], s_d_twiddle[tid_x]);
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1], s_d_twiddle[tid_x + max_stride]);
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0], s_d_twiddle[tid_x + 2 * max_stride]);
+      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1], s_d_twiddle[tid_x + 3 * max_stride]);
+    }
+    __syncthreads();  // Otherwise s_d_twiddle will be overwritten with s_twiddle before some thread can read
   }
-  __syncthreads();
   if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       d_input_a[b][s][input_base_idx + i] = s_grad[i + threadIdx.y * max_stride * 2];
@@ -2271,6 +2263,7 @@ __global__ void butterfly_multiply_untied_svd_forward_backward_cuda_kernel(const
       s_input[pos + stride] = temp[1];
     }
   }
+  __syncthreads(); // Otherwise s_input will be overwritten with s_grad before some thread can read
   // Backward pass
   scalar_t* s_grad = &s_input[0]; // Reusing the same storage as s_input
   accscalar_t* s_d_twiddle = (accscalar_t *)&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
@@ -2333,8 +2326,8 @@ __global__ void butterfly_multiply_untied_svd_forward_backward_cuda_kernel(const
       atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0], s_d_twiddle[tid_x + 2 * max_stride]);
       atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1], s_d_twiddle[tid_x + 3 * max_stride]);
     }
+    __syncthreads();  // Otherwise s_d_twiddle will be overwritten with s_twiddle before some thread can read
   }
-  __syncthreads();
   if (b < batch_size) {
     for (int i = threadIdx.x; i < max_stride * 2; i += blockDim.x) {
       d_input_a[b][s][input_base_idx + i] = s_grad[i + threadIdx.y * max_stride * 2];

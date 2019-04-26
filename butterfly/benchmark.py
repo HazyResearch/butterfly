@@ -7,8 +7,8 @@ import torch
 from butterfly import Butterfly
 from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_untied_svd, butterfly_mult_factors, butterfly_mult_inplace
 
-batch_size = 32768
-n = 128
+batch_size = 8192
+n = 256
 B = Butterfly(n, n, bias=False).to('cuda')
 L = torch.nn.Linear(n, n, bias=False).to('cuda')
 x = torch.randn(batch_size, n, requires_grad=True).to('cuda')
