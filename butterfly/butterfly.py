@@ -5,7 +5,6 @@ from torch import nn
 
 from .butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_untied_svd
 
-
 class Butterfly(nn.Module):
     """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
     Compatible with torch.nn.Linear.
@@ -202,6 +201,14 @@ class ButterflyBmm(Butterfly):
             with torch.no_grad():  # Projected SGD
                 self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
             output = butterfly_mult_untied_svd(self.twiddle, output, self.increasing_stride)
+        return self.post_process(output, batch)
+
+    def extra_repr(self):
+        return 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}'.format(
+            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init
+        )
+
+    def post_process(self, output, batch):
         output = output.view((batch, self.matrix_batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
@@ -212,8 +219,3 @@ class ButterflyBmm(Butterfly):
         if self.out_size != out_size_extended:  # Take top rows
             output = output[:, :, :self.out_size]
         return output if self.bias is None else output + self.bias
-
-    def extra_repr(self):
-        return 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}'.format(
-            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init
-        )

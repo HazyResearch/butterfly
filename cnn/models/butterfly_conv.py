@@ -4,7 +4,9 @@ import torch.nn.functional as F
 
 from butterfly import Butterfly
 from butterfly.butterfly import ButterflyBmm
+from butterfly.butterfly_multiply import butterfly_mult_conv2d
 
+import math 
 
 class Butterfly1x1Conv(Butterfly):
     """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
@@ -51,13 +53,15 @@ class ButterflyConv2d(ButterflyBmm):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True,
-                 tied_weight=True, increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0):
+                 tied_weight=True, increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0, 
+                 fused_unfold=False):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
         self.stride = (stride, stride) if isinstance(stride, int) else stride
         self.padding = (padding, padding) if isinstance(padding, int) else padding
         self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
+        self.fused_unfold = fused_unfold
         super().__init__(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False,
                          tied_weight, increasing_stride, ortho_init, param, max_gain)
 
@@ -72,9 +76,19 @@ class ButterflyConv2d(ButterflyBmm):
         batch, c, h, w = input.shape
         h_out = (h + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) // self.stride[0] + 1
         w_out = (h + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
-        input_patches = F.unfold(input, self.kernel_size, self.dilation, self.padding, self.stride).view(batch, c, self.kernel_size[0] * self.kernel_size[1], h_out * w_out)
-        input_reshape = input_patches.permute(0, 3, 2, 1).reshape(batch * h_out * w_out, self.kernel_size[0] * self.kernel_size[1], c)
-        output = super().forward(input_reshape).mean(dim=1)
+        if not self.fused_unfold or c > 1024 or not input.is_cuda:
+            # unfold input into patches and call batch matrix multiply 
+            input_patches = F.unfold(input, self.kernel_size, self.dilation, self.padding, self.stride).view(
+                batch, c, self.kernel_size[0] * self.kernel_size[1], h_out * w_out)
+            input = input_patches.permute(0, 3, 2, 1).reshape(batch * h_out * w_out, self.kernel_size[0] * self.kernel_size[1], c)
+            output = super().forward(input)
+        else: 
+            batch_out = batch * h_out * w_out 
+            output = butterfly_mult_conv2d(self.twiddle, input, self.kernel_size[0], 
+                self.padding[0], self.increasing_stride)
+            output = super().post_process(output, batch_out)
+        # combine matrix batches 
+        output = output.mean(dim=1)
         return output.view(batch, h_out * w_out, self.out_channels).transpose(1, 2).view(batch, self.out_channels, h_out, w_out)
 
 
