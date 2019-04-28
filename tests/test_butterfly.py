@@ -1,6 +1,3 @@
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import math
 import unittest
 
@@ -8,9 +5,8 @@ import numpy as np
 
 import torch
 
-from butterfly import Butterfly
-from butterfly.butterfly import ButterflyBmm
-
+from torch_butterfly.butterfly import Butterfly
+from torch_butterfly.butterfly import ButterflyBmm
 
 class ButterflyTest(unittest.TestCase):
 

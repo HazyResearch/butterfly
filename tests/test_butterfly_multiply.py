@@ -1,19 +1,15 @@
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import math
 import unittest
 
 import torch
 import torch.nn.functional as F
 
-from butterfly import Butterfly
-from cnn.models.butterfly_conv import ButterflyConv2d
+from torch_butterfly import Butterfly
 
-from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
-from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
-from butterfly.butterfly_multiply import butterfly_mult_conv2d_torch, butterfly_mult_conv2d
-from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
+from torch_butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
+from torch_butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
+from torch_butterfly.butterfly_multiply import butterfly_mult_conv2d_torch, butterfly_mult_conv2d
+from torch_butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
 
 
 class ButterflyMultTest(unittest.TestCase):
