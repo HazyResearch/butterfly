@@ -108,5 +108,10 @@ def named_target_matrix(name, size):
     elif name == 'randn':
         np.random.seed(0)
         return np.random.randn(size, size) / math.sqrt(size)
+    elif name == 'permutation':
+        np.random.seed(0)
+        perm = np.random.permutation(size)
+        P = np.eye(size)[perm]
+        return P
     else:
         assert False, 'Target matrix name not recognized or implemented'
