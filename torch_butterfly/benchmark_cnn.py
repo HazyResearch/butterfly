@@ -1,12 +1,6 @@
-import os, sys
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-
 import torch
 
-from cnn.models.butterfly_conv import ButterflyConv2d
-from butterfly.butterfly import ButterflyBmm
-from butterfly.butterfly_multiply import butterfly_conv2d
+from torch_butterfly.butterfly import ButterflyConv2d
 
 import time
 nsteps = 1000

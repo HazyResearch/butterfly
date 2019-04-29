@@ -1,13 +1,10 @@
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import math
 import unittest
 
 import torch
 
-from butterfly.permutation_multiply import permutation_mult_torch, permutation_mult
-from butterfly.permutation_multiply import permutation_mult_single_factor_torch, permutation_mult_single
+from torch_butterfly.permutation_multiply import permutation_mult_torch, permutation_mult
+from torch_butterfly.permutation_multiply import permutation_mult_single_factor_torch, permutation_mult_single
 
 
 class PermutationMultTest(unittest.TestCase):

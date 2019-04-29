@@ -1,6 +1,3 @@
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import math
 import unittest
 
@@ -8,7 +5,7 @@ import numpy as np
 
 import torch
 
-from butterfly.permutation import Permutation, FixedPermutation, PermutationFactor
+from torch_butterfly.permutation import Permutation, FixedPermutation, PermutationFactor
 
 
 class PermutationTest(unittest.TestCase):
