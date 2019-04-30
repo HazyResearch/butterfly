@@ -1,0 +1,4 @@
+[submodule "fairseq"]
+	path = fairseq
+	url = git@github.com:HazyResearch/fairseq-fork.git
+	ignore = dirty
