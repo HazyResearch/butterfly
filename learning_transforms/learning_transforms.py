@@ -129,7 +129,7 @@ def default_config():
     nsteps = 400  # Number of steps per epoch
     nepochsvalid = 5  # Frequency of validation (polishing), in terms of epochs
     nmaxepochs = 200  # Maximum number of epochs
-    result_dir = project_root + 'learning_transforms/results_new'  # Directory to store results
+    result_dir = project_root + '/learning_transforms/results_new'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
     nthreads = 1  # Number of CPU threads per job
     smoke_test = False  # Finish quickly for testing
