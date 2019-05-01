@@ -29,7 +29,7 @@ class Butterfly(nn.Module):
             For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
     """
 
-    def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
+    def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=False,
                  increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0):
         super().__init__()
         self.in_size = in_size
@@ -41,7 +41,7 @@ class Butterfly(nn.Module):
         self.tied_weight = tied_weight
         self.increasing_stride = increasing_stride
         self.ortho_init = ortho_init
-        assert param in ['regular', 'ortho', 'svd']
+        assert param in ['regular', 'ortho', 'svd', 'ds', 'logit', 'ortho2']
         self.param = param
         self.max_gain_per_factor = max_gain ** (1 / m)
         twiddle_core_shape = (self.nstack, size - 1) if tied_weight else (self.nstack, m, size // 2)
@@ -78,6 +78,12 @@ class Butterfly(nn.Module):
                 theta_phi = torch.rand(twiddle_core_shape + (2, )) * math.pi * 2
                 sigmas = torch.ones(twiddle_core_shape + (2, ), dtype=theta_phi.dtype) # Singular values
                 self.twiddle = nn.Parameter(torch.stack((theta_phi, sigmas) , dim=-2))
+            elif param == 'ds':
+                self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape))
+            elif param == 'logit':
+                self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape)*2-1)
+            elif param == 'ortho2':
+                self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * 2*math.pi)
         self.twiddle._is_structured = True  # Flag to avoid weight decay
         if bias:
             bias_shape = (out_size, ) if not complex else (out_size, 2)
@@ -117,6 +123,22 @@ class Butterfly(nn.Module):
             with torch.no_grad():  # Projected SGD
                 self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
             output = butterfly_mult_untied_svd(self.twiddle, output, self.increasing_stride)
+        elif self.param == 'ds':
+            p = self.twiddle
+            twiddle = torch.stack((torch.stack((p, 1-p), dim=-1),
+                                   torch.stack((1-p, p), dim=-1)), dim=-2)
+            output = butterfly_mult(twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(twiddle, output, self.increasing_stride)
+        elif self.param == 'logit':
+            p = 1.0/(1.0 + torch.exp(-self.twiddle))
+            twiddle = torch.stack((torch.stack((p, 1-p), dim=-1),
+                                   torch.stack((1-p, p), dim=-1)), dim=-2)
+            output = butterfly_mult(twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(twiddle, output, self.increasing_stride)
+        elif self.param == 'ortho2':
+            p = torch.cos(self.twiddle)**2
+            # p = self.twiddle
+            twiddle = torch.stack((torch.stack((p, 1-p), dim=-1),
+                                   torch.stack((1-p, p), dim=-1)), dim=-2)
+            output = butterfly_mult(twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(twiddle, output, self.increasing_stride)
         output = output.view((batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
@@ -132,6 +154,19 @@ class Butterfly(nn.Module):
         return 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}'.format(
             self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init
         )
+
+    def round_to_perm(self):
+        if self.param in ['ds', 'logit', 'ortho2']:
+            if self.param == 'ds':
+                self.twiddle_round = self.twiddle.data
+                self.twiddle.data = torch.where(self.twiddle_round > 0.5, torch.tensor(1.0), torch.tensor(0.0))
+            elif self.param == 'logit':
+                self.twiddle_round = 1.0/(1.0 + torch.exp(-self.twiddle.data))
+                self.twiddle.data = torch.where(self.twiddle_round > 0.5, torch.tensor(10.0), torch.tensor(-10.0))
+            elif self.param == 'ortho2':
+                self.twiddle_round = torch.cos(self.twiddle.data)**2
+                self.twiddle.data = torch.where(self.twiddle_round > 0.5, torch.tensor(0.0), torch.tensor(math.pi/2.0))
+
 
 
 class ButterflyBmm(Butterfly):

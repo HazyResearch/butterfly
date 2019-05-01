@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from .complex_utils import complex_mul
 
-use_extension = True
+use_extension = False
 try:
     from factor_multiply import butterfly_multiply_intermediate, butterfly_multiply_intermediate_backward
     from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_backward

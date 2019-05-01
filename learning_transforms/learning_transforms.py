@@ -80,8 +80,33 @@ class TrainableBP(TrainableMatrixFactorization):
                 Permutation(size=size, share_logit=config['share_logit'][1]),
                 Butterfly(in_size=size, out_size=size, bias=False, complex=complex, ortho_init=True)
             ).to(device)
+        elif config['model'] == 'BBT':
+            # param_type = 'regular' if complex else 'perm'
+            param_type = config['param']
+            self.model = nn.Sequential(
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=False),
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
+            )
+        elif config['model'][0] == 'B' and (config['model'][1:]).isdigit():
+            depth = int(config['model'][1:])
+            param_type = config['param']
+            self.model = nn.Sequential(
+                *[
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
+                    for _ in range(depth)
+                ]
+            )
+        elif config['model'][0] == 'T' and (config['model'][1:]).isdigit():
+            depth = int(config['model'][1:])
+            param_type = config['param']
+            self.model = nn.Sequential(
+                *[
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=False)
+                    for _ in range(depth)
+                ]
+            )
         else:
-            assert False, f'Model {model} not implemented'
+            assert False, f"Model {config['model']} not implemented"
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.n_epochs_per_validation = config['n_epochs_per_validation']
@@ -108,6 +133,14 @@ def polish(trial):
     trainable.restore(str(Path(trial.logdir) / trial._checkpoint.value))
     loss = trainable.polish(N_LBFGS_STEPS, save_to_self_model=True)
     torch.save(trainable.model.state_dict(), str((Path(trial.logdir) / trial._checkpoint.value).parent / 'polished_model.pth'))
+
+    # round for permutation experiments
+    def proj(m):
+        if isinstance(m, Butterfly):
+            m.round_to_perm()
+
+    trainable.model.apply(proj)
+    loss = trainable.loss().item()
     return loss
 
 
@@ -125,6 +158,7 @@ def default_config():
     size = 8  # Size of matrix to factor, must be power of 2
     complex = True  # Whether to use complex factorization or real factorization
     fixed_order = True  # Whether the order of the factors are fixed
+    param = 'regular' # How to constrain the parameters
     ntrials = 20  # Number of trials for hyperparameter tuning
     nsteps = 400  # Number of steps per epoch
     nepochsvalid = 5  # Frequency of validation (polishing), in terms of epochs
@@ -136,14 +170,16 @@ def default_config():
 
 
 @ex.capture
-def transform_experiment(model, target, size, complex, ntrials, nsteps, nepochsvalid, result_dir, cuda, nthreads, smoke_test):
-    assert model in ['B', 'BP', 'PBT', 'BPP', 'BPBP'], f'Model {model} not implemented'
+def transform_experiment(model, target, size, complex, param, ntrials, nsteps, nepochsvalid, result_dir, cuda, nthreads, smoke_test):
+    # assert model in ['B', 'BP', 'PBT', 'BPP', 'BPBP', 'BBT', 'BBB'], f'Model {model} not implemented'
     config={
         'model': model,
         'target_matrix': target,
         'size': size,
         'complex': complex,
-        'share_logit': sample_from(lambda spec: np.random.choice((True, False), size=2)),
+        # 'share_logit': sample_from(lambda spec: np.random.choice((True, False), size=2)),
+        'share_logit': True,
+        'param': param,
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_steps_per_epoch': nsteps,
@@ -151,7 +187,7 @@ def transform_experiment(model, target, size, complex, ntrials, nsteps, nepochsv
         'device': 'cuda' if cuda else 'cpu',
      }
     experiment = RayExperiment(
-        name=f'{target}_factorization_{model}_{complex}_{size}',
+        name=f'{target}_factorization_{model}_{complex}_{size}_{param}',
         run=TrainableBP,
         local_dir=result_dir,
         num_samples=ntrials,
