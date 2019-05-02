@@ -105,6 +105,19 @@ class TrainableBP(TrainableMatrixFactorization):
                     for _ in range(depth)
                 ]
             )
+        elif config['model'][0:3] == 'BBT' and (config['model'][3:]).isdigit():
+            depth = int(config['model'][3:])
+            param_type = config['param']
+            self.model = nn.Sequential(
+                *[
+                    nn.Sequential(
+                        Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=False),
+                        Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
+                    )
+                    for _ in range(depth)
+                ]
+            )
+
         else:
             assert False, f"Model {config['model']} not implemented"
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
@@ -156,7 +169,7 @@ def default_config():
     model = 'BP'
     target = 'dft'  # The target matrix to factor ('dft', 'idft', 'dct', 'hadamard')
     size = 8  # Size of matrix to factor, must be power of 2
-    complex = True  # Whether to use complex factorization or real factorization
+    complex = False  # Whether to use complex factorization or real factorization
     fixed_order = True  # Whether the order of the factors are fixed
     param = 'regular' # How to constrain the parameters
     ntrials = 20  # Number of trials for hyperparameter tuning
