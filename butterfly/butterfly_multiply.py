@@ -17,6 +17,7 @@ try:
     from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
     from factor_multiply import butterfly_conv2d, butterfly_conv2d_backward, butterfly_conv2d_forward_backward
     from factor_multiply import butterfly_conv2d_svd, butterfly_conv2d_svd_forward_backward
+    from factor_multiply import butterfly_multiply_untied_batch
 except:
     use_extension = False
     import warnings
@@ -148,7 +149,7 @@ def butterfly_mult_untied_torch(twiddle, input, increasing_stride=True, return_i
 class ButterflyMultUntied(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, twiddle, input, increasing_stride=True):
+    def forward(ctx, twiddle, input, increasing_stride=True, is_training=True):
         """
         Parameters:
             twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
@@ -160,12 +161,19 @@ class ButterflyMultUntied(torch.autograd.Function):
         Returns:
             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
-        # output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride)
-        # ctx.save_for_backward(twiddle, output_and_intermediate)
-        output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
-        ctx.save_for_backward(twiddle, input)
-        ctx._increasing_stride = increasing_stride
-        # return output_and_intermediate[-1]
+        batch_size = input.size(0)
+        # use batch vectorization optimization
+        if not is_training and batch_size >= 8:
+            # determine how many batches to pad to make batches factor of 8 for vectorization
+            batch_pad = 8 - input.size(0) % 8
+            # zero pad batches
+            input = F.pad(input, pad=(0,0,0,0,0,batch_pad))
+            # remove extra padding
+            output = butterfly_multiply_untied_batch(twiddle, input, increasing_stride)[:-batch_pad]
+        else:
+            output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
+            ctx.save_for_backward(twiddle, input)
+            ctx._increasing_stride = increasing_stride
         return output
 
     @staticmethod

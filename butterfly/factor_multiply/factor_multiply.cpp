@@ -717,6 +717,68 @@ at::Tensor butterfly_multiply_untied(const at::Tensor& twiddle, const at::Tensor
   return return_intermediates ? output : output[-1];
 }
 
+at::Tensor butterfly_multiply_untied_batch(const at::Tensor& twiddle, const at::Tensor& input, bool increasing_stride) {
+  /* Vectorizes over the batch for inference. Useful for batch sizes >= 8. Only supports reals, 32-bit input, and cpus.
+    Parameters:
+         twiddle: (nstack, log n, n/2, 2, 2)
+         input: (batch_size, nstack, n)
+         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
+             decreasing stride (e.g., n/2, n/4, ..., 1).
+             Note that this only changes the order of multiplication, not how twiddle is stored.
+             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
+     Returns:
+        output: (batch_size, nstack, n)
+  */
+  const auto batch_size = input.size(0);
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
+  const int log_n = int(log2((double) n));
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(input);
+  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(),
+    ") must match device of input (", input.device(), ")");
+  AT_CHECK((twiddle.dim() == 5 && input.dim() == 3),
+           "butterfly_multiply_untied: twiddle and input must have dimension 5,3");
+  AT_CHECK((batch_size % 8 == 0), "Only multiples of 8 currently supported for batch size. Padding can be used.");
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
+           "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  auto output = input.permute({1,2,0}).contiguous().clone();
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_untied_batch", [&] {
+    const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
+    float* output_data = output.data<float>();
+    for (int64_t idx = 0; idx <= log_n - 1; ++idx) {
+      int64_t log_stride = increasing_stride ? idx : (log_n - 1 - idx);
+      int64_t stride = 1 << log_stride;
+      for (int64_t s = 0; s < nstack; ++s) {
+        for (int64_t i = 0; i < n / 2; ++i) {
+          // same twiddle used across many batches -- load into four 256b registers
+          __m256 mmtwid_00 = _mm256_set1_ps(twiddle_a[s][log_stride][i][0][0]);
+          __m256 mmtwid_01 = _mm256_set1_ps(twiddle_a[s][log_stride][i][0][1]);
+          __m256 mmtwid_10 = _mm256_set1_ps(twiddle_a[s][log_stride][i][1][0]);
+          __m256 mmtwid_11 = _mm256_set1_ps(twiddle_a[s][log_stride][i][1][1]);
+          int64_t low_order_bit = i % stride;
+          int64_t pos = 2 * (i - low_order_bit) + low_order_bit;
+          // TODO: try blocking if batch_sizes are large to not mess up cache
+          for (int64_t b = 0; b < batch_size; b += 8) {
+            // load 8 values in 256b register -- we assume batches are contiguous at this point
+            int wide_idx_0 = (s) * (batch_size * n) + ((pos) * batch_size + b);
+            int wide_idx_1 = (s) * (batch_size * n) + ((pos + stride) * batch_size + b);
+            __m256 mminput_0 = _mm256_loadu_ps(&output_data[wide_idx_0]);
+            __m256 mminput_1 = _mm256_loadu_ps(&output_data[wide_idx_1]);
+            // 4 vector multiples and 2 vector adds
+            __m256 sum1 = _mm256_fmadd_ps(mminput_0, mmtwid_00, _mm256_mul_ps(mminput_1, mmtwid_01));
+            __m256 sum2 = _mm256_fmadd_ps(mminput_0, mmtwid_10, _mm256_mul_ps(mminput_1, mmtwid_11));
+            // store 256b register values in place
+            _mm256_storeu_ps(&output_data[wide_idx_0], sum1);
+            _mm256_storeu_ps(&output_data[wide_idx_1], sum2);
+          }
+        }
+      }
+    }
+  });
+  return output.permute({2,0,1}); // change back to batch_size, nstack, n (currently non-contiguous)
+}
+
 std::vector<at::Tensor> butterfly_multiply_untied_backward(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& output, bool increasing_stride) {
   /* Parameters:
          grad: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
@@ -1685,6 +1747,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_multiply_intermediate", &butterfly_multiply_intermediate, "Butterfly factor multiply intermediate forward");
   m.def("butterfly_multiply_intermediate_backward", &butterfly_multiply_intermediate_backward, "Butterfly factor multiply intermediate backward");
   m.def("butterfly_multiply_untied", &butterfly_multiply_untied, "Butterfly factor multiply untied forward");
+  m.def("butterfly_multiply_untied_batch", &butterfly_multiply_untied_batch, "Butterfly factor multiply untied batch forward");
   m.def("butterfly_multiply_untied_backward", &butterfly_multiply_untied_backward, "Butterfly factor multiply untied backward");
   m.def("butterfly_multiply_untied_forward_backward", &butterfly_multiply_untied_forward_backward, "Butterfly factor multiply untied forward+backward");
   m.def("butterfly_conv2d", &butterfly_conv2d, "Butterfly conv2d forward");

@@ -15,7 +15,7 @@ from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_
 from butterfly.butterfly_multiply import butterfly_mult_conv2d_torch, butterfly_mult_conv2d
 from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
 from butterfly.butterfly_multiply import butterfly_mult_conv2d_svd_torch, butterfly_mult_conv2d_svd
-
+from factor_multiply import butterfly_multiply_untied_batch
 
 class ButterflyMultTest(unittest.TestCase):
 
@@ -79,6 +79,28 @@ class ButterflyMultTest(unittest.TestCase):
                                                        atol=self.atol * (10 if batch_size > 1024 else 1)),
                                         (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(),
                                          (batch_size, n), device, complex, increasing_stride))
+
+    def test_butterfly_untied_batch(self):
+        for batch_size, n in [(8, 256), (10, 512)]:
+            m = int(math.log2(n))
+            nstack = 2
+            for device in ['cpu']:
+                for complex in [ True]:
+                    for increasing_stride in [True, False]:
+                        scaling = 1 / math.sqrt(2)
+                        twiddle = torch.randn((nstack, m, n // 2, 2, 2), requires_grad=True, device=device) * scaling
+                        input = torch.randn((batch_size, nstack, n), requires_grad=True, device=twiddle.device)
+                        output = butterfly_mult_untied(twiddle, input, increasing_stride, False) # is_training = False
+                        output_torch = butterfly_mult_untied_torch(twiddle, input, increasing_stride)
+                        self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
+                                        ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
+
+                        # also call directly in case butterfly_mult_untied gets changed
+                        if batch_size % 8 != 0:
+                            continue
+                        output = butterfly_multiply_untied_batch(twiddle, input, increasing_stride)
+                        self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
+                                        ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
 
     def test_butterfly_untied_svd(self):
         for batch_size, n in [(10, 4096), (99, 128)]:  # Test size smaller than 1024
