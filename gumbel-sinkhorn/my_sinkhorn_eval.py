@@ -31,45 +31,23 @@ def test_model(
     model = my_sorting_model.Sinkhorn_Net(latent_dim= n_units, output_dim= n_numbers, dropout_prob = 1. - keep_prob)
     model.load_state_dict(torch.load(os.path.join(dir_path, 'trained_model')))
     model.to(device)
+    model.eval()
+
 
     # generate test set
     # validation variables
     test_ordered, test_random, test_hard_perms, test_ordered_tiled, test_random_tiled = make_random_batch(batch_size, n_numbers, prob_inc, samples_per_num)
-    test_ordered = test_ordered.to(device) * scale + shift
-    test_random = test_random.to(device) * scale + shift
-    # test_ordered, test_random, test_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers,
-    #                                                                                          prob_inc)
-    # # scale to out-of-domain interval
-    # test_ordered = test_ordered * scale + shift
-    # test_random = test_random * scale + shift
-    # # tiled variables, to compare to many permutations
-    # test_ordered_tiled = test_ordered.repeat(samples_per_num, 1)
-    # test_random_tiled = test_random.repeat(samples_per_num, 1)
 
-    # test_ordered_tiled = test_ordered_tiled.view(-1, n_numbers, 1)
-    # test_random_tiled = test_random_tiled.view(-1, n_numbers, 1)
-
-    # test_ordered_tiled = test_ordered_tiled.to(device)
-    # test_random_tiled = test_random_tiled.to(device)
-
-
-    # Testing phase
-    model.eval()
-
-    x_in, perms = test_random, test_hard_perms
-    y_in = test_ordered
-
-    x_in, y_in = x_in.to(device), y_in.to(device)
-    # test_ordered_tiled = test_ordered_tiled.to(device)
-    perms = perms.to(device)
+    # transform to different out-of-domain interval
+    test_ordered = test_ordered * scale + shift
+    test_random = test_random * scale + shift
 
     #obtain log alpha
-    log_alpha = model(x_in)
+    log_alpha = model(test_random)
     #apply the gumbel sinkhorn on log alpha
     soft_perms_inf, log_alpha_w_noise = my_sinkhorn_ops.my_gumbel_sinkhorn(log_alpha, temperature, samples_per_num, noise_factor, n_iter_sinkhorn, squeeze=False)
 
-    #n_correct_pred += compute_acc(vecmat2perm2x2(outputs), perms, False).data[0]
-    l1_loss, l2_loss, prop_wrong, prop_any_wrong, kendall_tau = build_hard_losses(log_alpha_w_noise, test_random_tiled, test_ordered_tiled, perms, n_numbers, samples_per_num)
+    l1_loss, l2_loss, prop_wrong, prop_any_wrong, kendall_tau = build_hard_losses(log_alpha_w_noise, test_random_tiled, test_ordered_tiled, test_hard_perms, n_numbers, samples_per_num)
     print("samples_per_num", samples_per_num)
     print("l1 loss", l1_loss)
     print("l2 loss",l2_loss)

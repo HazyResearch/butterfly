@@ -1,4 +1,3 @@
-
 import torch
 import numpy
 import torch.nn as nn
@@ -18,15 +17,13 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def make_random_batch(batch_size, n_numbers, prob_inc, samples_per_num):
     train_ordered, train_random, train_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers, prob_inc)
+    train_ordered = train_ordered.to(device)
+    train_random = train_random.to(device)
+    train_hard_perms = train_hard_perms.to(device)
+
     # tiled variables, to compare to many permutations
-    train_ordered_tiled = train_ordered.repeat(samples_per_num, 1)
-    train_random_tiled = train_random.repeat(samples_per_num, 1)
-
-    train_ordered_tiled = train_ordered_tiled.view(-1, n_numbers, 1)
-    train_random_tiled = train_random_tiled.view(-1, n_numbers, 1)
-
-    train_ordered_tiled = train_ordered_tiled.to(device)
-    train_random_tiled = train_random_tiled.to(device)
+    train_ordered_tiled = train_ordered.repeat(samples_per_num, 1).unsqueeze(-1)
+    train_random_tiled = train_random.repeat(samples_per_num, 1).unsqueeze(-1)
 
     return train_ordered, train_random, train_hard_perms, train_ordered_tiled, train_random_tiled
 
@@ -76,19 +73,12 @@ def train_model(n_numbers       = 50,
                 n_epochs        = 500,
                 fixed_data      = True):
 
-    # ordered, random, hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers, prob_inc)
-    # # tiled variables, to compare to many permutations
-    # ordered_tiled = ordered.repeat(samples_per_num, 1)
-    # random_tiled = random.repeat(samples_per_num, 1)
-
     # Create the neural network
-    dropout_prob = 1. - keep_prob
-    model = my_sorting_model.Sinkhorn_Net(latent_dim= n_units, output_dim= n_numbers, dropout_prob = dropout_prob)
-    # is_cuda_available = torch.cuda.is_available();
-    # if is_cuda_available:
-    #     model.cuda()
+    model = my_sorting_model.Sinkhorn_Net(latent_dim= n_units, output_dim= n_numbers, dropout_prob = 1. - keep_prob)
     model.to(device)
+    model.train()
 
+    # count number of parameters
     n_params = 0
     for p in model.parameters():
         n_params += numpy.prod(p.size())
@@ -99,39 +89,19 @@ def train_model(n_numbers       = 50,
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, eps=1e-8)
 
     # Start training (old train_model function)
-    # loss_history, epoch_history = train_model(model, criterion, optimizer, batch_size, n_numbers, 1-prob_inc, n_epochs, samples_per_num, temperature)
     train_ordered, train_random, train_hard_perms, train_ordered_tiled, train_random_tiled = make_random_batch(batch_size, n_numbers, prob_inc, samples_per_num)
 
     loss_history = []
     epoch_history = []
 
-    model.train()
     for epoch in range(n_epochs):
         if not fixed_data:
             train_ordered, train_random, train_hard_perms, train_ordered_tiled, train_random_tiled = make_random_batch(batch_size, n_numbers, prob_inc)
 
 
-        epoch_history.append(epoch)
-        # Training phase
-
-        x_in, perms = train_random, train_hard_perms
-        y_in = train_ordered
-
-        # if is_cuda_available:
-        #     x_in, y_in = Variable(x_in.cuda()).detach(), Variable(y_in.cuda()).detach()
-        #     train_ordered_tiled = Variable(train_ordered_tiled.cuda()).detach()
-        #     perms = Variable(perms.cuda()).detach()
-        # else:
-        #     x_in, y_in = Variable(x_in).detach(), Variable(y_in).detach()
-        #     train_ordered_tiled = Variable(train_ordered_tiled).detach()
-        #     perms = Variable(perms).detach()
-        x_in, y_in = x_in.to(device), y_in.to(device)
-        # train_ordered_tiled = train_ordered_tiled.to(device)
-        perms = perms.to(device)
-
         optimizer.zero_grad()
         #obtain log alpha
-        log_alpha = model(x_in)
+        log_alpha = model(train_random)
         #apply the gumbel sinkhorn on log alpha
         soft_perms_inf, log_alpha_w_noise = my_sinkhorn_ops.my_gumbel_sinkhorn(log_alpha, temperature, samples_per_num, noise_factor,  n_iter_sinkhorn, squeeze=False)
 
@@ -142,6 +112,7 @@ def train_model(n_numbers       = 50,
         loss.backward()
         optimizer.step()
 
+        epoch_history.append(epoch)
         loss_history.append(loss.item())
 
         # Update the progress bar.
@@ -166,7 +137,5 @@ def train_model(n_numbers       = 50,
 
 if __name__ == '__main__':
     _parser = argh.ArghParser()
-    # _parser.add_commands([run])
-    # _parser.dispatch()
     _parser.set_default_command(train_model)
     _parser.dispatch()
