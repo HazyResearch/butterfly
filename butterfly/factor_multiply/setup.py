@@ -10,7 +10,7 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'factor_multiply.cpp',
             'factor_multiply_cuda.cu'
         ],
-        extra_compile_args={'cxx': ['-g', '-march=native'],
+        extra_compile_args={'cxx': ['-g', '-march=native', '-funroll-loops'],
                             # 'nvcc': ['-arch=sm_60', '-O2', '-lineinfo']})
                             'nvcc': ['-O2', '-lineinfo']})
     ext_modules.append(extension)
