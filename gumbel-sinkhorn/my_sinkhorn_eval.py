@@ -1,10 +1,12 @@
 import torch
-import my_sorting_model
 import numpy
 import torch.nn as nn
-import my_sinkhorn_ops
 import os
 import argh
+
+import my_sorting_model
+import my_sinkhorn_ops
+from my_sorting_train import make_random_batch
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -22,6 +24,8 @@ def test_model(
         n_units         = 32,
         noise_factor    = 0.0,
         keep_prob       = 1.,
+        scale           = 1.0,
+        shift           = 0.0
 ):
     #load the trained model
     model = my_sorting_model.Sinkhorn_Net(latent_dim= n_units, output_dim= n_numbers, dropout_prob = 1. - keep_prob)
@@ -30,21 +34,23 @@ def test_model(
 
     # generate test set
     # validation variables
-    test_ordered, test_random, test_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers,
-                                                                                             prob_inc)
-    # scale to out-of-domain interval
-    scale, shift = 1.0, 0.0
-    test_ordered = test_ordered * scale + shift
-    test_random = test_random * scale + shift
-    # tiled variables, to compare to many permutations
-    test_ordered_tiled = test_ordered.repeat(samples_per_num, 1)
-    test_random_tiled = test_random.repeat(samples_per_num, 1)
+    test_ordered, test_random, test_hard_perms, test_ordered_tiled, test_random_tiled = make_random_batch(batch_size, n_numbers, prob_inc, samples_per_num)
+    test_ordered = test_ordered.to(device) * scale + shift
+    test_random = test_random.to(device) * scale + shift
+    # test_ordered, test_random, test_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers,
+    #                                                                                          prob_inc)
+    # # scale to out-of-domain interval
+    # test_ordered = test_ordered * scale + shift
+    # test_random = test_random * scale + shift
+    # # tiled variables, to compare to many permutations
+    # test_ordered_tiled = test_ordered.repeat(samples_per_num, 1)
+    # test_random_tiled = test_random.repeat(samples_per_num, 1)
 
-    test_ordered_tiled = test_ordered_tiled.view(-1, n_numbers, 1)
-    test_random_tiled = test_random_tiled.view(-1, n_numbers, 1)
+    # test_ordered_tiled = test_ordered_tiled.view(-1, n_numbers, 1)
+    # test_random_tiled = test_random_tiled.view(-1, n_numbers, 1)
 
-    test_ordered_tiled = test_ordered_tiled.to(device)
-    test_random_tiled = test_random_tiled.to(device)
+    # test_ordered_tiled = test_ordered_tiled.to(device)
+    # test_random_tiled = test_random_tiled.to(device)
 
 
     # Testing phase

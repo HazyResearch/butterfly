@@ -1,14 +1,14 @@
 
 import torch
-import my_sorting_model
 import numpy
 import torch.nn as nn
-import my_sinkhorn_ops
 from torch.autograd import Variable
 import matplotlib.pyplot as plt
 import os
 import argh
 
+import my_sorting_model
+import my_sinkhorn_ops
 
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -16,7 +16,7 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def make_train_batch(batch_size, n_numbers, prob_inc, samples_per_num):
+def make_random_batch(batch_size, n_numbers, prob_inc, samples_per_num):
     train_ordered, train_random, train_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers, prob_inc)
     # tiled variables, to compare to many permutations
     train_ordered_tiled = train_ordered.repeat(samples_per_num, 1)
@@ -100,7 +100,7 @@ def train_model(n_numbers       = 50,
 
     # Start training (old train_model function)
     # loss_history, epoch_history = train_model(model, criterion, optimizer, batch_size, n_numbers, 1-prob_inc, n_epochs, samples_per_num, temperature)
-    train_ordered, train_random, train_hard_perms, train_ordered_tiled, train_random_tiled = make_train_batch(batch_size, n_numbers, prob_inc, samples_per_num)
+    train_ordered, train_random, train_hard_perms, train_ordered_tiled, train_random_tiled = make_random_batch(batch_size, n_numbers, prob_inc, samples_per_num)
 
     loss_history = []
     epoch_history = []
@@ -108,7 +108,7 @@ def train_model(n_numbers       = 50,
     model.train()
     for epoch in range(n_epochs):
         if not fixed_data:
-            train_ordered, train_random, train_hard_perms, train_ordered_tiled, train_random_tiled = make_train_batch(batch_size, n_numbers, prob_inc)
+            train_ordered, train_random, train_hard_perms, train_ordered_tiled, train_random_tiled = make_random_batch(batch_size, n_numbers, prob_inc)
 
 
         epoch_history.append(epoch)
