@@ -170,4 +170,3 @@ if __name__ == '__main__':
     # _parser.dispatch()
     _parser.set_default_command(train_model)
     _parser.dispatch()
-
