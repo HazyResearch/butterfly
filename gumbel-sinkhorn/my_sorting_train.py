@@ -10,52 +10,73 @@ import os
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 #parameters
 n_numbers = 50
 lr = 0.1
 temperature = 1.0
-batch_size = 10
+batch_size = 2000
 prob_inc = 1.0
 samples_per_num = 5
-n_iter_sinkhorn = 10
+n_iter_sinkhorn = 20
 n_units =32
 noise_factor= 1.0
 optimizer = 'adam'
 keep_prob = 1.
 num_iters = 500
 
-n_epochs = 300
+n_epochs = 500
 
 # Training process
 def train_model(model, criterion, optimizer, batch_size, n_numbers, prob_inc, n_epochs=500):
     #train variables
-    train_ordered, train_random, train_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers, prob_inc)
-    # tiled variables, to compare to many permutations
-    train_ordered_tiled = train_ordered.repeat(samples_per_num, 1)
-    train_random_tiled = train_random.repeat(samples_per_num, 1)
+    # train_ordered, train_random, train_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers, prob_inc)
+    # # tiled variables, to compare to many permutations
+    # train_ordered_tiled = train_ordered.repeat(samples_per_num, 1)
+    # train_random_tiled = train_random.repeat(samples_per_num, 1)
 
-    train_ordered_tiled = train_ordered_tiled.view(-1, n_numbers, 1)
-    train_random_tiled = train_random_tiled.view(-1, n_numbers, 1)
+    # train_ordered_tiled = train_ordered_tiled.view(-1, n_numbers, 1)
+    # train_random_tiled = train_random_tiled.view(-1, n_numbers, 1)
+
+    # train_ordered_tiled = train_ordered_tiled.to(device)
+    # train_random_tiled = train_random_tiled.to(device)
 
     loss_history = []
     epoch_history = []
 
+    model.train()
     for epoch in range(n_epochs):
+        train_ordered, train_random, train_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers, prob_inc)
+        # tiled variables, to compare to many permutations
+        train_ordered_tiled = train_ordered.repeat(samples_per_num, 1)
+        train_random_tiled = train_random.repeat(samples_per_num, 1)
+
+        train_ordered_tiled = train_ordered_tiled.view(-1, n_numbers, 1)
+        train_random_tiled = train_random_tiled.view(-1, n_numbers, 1)
+
+        train_ordered_tiled = train_ordered_tiled.to(device)
+        train_random_tiled = train_random_tiled.to(device)
+
+
         epoch_history.append(epoch)
         # Training phase
-        model.train()
 
         x_in, perms = train_random, train_hard_perms
         y_in = train_ordered
 
-        if is_cuda_available:
-            x_in, y_in = Variable(x_in.cuda()).detach(), Variable(y_in.cuda()).detach()
-            train_ordered_tiled = Variable(train_ordered_tiled.cuda()).detach()
-            perms = Variable(perms.cuda()).detach()
-        else:
-            x_in, y_in = Variable(x_in).detach(), Variable(y_in).detach()
-            train_ordered_tiled = Variable(train_ordered_tiled).detach()
-            perms = Variable(perms).detach()
+        # if is_cuda_available:
+        #     x_in, y_in = Variable(x_in.cuda()).detach(), Variable(y_in.cuda()).detach()
+        #     train_ordered_tiled = Variable(train_ordered_tiled.cuda()).detach()
+        #     perms = Variable(perms.cuda()).detach()
+        # else:
+        #     x_in, y_in = Variable(x_in).detach(), Variable(y_in).detach()
+        #     train_ordered_tiled = Variable(train_ordered_tiled).detach()
+        #     perms = Variable(perms).detach()
+        x_in, y_in = x_in.to(device), y_in.to(device)
+        # train_ordered_tiled = train_ordered_tiled.to(device)
+        perms = perms.to(device)
+
         optimizer.zero_grad()
         #obtain log alpha
         log_alpha = model(x_in)
@@ -114,9 +135,10 @@ random_tiled = random.repeat(samples_per_num, 1)
 # Create the neural network
 dropout_prob = 1. - keep_prob
 model = my_sorting_model.Sinkhorn_Net(latent_dim= n_units, output_dim= n_numbers, dropout_prob = dropout_prob)
-is_cuda_available = torch.cuda.is_available();
-if is_cuda_available:
-    model.cuda()
+# is_cuda_available = torch.cuda.is_available();
+# if is_cuda_available:
+#     model.cuda()
+model.to(device)
 
 n_params = 0
 for p in model.parameters():

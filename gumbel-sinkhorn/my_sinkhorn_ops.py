@@ -11,7 +11,10 @@ from scipy.stats import kendalltau
 import torch
 #from torch.distributions import Bernoulli
 
-def my_sample_gumbel(shape, eps=1e-20):
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+def my_sample_gumbel(shape, eps=1e-10):
     """Samples arbitrary-shaped standard gumbel variables.
     Args:
     shape: list of integers
@@ -21,7 +24,7 @@ def my_sample_gumbel(shape, eps=1e-20):
     A sample of standard Gumbel random variables
     """
     #Sample from Gumbel(0, 1)
-    U = torch.rand(shape).float()
+    U = torch.rand(shape, dtype=torch.float, device=device)
     return -torch.log(eps - torch.log(U + eps))
 
 def simple_sinkhorn(MatrixA, n_iter = 20):
@@ -257,8 +260,8 @@ def my_listperm2matperm(listperm):
       permutation of the identity matrix, with matperm[n, i, listperm[n,i]] = 1
     """
     n_objects = listperm.size()[1]
-    eye = np.eye(n_objects)[listperm]
-    eye= torch.tensor(eye, dtype=torch.int32)
+    eye = torch.eye(n_objects, dtype=torch.int, device=listperm.device)[listperm]
+    # eye= torch.tensor(eye, dtype=torch.int32)
     return eye
 
 def my_matperm2listperm(matperm):
@@ -324,8 +327,9 @@ def my_matching(matrix_batch):
       sol[i, :] = linear_sum_assignment(-x[i, :])[1].astype(np.int32)
     return sol
 
-  listperms = hungarian(matrix_batch.detach().numpy())
-  listperms = torch.from_numpy(listperms)
+  listperms = hungarian(matrix_batch.cpu().detach().numpy())
+  # listperms = torch.from_numpy(listperms)
+  listperms = torch.tensor(listperms, dtype=torch.long)
   return listperms
 
 def my_kendall_tau(batch_perm1, batch_perm2):
@@ -351,7 +355,7 @@ def my_kendall_tau(batch_perm1, batch_perm2):
       kendall[i, :] = kendalltau(x[i, :], y[i, :])[0]
     return kendall
 
-  listkendall = kendalltau_batch(batch_perm1.numpy(), batch_perm2.numpy())
+  listkendall = kendalltau_batch(batch_perm1.cpu().numpy(), batch_perm2.cpu().numpy())
   listkendall = torch.from_numpy(listkendall)
   return listkendall
 
