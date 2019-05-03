@@ -16,6 +16,20 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
+def make_train_batch(batch_size, n_numbers, prob_inc, samples_per_num):
+    train_ordered, train_random, train_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers, prob_inc)
+    # tiled variables, to compare to many permutations
+    train_ordered_tiled = train_ordered.repeat(samples_per_num, 1)
+    train_random_tiled = train_random.repeat(samples_per_num, 1)
+
+    train_ordered_tiled = train_ordered_tiled.view(-1, n_numbers, 1)
+    train_random_tiled = train_random_tiled.view(-1, n_numbers, 1)
+
+    train_ordered_tiled = train_ordered_tiled.to(device)
+    train_random_tiled = train_random_tiled.to(device)
+
+    return train_ordered, train_random, train_hard_perms, train_ordered_tiled, train_random_tiled
+
 
 
 def inv_soft_pers_flattened(soft_perms_inf):
@@ -47,19 +61,20 @@ def build_l2s_loss(ordered_tiled, random_tiled, soft_perms_inf, n_numbers):
 
     print("l2s_diff", l2s_diff)
 
-def train(n_numbers = 50,
-         lr = 0.1,
-         temperature = 1.0,
-         batch_size = 2000,
-         prob_inc = 1.0,
-         samples_per_num = 5,
-         n_iter_sinkhorn = 20,
-         n_units =32,
-         noise_factor= 1.0,
-         optimizer = 'adam',
-         keep_prob = 1.,
-         num_iters = 500,
-         n_epochs = 500):
+def train_model(n_numbers       = 50,
+                lr              = 0.1,
+                temperature     = 1.0,
+                batch_size      = 500,
+                prob_inc        = 1.0,
+                samples_per_num = 5,
+                n_iter_sinkhorn = 20,
+                n_units         = 32,
+                noise_factor    = 1.0,
+                optimizer       = 'adam',
+                keep_prob       = 1.,
+                num_iters       = 500,
+                n_epochs        = 500,
+                fixed_data      = True):
 
     # ordered, random, hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers, prob_inc)
     # # tiled variables, to compare to many permutations
@@ -85,22 +100,15 @@ def train(n_numbers = 50,
 
     # Start training (old train_model function)
     # loss_history, epoch_history = train_model(model, criterion, optimizer, batch_size, n_numbers, 1-prob_inc, n_epochs, samples_per_num, temperature)
+    train_ordered, train_random, train_hard_perms, train_ordered_tiled, train_random_tiled = make_train_batch(batch_size, n_numbers, prob_inc, samples_per_num)
 
     loss_history = []
     epoch_history = []
 
     model.train()
     for epoch in range(n_epochs):
-        train_ordered, train_random, train_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers, prob_inc)
-        # tiled variables, to compare to many permutations
-        train_ordered_tiled = train_ordered.repeat(samples_per_num, 1)
-        train_random_tiled = train_random.repeat(samples_per_num, 1)
-
-        train_ordered_tiled = train_ordered_tiled.view(-1, n_numbers, 1)
-        train_random_tiled = train_random_tiled.view(-1, n_numbers, 1)
-
-        train_ordered_tiled = train_ordered_tiled.to(device)
-        train_random_tiled = train_random_tiled.to(device)
+        if not fixed_data:
+            train_ordered, train_random, train_hard_perms, train_ordered_tiled, train_random_tiled = make_train_batch(batch_size, n_numbers, prob_inc)
 
 
         epoch_history.append(epoch)
@@ -160,6 +168,6 @@ if __name__ == '__main__':
     _parser = argh.ArghParser()
     # _parser.add_commands([run])
     # _parser.dispatch()
-    _parser.set_default_command(main)
+    _parser.set_default_command(train_model)
     _parser.dispatch()
 
