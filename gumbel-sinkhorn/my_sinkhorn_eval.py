@@ -28,7 +28,7 @@ def test_model(model, batch_size, n_numbers, prob_inc):
     test_ordered, test_random, test_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers,
                                                                                              prob_inc)
     # scale to out-of-domain interval
-    scale, shift = 0.0, 2.0
+    scale, shift = 1.0, 0.0
     test_ordered = test_ordered * scale + shift
     test_random = test_random * scale + shift
     # tiled variables, to compare to many permutations
