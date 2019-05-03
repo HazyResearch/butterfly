@@ -29,7 +29,7 @@ def make_random_batch(batch_size, n_numbers, prob_inc, samples_per_num):
 
 
 
-def inv_soft_pers_flattened(soft_perms_inf):
+def inv_soft_perms_flattened(soft_perms_inf):
     n_numbers = soft_perms_inf.size(-1)
     inv_soft_perms = torch.transpose(soft_perms_inf, 2, 3)
     inv_soft_perms = torch.transpose(inv_soft_perms, 0, 1)
@@ -105,7 +105,7 @@ def train_model(n_numbers       = 50,
         #apply the gumbel sinkhorn on log alpha
         soft_perms_inf, log_alpha_w_noise = my_sinkhorn_ops.my_gumbel_sinkhorn(log_alpha, temperature, samples_per_num, noise_factor,  n_iter_sinkhorn, squeeze=False)
 
-        inv_soft_perms_flat = inv_soft_pers_flattened(soft_perms_inf)
+        inv_soft_perms_flat = inv_soft_perms_flattened(soft_perms_inf)
 
         loss= criterion(train_ordered_tiled, torch.matmul(inv_soft_perms_flat, train_random_tiled))
 
