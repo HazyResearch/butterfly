@@ -4,25 +4,30 @@ import numpy
 import torch.nn as nn
 import my_sinkhorn_ops
 import os
+import argh
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-n_numbers = 50
-temperature = 1.0
-batch_size = 50
-prob_inc = 1.0
-samples_per_num = 5
-n_iter_sinkhorn = 10
-n_units = 32
-noise_factor = 0.0
-keep_prob = 1.
-dropout_prob = 1. - keep_prob
-
 # Test process
-def test_model(model, batch_size, n_numbers, prob_inc):
+def test_model(
+        n_numbers       = 50,
+        temperature     = 1.0,
+        batch_size      = 50,
+        prob_inc        = 1.0,
+        samples_per_num = 5,
+        n_iter_sinkhorn = 10,
+        n_units         = 32,
+        noise_factor    = 0.0,
+        keep_prob       = 1.,
+):
+    #load the trained model
+    model = my_sorting_model.Sinkhorn_Net(latent_dim= n_units, output_dim= n_numbers, dropout_prob = 1. - keep_prob)
+    model.load_state_dict(torch.load(os.path.join(dir_path, 'trained_model')))
+    model.to(device)
+
     # generate test set
     # validation variables
     test_ordered, test_random, test_hard_perms = my_sinkhorn_ops.my_sample_uniform_and_order(batch_size, n_numbers,
@@ -58,7 +63,7 @@ def test_model(model, batch_size, n_numbers, prob_inc):
     soft_perms_inf, log_alpha_w_noise = my_sinkhorn_ops.my_gumbel_sinkhorn(log_alpha, temperature, samples_per_num, noise_factor, n_iter_sinkhorn, squeeze=False)
 
     #n_correct_pred += compute_acc(vecmat2perm2x2(outputs), perms, False).data[0]
-    l1_loss, l2_loss, prop_wrong, prop_any_wrong, kendall_tau = build_hard_losses(log_alpha_w_noise, test_random_tiled, test_ordered_tiled, perms, n_numbers)
+    l1_loss, l2_loss, prop_wrong, prop_any_wrong, kendall_tau = build_hard_losses(log_alpha_w_noise, test_random_tiled, test_ordered_tiled, perms, n_numbers, samples_per_num)
     print("samples_per_num", samples_per_num)
     print("l1 loss", l1_loss)
     print("l2 loss",l2_loss)
@@ -68,7 +73,7 @@ def test_model(model, batch_size, n_numbers, prob_inc):
     print('Test completed')
 
 
-def build_hard_losses(log_alpha_w_noise, random_tiled, ordered_tiled, hard_perms, n_numbers):
+def build_hard_losses(log_alpha_w_noise, random_tiled, ordered_tiled, hard_perms, n_numbers, samples_per_num):
     """Losses based on hard reconstruction. Only for evaluation.
     Doubly stochastic matrices are rounded with
     the matching function.
@@ -106,10 +111,9 @@ def build_hard_losses(log_alpha_w_noise, random_tiled, ordered_tiled, hard_perms
     return l1_diff, l2_diff, prop_wrong, prop_any_wrong, kendall_tau
 
 
-#load the trained model
-model = my_sorting_model.Sinkhorn_Net(latent_dim= n_units, output_dim= n_numbers, dropout_prob = dropout_prob)
-model.load_state_dict(torch.load(os.path.join(dir_path, 'trained_model')))
-model.to(device)
-
-#test the model
-test_model(model, batch_size, n_numbers, prob_inc)
+if __name__ == '__main__':
+    _parser = argh.ArghParser()
+    # _parser.add_commands([run])
+    # _parser.dispatch()
+    _parser.set_default_command(test_model)
+    _parser.dispatch()
