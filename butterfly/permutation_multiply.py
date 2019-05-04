@@ -11,7 +11,7 @@ try:
 except:
     use_extension = False
     import warnings
-    warnings.warn("C++/CUDA extension isn't installed. Will use butterfly multiply implemented in Pytorch, which is much slower.")
+    # warnings.warn("C++/CUDA extension isn't installed. Will use butterfly multiply implemented in Pytorch, which is much slower.")
 
 
 def permutation_mult_torch(prob, input, increasing_stride=False, return_intermediates=False):
