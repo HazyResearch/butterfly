@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, subprocess
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 # Add to $PYTHONPATH in addition to sys.path so that ray workers can see
@@ -193,14 +193,16 @@ def transform_experiment(model, target, size, complex, param, ntrials, nsteps, n
         # 'share_logit': sample_from(lambda spec: np.random.choice((True, False), size=2)),
         'share_logit': True,
         'param': param,
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-2), math.log(5e-1)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_steps_per_epoch': nsteps,
         'n_epochs_per_validation': nepochsvalid,
         'device': 'cuda' if cuda else 'cpu',
      }
+    commit_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip().decode('utf-8')
     experiment = RayExperiment(
-        name=f'{target}_factorization_{model}_{complex}_{size}_{param}',
+        name=f'{commit_id}_{target}_factorization_{model}_{complex}_{size}_{param}',
         run=TrainableBP,
         local_dir=result_dir,
         num_samples=ntrials,
