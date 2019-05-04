@@ -44,8 +44,9 @@ class TrainableModel(Trainable):
         torch.manual_seed(config['seed'])
         if self.device == 'cuda':
             torch.cuda.manual_seed(config['seed'])
+        model = config['model']
         train_args = [project_root + '/fairseq/data-bin/iwslt14.tokenized.de-en']
-        train_args += ['--clip-norm', '0']
+        train_args += ['--clip-norm', '0'] if model['name'] == 'DynamicConv' else []
         train_args += ['--optimizer', 'adam']
         train_args += ['--lr', str(config['lr'])]
         train_args += ['--source-lang', 'de']
@@ -64,12 +65,12 @@ class TrainableModel(Trainable):
         train_args += ['--warmup-init-lr', "1e-07"]
         train_args += ['--adam-betas=(0.9, 0.98)']
         train_args += ['--keep-last-epochs', '10']
-        train_args += ['-a', 'lightconv_butterfly_iwslt_de_en']
+        train_args += ['-a', 'lightconv_butterfly_iwslt_de_en'] if model['name'] == 'DynamicConv' else ['-a', 'transformer_iwslt_de_en']
         train_args += ['--dropout', str(config['dropout'])]
-        train_args += ['--attention-dropout', '0.1']
-        train_args += ['--weight-dropout', '0.1']
-        train_args += ['--encoder-glu', '0']
-        train_args += ['--decoder-glu', '0 ']
+        train_args += ['--attention-dropout', '0.1'] if model['name'] == 'DynamicConv' else []
+        train_args += ['--weight-dropout', '0.1'] if model['name'] == 'DynamicConv' else []
+        train_args += ['--encoder-glu', '0'] if model['name'] == 'DynamicConv' else []
+        train_args += ['--decoder-glu', '0 '] if model['name'] == 'DynamicConv' else []
         train_args += ['--seed', str(config['seed'])]
         self._save_dir = config['result_dir'] + f"/seed={config['seed']}"
         train_args += ['--save-dir', self._save_dir]
@@ -78,8 +79,11 @@ class TrainableModel(Trainable):
         encoder_structure_type = ['Linear'] * (7 - n_encoder_structure_layer) + [structure_type] * n_encoder_structure_layer
         n_decoder_structure_layer = config['n_decoder_structure_layer']
         decoder_structure_type = ['Linear'] * (6 - n_decoder_structure_layer) + [structure_type] * n_decoder_structure_layer
-        train_args += ['--encoder-structure-type-list', str(encoder_structure_type)]
-        train_args += ['--decoder-structure-type-list', str(decoder_structure_type)]
+        train_args += ['--encoder-structure-type-list', str(encoder_structure_type)] if model['name'] == 'DynamicConv' else []
+        train_args += ['--decoder-structure-type-list', str(decoder_structure_type)] if model['name'] == 'DynamicConv' else []
+        if config['structured_attention']:
+            decoder_structured_attention = [False] * (6 - n_decoder_structure_layer) + [True] * n_decoder_structure_layer
+            train_args += ['--structured-attention-list', str(decoder_structured_attention)] if model['name'] == 'DynamicConv' else []
 
         avg_args = [
             '--inputs=' + self._save_dir, '--num-epoch-checkpoints=10',
@@ -131,7 +135,7 @@ class TrainableModel(Trainable):
         pass
 
 
-ex = Experiment('Dynamic_conv_experiment')
+ex = Experiment('Transformer_experiment')
 ex.observers.append(FileStorageObserver.create('logs'))
 slack_config_path = Path('../config/slack.json')  # Add webhook_url there for Slack notification
 if slack_config_path.exists():
@@ -140,12 +144,12 @@ if slack_config_path.exists():
 
 @ex.config
 def default_config():
-    model = 'DynamicConv'  # Name of model, see model_utils.py
+    model = 'DynamicConv'  # Name of model, either 'DynamicConv' or 'Transformer'
     model_args = {}  # Arguments to be passed to the model, as a dictionary
     n_encoder_structure_layer = 0  # Number of structured layer in the encoder
     n_decoder_structure_layer = 0  # Number of structured layer in the decoder
     structure_type = 'B'  # 'B' for butterfly or BBT for product of 2 butterflies
-    optimizer = 'Adam'  # Which optimizer to use, either Adam or SGD
+    structured_attention = False  # Whether attention layers are structured
     ntrials = 20  # Number of trials for hyperparameter tuning
     nmaxupdates = 50000  # Maximum number of updates
     result_dir = project_root + '/transformer/results'  # Directory to store results
@@ -154,17 +158,18 @@ def default_config():
 
 
 @ex.capture
-def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_decoder_structure_layer, structure_type,
-                            nmaxupdates, optimizer, ntrials, result_dir, cuda, smoke_test):
-    name=f'dynamic_conv_{model}_{model_args}_type_{structure_type}_encstruct_{n_encoder_structure_layer}_decstruct_{n_decoder_structure_layer}'
+def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_decoder_structure_layer, structure_type, structured_attention,
+                            nmaxupdates, ntrials, result_dir, cuda, smoke_test):
+    name=f'{model}_{model_args}_type_{structure_type}_encstruct_{n_encoder_structure_layer}_decstruct_{n_decoder_structure_layer}_attstruct_{structured_attention}'
     config={
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(2e-3)))),
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
         'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))),
         'dropout': sample_from(lambda spec: random.uniform(0.0, 0.3)),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_encoder_structure_layer': n_encoder_structure_layer,
         'n_decoder_structure_layer': n_decoder_structure_layer,
         'structure_type': structure_type,
+        'structured_attention': structured_attention,
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
         'nmaxupdates': nmaxupdates,
