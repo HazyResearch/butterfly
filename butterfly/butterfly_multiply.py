@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from .complex_utils import complex_mul
 
-use_extension = False
+use_extension = True
 try:
     from factor_multiply import butterfly_multiply_intermediate, butterfly_multiply_intermediate_backward
     from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_backward
@@ -19,7 +19,7 @@ try:
 except:
     use_extension = False
     import warnings
-    warnings.warn("C++/CUDA extension isn't installed. Will use butterfly multiply implemented in Pytorch, which is much slower.")
+    # warnings.warn("C++/CUDA extension isn't installed. Will use butterfly multiply implemented in Pytorch, which is much slower.")
 
 
 def butterfly_mult_torch(twiddle, input, increasing_stride=True, return_intermediates=False):
