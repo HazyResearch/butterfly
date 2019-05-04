@@ -17,6 +17,7 @@ try:
     from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
     from factor_multiply import butterfly_conv2d, butterfly_conv2d_backward, butterfly_conv2d_forward_backward
     from factor_multiply import butterfly_conv2d_svd, butterfly_conv2d_svd_forward_backward
+    from factor_multiply import butterfly_multiply_untied_eval
 except:
     use_extension = False
     import warnings
@@ -148,7 +149,7 @@ def butterfly_mult_untied_torch(twiddle, input, increasing_stride=True, return_i
 class ButterflyMultUntied(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, twiddle, input, increasing_stride=True):
+    def forward(ctx, twiddle, input, increasing_stride=True, is_training=True):
         """
         Parameters:
             twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
@@ -160,12 +161,13 @@ class ButterflyMultUntied(torch.autograd.Function):
         Returns:
             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
-        # output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride)
-        # ctx.save_for_backward(twiddle, output_and_intermediate)
-        output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
+        # use optimized code for inference
+        if not is_training:
+            output = butterfly_multiply_untied_eval(twiddle, input, increasing_stride)
+        else:
+            output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
         ctx.save_for_backward(twiddle, input)
         ctx._increasing_stride = increasing_stride
-        # return output_and_intermediate[-1]
         return output
 
     @staticmethod

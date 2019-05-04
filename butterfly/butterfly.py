@@ -107,12 +107,14 @@ class Butterfly(nn.Module):
                                dim=-1 if not self.complex else -2)
         output = output.unsqueeze(1).expand((batch, self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         if self.param == 'regular':
-            output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(self.twiddle, output, self.increasing_stride)
+            output = butterfly_mult(self.twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(
+                    self.twiddle, output, self.increasing_stride, self.training)
         elif self.param == 'ortho':
             c, s = torch.cos(self.twiddle), torch.sin(self.twiddle)
             twiddle = torch.stack((torch.stack((c, -s), dim=-1),
                                    torch.stack((s, c), dim=-1)), dim=-2)
-            output = butterfly_mult(twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(twiddle, output, self.increasing_stride)
+            output = butterfly_mult(twiddle, output, self.increasing_stride) if self.tied_weight else butterfly_mult_untied(
+                twiddle, output, self.increasing_stride, self.training)
         elif self.param == 'svd':
             with torch.no_grad():  # Projected SGD
                 self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
