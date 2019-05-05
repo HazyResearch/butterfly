@@ -143,18 +143,20 @@ class ButterflyConv2dBBT(nn.Module):
         self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
         self.nblocks = nblocks
         max_gain_per_block = max_gain ** (1 / (2 * nblocks))
-        layers = [ButterflyConv2d(in_channels, out_channels, self.kernel_size,
-                                  self.padding, self.dilation, False,
-                                  tied_weight, increasing_stride=False,
-                                  ortho_init=ortho_init, param=param,
-                                  max_gain=max_gain_per_block),
-                  ButterflyBmm(out_channels, out_channels,
-                               self.kernel_size[0] * self.kernel_size[1],
-                               False, bias if 0 == nblocks - 1 else False,
-                               tied_weight, increasing_stride=True,
-                               ortho_init=ortho_init, param=param,
-                               max_gain=max_gain_per_block)]
-        for i in range(nblocks - 1):
+        # layers = [ButterflyConv2d(in_channels, out_channels, self.kernel_size,
+        #                           self.stride, self.padding, self.dilation, bias=False,
+        #                           tied_weight=tied_weight, increasing_stride=False,
+        #                           ortho_init=ortho_init, param=param,
+        #                           max_gain=max_gain_per_block),
+        #           ButterflyBmm(out_channels, out_channels,
+        #                        self.kernel_size[0] * self.kernel_size[1],
+        #                        False, bias if 0 == nblocks - 1 else False,
+        #                        tied_weight, increasing_stride=True,
+        #                        ortho_init=ortho_init, param=param,
+        #                        max_gain=max_gain_per_block)]
+        # for i in range(nblocks - 1):
+        layers = []
+        for i in range(nblocks):
             layers.append(ButterflyBmm(in_channels if i == 0 else out_channels,
                                        out_channels, self.kernel_size[0] *
                                        self.kernel_size[1], False, False,
@@ -180,10 +182,10 @@ class ButterflyConv2dBBT(nn.Module):
         batch, c, h, w = input.shape
         h_out = (h + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) // self.stride[0] + 1
         w_out = (h + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
-        # input_patches = F.unfold(input, self.kernel_size, self.dilation, self.padding, self.stride).view(batch, c, self.kernel_size[0] * self.kernel_size[1], h_out * w_out)
-        # input_reshape = input_patches.permute(0, 3, 2, 1).reshape(batch * h_out * w_out, self.kernel_size[0] * self.kernel_size[1], c)
-        # output = self.layers(input_reshape).mean(dim=1)
-        output = self.layers(input).mean(dim=1)
+        input_patches = F.unfold(input, self.kernel_size, self.dilation, self.padding, self.stride).view(batch, c, self.kernel_size[0] * self.kernel_size[1], h_out * w_out)
+        input_reshape = input_patches.permute(0, 3, 2, 1).reshape(batch * h_out * w_out, self.kernel_size[0] * self.kernel_size[1], c)
+        output = self.layers(input_reshape).mean(dim=1)
+        # output = self.layers(input).mean(dim=1)
         return output.view(batch, h_out * w_out, self.out_channels).transpose(1, 2).view(batch, self.out_channels, h_out, w_out)
 
 
