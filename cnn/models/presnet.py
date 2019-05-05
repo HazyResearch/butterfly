@@ -257,7 +257,7 @@ class SinkhornPermutation(Permutation):
         # TODO: test effect of random initialization
 
     def mean_perm(self):
-        return self.sinkhorn(self.log_alpha, n_iters=10)
+        return self.sinkhorn(self.log_alpha, n_iters=20)
 
     def sample_soft_perm(self, sample_shape=()):
         log_alpha_noise = self.add_gumbel_noise(self.log_alpha, sample_shape)
@@ -274,21 +274,17 @@ class SinkhornPermutation(Permutation):
         """
         Performs incomplete Sinkhorn normalization
 
-        log_alpha: a 2D tensor of shape [N, N]
+        log_alpha: a tensor with shape ending in (n, n)
         n_iters: number of sinkhorn iterations (in practice, as little as 20
         iterations are needed to achieve decent convergence for N~100)
 
         Returns:
-        A 3D tensor of close-to-doubly-stochastic matrices (2D tensors are
-        converted to 3D tensors with batch_size equals to 1)
+        A 3D tensor of close-to-doubly-stochastic matrices over the last two dimensions
         """
-        n = log_alpha.size()[1]
         log_alpha = log_alpha / temp
-        log_alpha = log_alpha.view(-1, n, n)
-
         for _ in range(n_iters):
-            log_alpha = log_alpha - (torch.logsumexp(log_alpha, dim=2, keepdim=True)).view(-1, n, 1)
-            log_alpha = log_alpha - (torch.logsumexp(log_alpha, dim=1, keepdim=True)).view(-1, 1, n)
+            log_alpha = log_alpha - torch.logsumexp(log_alpha, dim=-2, keepdim=True)
+            log_alpha = log_alpha - torch.logsumexp(log_alpha, dim=-1, keepdim=True)
         return torch.exp(log_alpha)
 
     def sample_gumbel(self, shape, eps=1e-10):
@@ -300,18 +296,15 @@ class SinkhornPermutation(Permutation):
         Args:
         log_alpha: shape (N, N)
         temp: temperature parameter, a float.
-        n_samples: number of samples
+        sample_shape: represents shape of independent draws
 
         Returns:
-        log_alpha_noise: a tensor of (*shape, N, N)
+        log_alpha_noise: a tensor of shape [sample_shape + (N, N)]
         """
         batch = log_alpha.size(0)
         n = log_alpha.size(-1)
         noise = self.sample_gumbel(samples_shape + log_alpha.shape)
-        # log_alpha_noise = log_alpha.unsqueeze(1)
         log_alpha_noise = log_alpha + noise
-        # if n_samples == 1 and squeeze:
-        #     log_alpha_noise = torch.squeeze(log_alpha_noise)
         return log_alpha_noise
 
 
