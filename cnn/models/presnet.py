@@ -196,7 +196,7 @@ class TensorPermutation(nn.Module):
             self.perm_type = LinearPermutation
         elif method == 'sinkhorn':
             self.perm_type = SinkhornPermutation
-        self.perm_fn = self.perm_type.__sample_soft_perm__ if stochastic else self.perm_type.mean_perm
+        self.perm_fn = self.perm_type.sample_soft_perm if stochastic else self.perm_type.mean_perm
 
         self.rank = rank
         self.w = w
@@ -215,7 +215,6 @@ class TensorPermutation(nn.Module):
         if self.rank == 1:
             # perm = self.permute.sample_soft_perm()
             perm = self.perm_fn(self.permute)
-            assert perm.requires_grad
             x = x.view(-1, self.w*self.h)
             x = x @ perm
             x = x.view(-1, 3, self.w, self.h) # TODO make this channel agnostic
@@ -262,6 +261,7 @@ class SinkhornPermutation(Permutation):
         self.size = size
         self.temp = temp
         self.log_alpha = nn.Parameter(torch.zeros(size, size))
+        nn.init.kaiming_uniform_(self.log_alpha)
         # TODO: test effect of random initialization
 
     def mean_perm(self):
@@ -311,7 +311,7 @@ class SinkhornPermutation(Permutation):
         """
         batch = log_alpha.size(0)
         n = log_alpha.size(-1)
-        noise = self.sample_gumbel(samples_shape + log_alpha.shape)
+        noise = self.sample_gumbel(sample_shape + log_alpha.shape)
         log_alpha_noise = log_alpha + noise
         return log_alpha_noise
 
