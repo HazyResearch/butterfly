@@ -98,15 +98,22 @@ class Bottleneck(nn.Module):
 
 class PResNet(nn.Module):
 
-    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False):
+    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, perm_dim=2):
         super().__init__()
 
-        self.block = block
-        self.layers = layers
-        self.num_classes = num_classes
+        self.block              = block
+        self.layers             = layers
+        self.num_classes        = num_classes
         self.zero_init_residual = zero_init_residual
+        self.perm_dim           = perm_dim
 
-        self.permute = Permutation()
+        if perm_dim == 1:
+            self.permute = LinearPermutation(1024)
+        elif perm_dim == 2:
+            self.permute1 = LinearPermutation(32)
+            self.permute2 = LinearPermutation(32)
+        else:
+            assert False, "perm_dim must be 1 or 2"
 
         self.inplanes = 64
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -158,9 +165,20 @@ class PResNet(nn.Module):
     def forward(self, x):
         # print(x.size())
         # print(x)
-        x = x.view(-1, 1024)
-        x = self.permute(x)
-        x = x.view(-1, 3, 32, 32)
+        if self.perm_dim == 1:
+            perm = self.permute.sample_soft_perm()
+            assert perm.requires_grad
+            x = x.view(-1, 1024)
+            x = x @ perm
+            x = x.view(-1, 3, 32, 32)
+        elif self.perm_dim == 2:
+            x = x.transpose(-1, -2)
+            perm2 = self.permute2.sample_soft_perm()
+            x = x @ perm2
+            x = x.transpose(-1, -2)
+            perm1 = self.permute1.sample_soft_perm()
+            x = x @ perm1
+
         # print(x.size())
         x = self.conv1(x)
         # print(x.size())
@@ -188,10 +206,18 @@ class PResNet(nn.Module):
 
         return x
 
-class Permutation(nn.Module):
-    def __init__(self):
+class LinearPermutation(nn.Module):
+    def __init__(self, size):
         super().__init__()
-        self.W = nn.Linear(1024, 1024, bias=False)
+        self.size = size
+        self.W = nn.Parameter(torch.empty(size, size))
+        nn.init.kaiming_uniform_(self.W)
+
+    def mean_perm(self):
+        return self.W
+
+    def sample_soft_perm(self):
+        return self.W
 
     def forward(self, x):
         return self.W(x)
