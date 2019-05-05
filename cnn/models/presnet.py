@@ -98,22 +98,15 @@ class Bottleneck(nn.Module):
 
 class PResNet(nn.Module):
 
-    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, perm_dim=2):
+    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, prank=2):
         super().__init__()
 
         self.block              = block
         self.layers             = layers
         self.num_classes        = num_classes
         self.zero_init_residual = zero_init_residual
-        self.perm_dim           = perm_dim
 
-        if perm_dim == 1:
-            self.permute = LinearPermutation(1024)
-        elif perm_dim == 2:
-            self.permute1 = LinearPermutation(32)
-            self.permute2 = LinearPermutation(32)
-        else:
-            assert False, "perm_dim must be 1 or 2"
+        self.permute = TensorPermutation(32, 32, rank=prank)
 
         self.inplanes = 64
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -165,19 +158,7 @@ class PResNet(nn.Module):
     def forward(self, x):
         # print(x.size())
         # print(x)
-        if self.perm_dim == 1:
-            perm = self.permute.sample_soft_perm()
-            assert perm.requires_grad
-            x = x.view(-1, 1024)
-            x = x @ perm
-            x = x.view(-1, 3, 32, 32)
-        elif self.perm_dim == 2:
-            x = x.transpose(-1, -2)
-            perm2 = self.permute2.sample_soft_perm()
-            x = x @ perm2
-            x = x.transpose(-1, -2)
-            perm1 = self.permute1.sample_soft_perm()
-            x = x @ perm1
+        x = self.permute(x)
 
         # print(x.size())
         x = self.conv1(x)
@@ -206,7 +187,53 @@ class PResNet(nn.Module):
 
         return x
 
-class LinearPermutation(nn.Module):
+class TensorPermutation(nn.Module):
+    def __init__(self, w, h, rank):
+        super().__init__()
+        self.perm_type = LinearPermutation
+
+        self.rank = rank
+        self.w = w
+        self.h = h
+        if self.rank == 1:
+            self.permute = self.perm_type(w*h)
+        elif self.rank == 2:
+            self.permute1 = self.perm_type(w)
+            self.permute2 = self.perm_type(h)
+        else:
+            assert False, "prank must be 1 or 2"
+
+
+    def forward(self, x):
+        if self.rank == 1:
+            perm = self.permute.sample_soft_perm()
+            assert perm.requires_grad
+            x = x.view(-1, self.w*self.h)
+            x = x @ perm
+            x = x.view(-1, 3, self.w, self.h) # TODO make this channel agnostic
+        elif self.rank == 2:
+            x = x.transpose(-1, -2)
+            perm2 = self.permute2.sample_soft_perm()
+            x = x @ perm2
+            x = x.transpose(-1, -2)
+            perm1 = self.permute1.sample_soft_perm()
+            x = x @ perm1
+        return x
+
+
+class Permutation(nn.Module):
+
+    def forward(self, x, samples=1):
+        soft_perms = self.sample_soft_perm((samples, x.size(0)))
+        return x.unsqueeze(0) @ soft_perms
+
+    def mean_perm(self):
+        pass
+    def sample_soft_perm(self, sample_shape=()):
+        """ Return soft permutation of shape sample_shape + (size, size) """
+        pass
+
+class LinearPermutation(Permutation):
     def __init__(self, size):
         super().__init__()
         self.size = size
@@ -216,8 +243,8 @@ class LinearPermutation(nn.Module):
     def mean_perm(self):
         return self.W
 
-    def sample_soft_perm(self):
-        return self.W
+    def sample_soft_perm(self, sample_shape=()):
+        return self.W # TODO do this properly
 
     def forward(self, x):
         return self.W(x)
