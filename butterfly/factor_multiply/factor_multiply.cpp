@@ -92,7 +92,7 @@ at::Tensor butterfly_factor_multiply(const at::Tensor& twiddle, const at::Tensor
   AT_CHECK(!twiddle.is_cuda(), "butterfly_factor_multiply: Expected twiddle to be CPU tensor");
   const auto batch_size = input.size(0);
   const auto n = input.size(2);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_factor_multiply", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_factor_multiply", [&] {
     switch (input.dim()) {
       case 3:  // real
         {
@@ -169,7 +169,7 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
   }
   AT_CHECK((!twiddle.is_cuda()) && (!grad.is_cuda()) , "butterfly_factor_multiply_backward: Expected grad and twiddle to be CPU tensor");
   auto d_twiddle = torch::zeros_like(twiddle);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_factor_multiply_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_factor_multiply_backward", [&] {
     switch (input.dim()) {
       case 3:  // real
         {
@@ -255,7 +255,7 @@ at::Tensor butterfly_multiply_inplace(const at::Tensor& twiddle, const at::Tenso
   AT_CHECK(!twiddle.is_cuda(), "butterfly_multiply_inplace: Expected twiddle to be CPU tensor");
   // const auto batch_size = output.size(0);
   // const auto n = output.size(1);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.type(), "butterfly_multiply_inplace", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "butterfly_multiply_inplace", [&] {
     switch (output.dim()) {
       case 2:  // real
         {
@@ -336,7 +336,7 @@ std::vector<at::Tensor> butterfly_multiply_inplace_backward(const at::Tensor& gr
     return {d_twiddle, d_input};
   }
   AT_CHECK((!twiddle.is_cuda()) && (!grad.is_cuda()) , "butterfly_multiply_inplace_backward: Expected grad and twiddle to be CPU tensor");
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "butterfly_multiply_inplace_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(), "butterfly_multiply_inplace_backward", [&] {
     switch (grad.dim()) {
       case 2:  // real
         {
@@ -453,7 +453,7 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
     return return_intermediates ? output : output[-1];
   }
   const bool complex = input.dim() == 4;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_intermediate", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_multiply_intermediate", [&] {
     if (!complex) {  // real
       const auto twiddle_a = twiddle.accessor<scalar_t, 4>();
       auto output_a = output.accessor<scalar_t, 4>();
@@ -547,7 +547,7 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
     return {d_twiddle, d_input} ;
   }
   bool complex = grad.dim() == 4;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "butterfly_multiply_intermediate_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(), "butterfly_multiply_intermediate_backward", [&] {
     if (!complex) {
       const auto twiddle_a = twiddle.accessor<scalar_t, 4>();
       auto output_a = output.accessor<scalar_t, 4>();
@@ -672,7 +672,7 @@ at::Tensor butterfly_multiply_untied(const at::Tensor& twiddle, const at::Tensor
     return return_intermediates ? output : output[-1];
   }
   const bool complex = input.dim() == 4;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_untied", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_multiply_untied", [&] {
     if (!complex) {  // real
       const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
       auto output_a = output.accessor<scalar_t, 4>();
@@ -867,7 +867,7 @@ at::Tensor butterfly_multiply_untied_eval(const at::Tensor& twiddle, const at::T
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
   AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
            "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_untied_eval", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_multiply_untied_eval", [&] {
     const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
     const float* twiddle_data = twiddle.data<float>();
     // vectorize over butterfly twiddles (n/2 total)
@@ -929,7 +929,7 @@ std::vector<at::Tensor> butterfly_multiply_untied_backward(const at::Tensor& gra
     return {d_twiddle, d_input} ;
   }
   bool complex = grad.dim() == 4;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "butterfly_multiply_untied_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(), "butterfly_multiply_untied_backward", [&] {
     if (!complex) {
       const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
       auto output_a = output.accessor<scalar_t, 4>();
@@ -1063,17 +1063,17 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
         output: (batch_size, nstack, n) where b_in * h_out * w_out, n = c_in
   */
   // Currently assuming convolution stride is 1
-  const int b_in = input.size(0);
-  const int c_in = input.size(1);
+  const int64_t b_in = input.size(0);
+  const int64_t c_in = input.size(1);
   // twiddle nstack = c_out/c_in * matrix batach
-  const int n = c_in; // rename to be consistent with dimension of butterfly
-  const int c_out = twiddle.size(0) / (kernel_size*kernel_size) * c_in;
-  const int h = input.size(2);
-  const int w = input.size(3);
-  const int log_n = int(log2((double) c_in));
-  const auto bstack = twiddle.size(0);
-  auto h_out = h + 2 * padding - (kernel_size - 1);
-  auto w_out = w + 2 * padding - (kernel_size - 1);
+  const int64_t n = c_in; // rename to be consistent with dimension of butterfly
+  // const int64_t c_out = twiddle.size(0) / (kernel_size*kernel_size) * c_in;  // Unused
+  const int64_t h = input.size(2);
+  const int64_t w = input.size(3);
+  const int64_t log_n = int(log2((double) c_in));
+  const int64_t bstack = twiddle.size(0);
+  int64_t h_out = h + 2 * padding - (kernel_size - 1);
+  int64_t w_out = w + 2 * padding - (kernel_size - 1);
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   AT_CHECK((twiddle.dim() == 5 && input.dim() == 4),
@@ -1153,15 +1153,15 @@ std::vector<at::Tensor> butterfly_conv2d_forward_backward(
          d_twiddle: (nstack, log n, n / 2, 2, 2)
          d_input: (b_in, c_in, h_in, w_in)
   */
-  const int b_in = input.size(0);
-  const int c_in = input.size(1);
-  const int n = c_in; // rename to be consistent with dimension of butterfly
-  const int h_in = input.size(2);
-  const int w_in = input.size(3);
-  const int h_out = h_in + 2 * padding - (kernel_size - 1);
-  const int w_out = w_in + 2 * padding - (kernel_size - 1);
-  const int b_out = b_in * h_out * w_out;
-  const int nstack = grad.size(1);
+  const int64_t b_in = input.size(0);
+  const int64_t c_in = input.size(1);
+  const int64_t n = c_in; // rename to be consistent with dimension of butterfly
+  const int64_t h_in = input.size(2);
+  const int64_t w_in = input.size(3);
+  const int64_t h_out = h_in + 2 * padding - (kernel_size - 1);
+  const int64_t w_out = w_in + 2 * padding - (kernel_size - 1);
+  // const int64_t b_out = b_in * h_out * w_out;  // Unused
+  const int64_t nstack = grad.size(1);
   AT_CHECK(n <= 1024, "butterfly_conv2d_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
   AT_CHECK(twiddle.dim() == 5 && input.dim() == 4 && grad.dim() == 3,
@@ -1226,7 +1226,7 @@ at::Tensor butterfly_multiply_untied_svd(const at::Tensor& twiddle, const at::Te
     butterfly_multiply_untied_svd_cuda(twiddle, output, increasing_stride, return_intermediates);
     return return_intermediates ? output : output[-1];
   }
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "butterfly_multiply_untied_svd", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_multiply_untied_svd", [&] {
     const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
     auto output_a = output.accessor<scalar_t, 4>();
     for (int64_t idx = 0; idx <= log_n - 1; ++idx) {
@@ -1291,7 +1291,7 @@ std::vector<at::Tensor> butterfly_multiply_untied_svd_backward(const at::Tensor&
     butterfly_multiply_untied_svd_backward_cuda(twiddle, output, d_twiddle, d_input, increasing_stride);
     return {d_twiddle, d_input} ;
   }
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "butterfly_multiply_untied_svd_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(), "butterfly_multiply_untied_svd_backward", [&] {
     const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
     auto output_a = output.accessor<scalar_t, 4>();
     auto d_twiddle_a = d_twiddle.accessor<scalar_t, 5>();
@@ -1396,17 +1396,17 @@ at::Tensor butterfly_conv2d_svd(const at::Tensor& twiddle, const at::Tensor& inp
         output: (batch_size, nstack, n) where b_in * h_out * w_out, n = c_in
   */
   // Currently assuming convolution stride is 1
-  const int b_in = input.size(0);
-  const int c_in = input.size(1);
+  const int64_t b_in = input.size(0);
+  const int64_t c_in = input.size(1);
   // twiddle nstack = c_out/c_in * matrix batach
-  const int n = c_in; // rename to be consistent with dimension of butterfly
-  const int c_out = twiddle.size(0) / (kernel_size*kernel_size) * c_in;
-  const int h = input.size(2);
-  const int w = input.size(3);
-  const int log_n = int(log2((double) c_in));
-  const auto bstack = twiddle.size(0);
-  auto h_out = h + 2 * padding - (kernel_size - 1);
-  auto w_out = w + 2 * padding - (kernel_size - 1);
+  const int64_t n = c_in; // rename to be consistent with dimension of butterfly
+  // const int64_t c_out = twiddle.size(0) / (kernel_size*kernel_size) * c_in;  // Unused
+  const int64_t h = input.size(2);
+  const int64_t w = input.size(3);
+  const int64_t log_n = int(log2((double) c_in));
+  const int64_t bstack = twiddle.size(0);
+  int64_t h_out = h + 2 * padding - (kernel_size - 1);
+  int64_t w_out = w + 2 * padding - (kernel_size - 1);
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   AT_CHECK((twiddle.dim() == 5 && input.dim() == 4),
@@ -1452,7 +1452,7 @@ std::vector<at::Tensor> butterfly_conv2d_svd_forward_backward(
   const int w_in = input.size(3);
   const int h_out = h_in + 2 * padding - (kernel_size - 1);
   const int w_out = w_in + 2 * padding - (kernel_size - 1);
-  const int b_out = b_in * h_out * w_out;
+  // const int b_out = b_in * h_out * w_out;  // Unused
   const int nstack = grad.size(1);
   AT_CHECK(n <= 1024, "butterfly_conv2d_svd_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
@@ -1494,7 +1494,7 @@ at::Tensor permutation_factor_even_odd_multiply(const at::Tensor& p, const at::T
   AT_CHECK(!p.is_cuda(), "permutation_factor_even_odd_multiply: Expected p to be CPU tensor");
   const auto batch_size = input.size(0);
   const auto n = input.size(1);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_even_odd_multiply", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_even_odd_multiply", [&] {
     const scalar_t p_a = p.accessor<scalar_t, 1>()[0];
     switch (input.dim()) {
       case 2: // real
@@ -1564,7 +1564,7 @@ std::vector<at::Tensor> permutation_factor_even_odd_multiply_backward(const at::
     return {d_p, d_input};
   }
   AT_CHECK((!grad.is_cuda()) && (!p.is_cuda()), "permutation_factor_even_odd_multiply_backward: Expected grad and p to be CPU tensor");
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_even_odd_multiply_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_even_odd_multiply_backward", [&] {
     const scalar_t p_a = p.accessor<scalar_t, 1>()[0];
     auto d_p_a = d_p.accessor<scalar_t, 1>();
     scalar_t d_p_temp = 0;
@@ -1650,7 +1650,7 @@ at::Tensor permutation_factor_reverse_multiply(const at::Tensor& p, const at::Te
   AT_CHECK(!p.is_cuda(), "permutation_factor_reverse_multiply: Expected p to be CPU tensor");
   const auto batch_size = input.size(0);
   const auto n = input.size(1);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_reverse_multiply", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_reverse_multiply", [&] {
     const scalar_t p_a[2] = {p.accessor<scalar_t, 1>()[0], p.accessor<scalar_t, 1>()[1]};
     switch (input.dim()) {
       case 2: // real
@@ -1729,7 +1729,7 @@ std::vector<at::Tensor> permutation_factor_reverse_multiply_backward(const at::T
   }
   AT_CHECK((!grad.is_cuda()) && (!p.is_cuda()), "permutation_factor_reverse_multiply_backward: Expected grad and p to be CPU tensor");
   auto d_p = torch::zeros_like(p);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "permutation_factor_reverse_multiply_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_reverse_multiply_backward", [&] {
     const scalar_t p_a[2] = {p.accessor<scalar_t, 1>()[0], p.accessor<scalar_t, 1>()[1]};
     auto d_p_a = d_p.accessor<scalar_t, 1>();
     scalar_t d_p_temp[2] = {0, 0};
@@ -1836,7 +1836,7 @@ void complex_to_real_strides(at::Tensor& x) {
 
 // #define COMPLEX_ACCESSOR(x, dim, name)           \
 //   real_to_complex_strides(x); \
-//   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(x.type(), name [&] { \
+//   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(x.scalar_type(), name [&] { \
 //     auto ptr = reinterpret_cast<std::complex<scalar_t>*>(x.data<scalar_t>()); \
 //     return at::TensorAccessor<std::complex<scalar_t>, dim>(ptr, x.sizes().data(), x.strides().data()); \
 //   })
@@ -1849,7 +1849,7 @@ void complex_test(at::Tensor& input) {
   // int64_t strides[1] = {input.stride(0)};
   // auto input_a = at::TensorAccessor<std::complex<float>, 1>(ptr, input.sizes().data(), input.strides().data());
   real_to_complex_strides(input);
-  // auto input_a = AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), name [&] {
+  // auto input_a = AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), name [&] {
   //   auto ptr = reinterpret_cast<std::complex<scalar_t>*>(input.data<scalar_t>()); \
   //   return at::TensorAccessor<std::complex<scalar_t>, 1>(ptr, input.sizes().data(), input.strides().data());
   // });
