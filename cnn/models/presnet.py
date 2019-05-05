@@ -100,7 +100,7 @@ class Bottleneck(nn.Module):
 
 class PResNet(nn.Module):
 
-    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, prank=2):
+    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, prank=2, stochastic=False):
         super().__init__()
 
         self.block              = block
@@ -108,7 +108,7 @@ class PResNet(nn.Module):
         self.num_classes        = num_classes
         self.zero_init_residual = zero_init_residual
 
-        self.permute = TensorPermutation(32, 32, rank=prank)
+        self.permute = TensorPermutation(32, 32, rank=prank, stochastic=stochastic)
 
         self.inplanes = 64
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -190,9 +190,10 @@ class PResNet(nn.Module):
         return x
 
 class TensorPermutation(nn.Module):
-    def __init__(self, w, h, rank):
+    def __init__(self, w, h, rank, stochastic=False):
         super().__init__()
         self.perm_type = LinearPermutation
+        self.perm_fn = self.perm_type.__sample_soft_perm__ if stochastic else self.perm_type.mean_perm
 
         self.rank = rank
         self.w = w
@@ -206,19 +207,23 @@ class TensorPermutation(nn.Module):
             assert False, "prank must be 1 or 2"
 
 
+
     def forward(self, x):
         if self.rank == 1:
-            perm = self.permute.sample_soft_perm()
+            # perm = self.permute.sample_soft_perm()
+            perm = self.perm_fn(self.permute)
             assert perm.requires_grad
             x = x.view(-1, self.w*self.h)
             x = x @ perm
             x = x.view(-1, 3, self.w, self.h) # TODO make this channel agnostic
         elif self.rank == 2:
             x = x.transpose(-1, -2)
-            perm2 = self.permute2.sample_soft_perm()
+            # perm2 = self.permute2.sample_soft_perm()
+            perm2 = self.perm_fn(self.permute2)
             x = x @ perm2
             x = x.transpose(-1, -2)
-            perm1 = self.permute1.sample_soft_perm()
+            # perm1 = self.permute1.sample_soft_perm()
+            perm1 = self.perm_fn(self.permute1)
             x = x @ perm1
         return x
 
