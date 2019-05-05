@@ -860,40 +860,38 @@ at::Tensor butterfly_multiply_untied_eval(const at::Tensor& twiddle, const at::T
   const auto n = input.size(2);
   const int log_n = int(log2((double) n));
   at::Tensor output;
-  AT_CHECK((twiddle.dim() == 5 && input.dim() == 3) || (twiddle.dim() == 6 && input.dim() == 4),
-           "butterfly_multiply_untied: twiddle and input must have dimension 5,3 or 6,4");
+  AT_CHECK(twiddle.dim() == 5 && input.dim() == 3,
+           "butterfly_multiply_untied: twiddle and input must have dimension 5,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
   AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
-           "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_multiply_untied_eval", [&] {
-    const auto twiddle_a = twiddle.accessor<scalar_t, 5>();
-    const float* twiddle_data = twiddle.data<float>();
-    // vectorize over butterfly twiddles (n/2 total)
-    if (batch_size < 8) {
-      output = input.clone();
-      auto output_a = output.accessor<scalar_t, 3>();
-      float* output_data = output.data<float>();
-      if (increasing_stride){
-        // do small strides first
-        butterfly_multiply_untied_scalar_twiddle<scalar_t>(twiddle_a, output_a, 3 /*log_n*/, n, nstack, batch_size, increasing_stride);
-        butterfly_multiply_untied_vector_twiddle(twiddle_data, output_data, log_n, n, nstack, batch_size, increasing_stride);
-      } else {
-        // do large strides first
-        butterfly_multiply_untied_vector_twiddle(twiddle_data, output_data, log_n, n, nstack, batch_size, increasing_stride);
-        butterfly_multiply_untied_scalar_twiddle<scalar_t>(twiddle_a, output_a, 3 /*log_n*/, n, nstack, batch_size, increasing_stride);
-      }
+           "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  const auto twiddle_a = twiddle.accessor<float, 5>();
+  const float* twiddle_data = twiddle.data<float>();
+  // vectorize over butterfly twiddles (n/2 total)
+  if (batch_size < 8) {
+    output = input.clone();
+    auto output_a = output.accessor<float, 3>();
+    float* output_data = output.data<float>();
+    if (increasing_stride){
+      // do small strides first
+      butterfly_multiply_untied_scalar_twiddle<float>(twiddle_a, output_a, 3 /*log_n*/, n, nstack, batch_size, increasing_stride);
+      butterfly_multiply_untied_vector_twiddle(twiddle_data, output_data, log_n, n, nstack, batch_size, increasing_stride);
+    } else {
+      // do large strides first
+      butterfly_multiply_untied_vector_twiddle(twiddle_data, output_data, log_n, n, nstack, batch_size, increasing_stride);
+      butterfly_multiply_untied_scalar_twiddle<float>(twiddle_a, output_a, 3 /*log_n*/, n, nstack, batch_size, increasing_stride);
     }
-    // vectorize over batch for large batches
-    else {
-      output = input.permute({1,2,0}).contiguous();
-      float* output_data = output.data<float>();
-      butterfly_multiply_untied_vector_batch<scalar_t>(twiddle_a, output_data, log_n, n,
-        nstack, batch_size, increasing_stride);
-      output = output.permute({2,0,1}); // change back to batch_size, nstack, n (leaves non-contiguous)
-    }
-  });
+  }
+  // vectorize over batch for large batches
+  else {
+    output = input.permute({1,2,0}).contiguous();
+    float* output_data = output.data<float>();
+    butterfly_multiply_untied_vector_batch<float>(twiddle_a, output_data, log_n, n,
+      nstack, batch_size, increasing_stride);
+    output = output.permute({2,0,1}); // change back to batch_size, nstack, n (leaves non-contiguous)
+  }
   return output;
 }
 

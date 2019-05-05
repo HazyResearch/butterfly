@@ -162,7 +162,7 @@ class ButterflyMultUntied(torch.autograd.Function):
             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
         # use optimized code for inference
-        if not is_training and not input.is_cuda:
+        if not is_training and not input.is_cuda and input.dim() == 3 and input.dtype == torch.float and input.shape[-1] > 8:
             output = butterfly_multiply_untied_eval(twiddle, input, increasing_stride)
         else:
             output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
