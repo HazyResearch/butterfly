@@ -100,7 +100,7 @@ class Bottleneck(nn.Module):
 
 class PResNet(nn.Module):
 
-    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, prank=2, stochastic=False):
+    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, method='linear', prank=2, stochastic=False):
         super().__init__()
 
         self.block              = block
@@ -108,7 +108,7 @@ class PResNet(nn.Module):
         self.num_classes        = num_classes
         self.zero_init_residual = zero_init_residual
 
-        self.permute = TensorPermutation(32, 32, rank=prank, stochastic=stochastic)
+        self.permute = TensorPermutation(32, 32, method=method, rank=prank, stochastic=stochastic)
 
         self.inplanes = 64
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -190,9 +190,12 @@ class PResNet(nn.Module):
         return x
 
 class TensorPermutation(nn.Module):
-    def __init__(self, w, h, rank, stochastic=False):
+    def __init__(self, w, h, method='linear', rank=1, stochastic=False):
         super().__init__()
-        self.perm_type = LinearPermutation
+        if method == 'linear':
+            self.perm_type = LinearPermutation
+        elif method == 'sinkhorn':
+            self.perm_type = SinkhornPermutation
         self.perm_fn = self.perm_type.__sample_soft_perm__ if stochastic else self.perm_type.mean_perm
 
         self.rank = rank
