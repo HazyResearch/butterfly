@@ -190,7 +190,7 @@ class PResNet(nn.Module):
         return x
 
 class TensorPermutation(nn.Module):
-    def __init__(self, w, h, method='linear', rank=1, stochastic=False, train=True, **kwargs):
+    def __init__(self, w, h, method='linear', rank=2, stochastic=False, train=True, **kwargs):
         super().__init__()
         self.w = w
         self.h = h
