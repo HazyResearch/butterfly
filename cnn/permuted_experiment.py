@@ -113,9 +113,9 @@ def default_config():
     model = 'LeNet'  # Name of model, see model_utils.py
     args = {}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'Adam'  # Which optimizer to use, either Adam or SGD
-    lr_decay = False  # Whether to use learning rate decay
+    lr_decay = True  # Whether to use learning rate decay
     lr_decay_period = 25  # Period of learning rate decay
-    weight_decay = False  # Whether to use weight decay
+    weight_decay = True  # Whether to use weight decay
     ntrials = 20  # Number of trials for hyperparameter tuning
     nmaxepochs = 100  # Maximum number of epochs
     result_dir = project_root + '/cnn/results'  # Directory to store results
