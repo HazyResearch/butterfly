@@ -111,7 +111,7 @@ if slack_config_path.exists():
 def default_config():
     dataset = 'PCIFAR10'
     model = 'LeNet'  # Name of model, see model_utils.py
-    model_args = {}  # Arguments to be passed to the model, as a dictionary
+    args = {}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'Adam'  # Which optimizer to use, either Adam or SGD
     lr_decay = False  # Whether to use learning rate decay
     lr_decay_period = 25  # Period of learning rate decay
@@ -132,7 +132,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, model_args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test):
+def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -146,14 +146,14 @@ def cifar10_experiment(dataset, model, model_args, optimizer, lr_decay, lr_decay
         'weight_decay': 2e-4 if weight_decay else 0.0,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
-        'model': {'name': model, 'args': model_args},
+        'model': {'name': model, 'args': args},
         # 'dataset': {'name': 'CIFAR10'}
         # 'dataset': {'name': 'PCIFAR10'}
         'dataset': {'name': dataset}
      }
     experiment = RayExperiment(
-        # name=f'pcifar10_{model}_{model_args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
-        name=f'{dataset.lower()}_{model}_{model_args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
+        # name=f'pcifar10_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
+        name=f'{dataset.lower()}_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
         run=TrainableModel,
         local_dir=result_dir,
         num_samples=ntrials,
