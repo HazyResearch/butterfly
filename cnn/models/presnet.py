@@ -196,7 +196,7 @@ class TensorPermutation(nn.Module):
             self.perm_type = LinearPermutation
         elif method == 'sinkhorn':
             self.perm_type = SinkhornPermutation
-        self.perm_fn = self.perm_type.sample_soft_perm if stochastic else self.perm_type.mean_perm
+        self.perm_fn = self.perm_type.sample_soft_perm if stochastic else self.perm_type.hard_perm
 
         self.rank = rank
         self.w = w
@@ -208,7 +208,6 @@ class TensorPermutation(nn.Module):
             self.permute2 = self.perm_type(h, temp=temp)
         else:
             assert False, "prank must be 1 or 2"
-
 
 
     def forward(self, x):
@@ -253,6 +252,9 @@ class LinearPermutation(Permutation):
     def mean_perm(self):
         return self.W
 
+    def hard_perm(self):
+        return self.W
+
     def sample_soft_perm(self, sample_shape=()):
         return self.W # TODO do this properly
 
@@ -261,8 +263,9 @@ class SinkhornPermutation(Permutation):
         super().__init__()
         self.size = size
         self.temp = temp
-        self.log_alpha = nn.Parameter(torch.zeros(size, size))
-        self.log_alpha.is_perm_param = True
+        # self.log_alpha = nn.Parameter(torch.zeros(size, size))
+        # self.log_alpha.is_perm_param = True
+        self.log_alpha = torch.zeros(size, size).to(device)
         nn.init.kaiming_uniform_(self.log_alpha)
         # TODO: test effect of random initialization
 
@@ -276,8 +279,8 @@ class SinkhornPermutation(Permutation):
 
     def hard_perm(self):
         """ Round to nearest permutation (in this case, MLE) """
-        l = self.log_alpha.detach()
-        P = self.sinkhorn(l, temp=0.01, n_iters=100)
+        # l = self.log_alpha.detach()
+        P = self.sinkhorn(self.log_alpha, temp=0.01, n_iters=100)
         return P
 
     def sinkhorn(self, log_alpha, temp=1.0, n_iters=20):
