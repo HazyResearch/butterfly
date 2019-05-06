@@ -100,7 +100,7 @@ class Bottleneck(nn.Module):
 
 class PResNet(nn.Module):
 
-    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, method='linear', prank=2, stochastic=False, temp=1.0):
+    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, method='linear', prank=2, stochastic=False, temp=1.0, train_perm=True):
         super().__init__()
 
         self.block              = block
@@ -108,7 +108,7 @@ class PResNet(nn.Module):
         self.num_classes        = num_classes
         self.zero_init_residual = zero_init_residual
 
-        self.permute = TensorPermutation(32, 32, method=method, rank=prank, stochastic=stochastic, temp=temp)
+        self.permute = TensorPermutation(32, 32, method=method, rank=prank, stochastic=stochastic, temp=temp, train=train_perm)
 
         self.inplanes = 64
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -190,13 +190,23 @@ class PResNet(nn.Module):
         return x
 
 class TensorPermutation(nn.Module):
-    def __init__(self, w, h, method='linear', rank=1, stochastic=False, temp=1.0):
+    def __init__(self, w, h, method='linear', rank=1, stochastic=False, temp=1.0, train=True):
         super().__init__()
         if method == 'linear':
             self.perm_type = LinearPermutation
         elif method == 'sinkhorn':
             self.perm_type = SinkhornPermutation
-        self.perm_fn = self.perm_type.sample_soft_perm if stochastic else self.perm_type.hard_perm
+
+        if stochastic:
+            self.perm_fn = self.perm_type.sample_soft_perm
+        else:
+            self.perm_fn =self.perm_type.mean_perm
+        # elif acqfn == 'mean':
+        #     self.perm_fn =self.perm_type.mean_perm
+        # elif acqfn == 'sample':
+        #     self.perm_fn = self.perm_type.sample_soft_perm
+        # else:
+        #     assert False, f"Permutation acquisition function {acqfn} not supported."
 
         self.rank = rank
         self.w = w
@@ -208,6 +218,10 @@ class TensorPermutation(nn.Module):
             self.permute2 = self.perm_type(h, temp=temp)
         else:
             assert False, "prank must be 1 or 2"
+
+        if train == False:
+            for p in self.parameters():
+                p.requires_grad = False
 
 
     def forward(self, x):
@@ -252,8 +266,8 @@ class LinearPermutation(Permutation):
     def mean_perm(self):
         return self.W
 
-    def hard_perm(self):
-        return self.W
+    # def hard_perm(self):
+    #     return self.W
 
     def sample_soft_perm(self, sample_shape=()):
         return self.W # TODO do this properly
@@ -263,25 +277,32 @@ class SinkhornPermutation(Permutation):
         super().__init__()
         self.size = size
         self.temp = temp
-        # self.log_alpha = nn.Parameter(torch.zeros(size, size))
-        # self.log_alpha.is_perm_param = True
-        self.log_alpha = torch.zeros(size, size).to(device)
+        # set sinkhorn iterations based on temperature
+        self.sinkhorn_iters = 20 + int(1./temp)
+        self.log_alpha = nn.Parameter(torch.zeros(size, size))
+        self.log_alpha.is_perm_param = True
         nn.init.kaiming_uniform_(self.log_alpha)
         # TODO: test effect of random initialization
 
     def mean_perm(self):
-        return self.sinkhorn(self.log_alpha, n_iters=20)
+        """
+        Treat log_alpha as a soft permutation itself
+        Note that if l is viewed as a distribution over hard permutations, then
+          - sinkhorn(l, tau=1.0) is the mean of this distribution
+          - sinkhorn(l, tau->0) is the max likelihood of this distribution
+        """
+        return self.sinkhorn(self.log_alpha, temp=self.temp, n_iters=self.sinkhorn_iters)
 
     def sample_soft_perm(self, sample_shape=()):
         log_alpha_noise = self.add_gumbel_noise(self.log_alpha, sample_shape)
-        soft_perms = self.sinkhorn(log_alpha_noise, self.temp)
+        soft_perms = self.sinkhorn(log_alpha_noise, self.temp, n_iters=self.sinkhorn_iters)
         return soft_perms
 
-    def hard_perm(self):
-        """ Round to nearest permutation (in this case, MLE) """
-        # l = self.log_alpha.detach()
-        P = self.sinkhorn(self.log_alpha, temp=0.01, n_iters=100)
-        return P
+    # def hard_perm(self):
+    #     """ Round to nearest permutation (in this case, MLE) """
+    #     # l = self.log_alpha.detach()
+    #     P = self.sinkhorn(self.log_alpha, temp=0.01, n_iters=100)
+    #     return P
 
     def sinkhorn(self, log_alpha, temp=1.0, n_iters=20):
         """
