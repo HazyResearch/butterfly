@@ -247,6 +247,7 @@ class LinearPermutation(Permutation):
         super().__init__()
         self.size = size
         self.W = nn.Parameter(torch.empty(size, size))
+        self.W.is_perm_param = True
         nn.init.kaiming_uniform_(self.W)
 
     def mean_perm(self):
@@ -261,6 +262,7 @@ class SinkhornPermutation(Permutation):
         self.size = size
         self.temp = temp
         self.log_alpha = nn.Parameter(torch.zeros(size, size))
+        self.log_alpha.is_perm_param = True
         nn.init.kaiming_uniform_(self.log_alpha)
         # TODO: test effect of random initialization
 

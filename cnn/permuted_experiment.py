@@ -40,10 +40,10 @@ class TrainableModel(Trainable):
             torch.cuda.manual_seed(config['seed'])
         self.model = model_utils.get_model(config['model']).to(device)
         self.train_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
-        structured_params = filter(lambda p: hasattr(p, '_is_structured') and p._is_structured, self.model.parameters())
-        unstructured_params = filter(lambda p: not (hasattr(p, '_is_structured') and p._is_structured), self.model.parameters())
+        permutation_params = filter(lambda p: hasattr(p, '_is_perm_param') and p._is_perm_param, self.model.parameters())
+        unstructured_params = filter(lambda p: not (hasattr(p, '_is_perm_param') and p._is_perm_param), self.model.parameters())
         if config['optimizer'] == 'Adam':
-            self.optimizer = optim.Adam([{'params': structured_params, 'weight_decay': 0.0},
+            self.optimizer = optim.Adam([{'params': permutation_params, 'weight_decay': 0.0, 'lr': config['plr']},
                                          {'params': unstructured_params}],
                                         lr=config['lr'], weight_decay=config['weight_decay'])
         else:
@@ -137,13 +137,13 @@ def cifar10_experiment(dataset, model, model_args, optimizer, lr_decay, lr_decay
     config={
         'optimizer': optimizer,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-2)) if optimizer == 'Adam'
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)) if optimizer == 'Adam'
-                                           else random.uniform(math.log(2e-3), math.log(1e-0)))),
+        'lr': 2e-4 if optimizer == 'Adam' else random.uniform(math.log(2e-3), math.log(1e-0)),
+        'plr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-2)))),
         # 'lr_decay_factor': sample_from(lambda spec: random.choice([0.1, 0.2])) if lr_decay else 1.0,
         'lr_decay_factor': 0.1 if lr_decay else 1.0,
         'lr_decay_period': lr_decay_period,
         # 'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if weight_decay else 0.0,
-        'weight_decay': 5e-4 if weight_decay else 0.0,
+        'weight_decay': 2e-4 if weight_decay else 0.0,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
