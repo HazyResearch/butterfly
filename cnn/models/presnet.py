@@ -100,7 +100,7 @@ class Bottleneck(nn.Module):
 
 class PResNet(nn.Module):
 
-    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, method='linear', prank=2, stochastic=False, temp=1.0, train_perm=True):
+    def __init__(self, block=BasicBlock, layers=[2,2,2,2], num_classes=10, zero_init_residual=False, **perm_args):
         super().__init__()
 
         self.block              = block
@@ -108,7 +108,7 @@ class PResNet(nn.Module):
         self.num_classes        = num_classes
         self.zero_init_residual = zero_init_residual
 
-        self.permute = TensorPermutation(32, 32, method=method, rank=prank, stochastic=stochastic, temp=temp, train=train_perm)
+        self.permute = TensorPermutation(32, 32, **perm_args)
 
         self.inplanes = 64
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -190,12 +190,26 @@ class PResNet(nn.Module):
         return x
 
 class TensorPermutation(nn.Module):
-    def __init__(self, w, h, method='linear', rank=1, stochastic=False, temp=1.0, train=True):
+    def __init__(self, w, h, method='linear', rank=1, stochastic=False, train=True, **kwargs):
         super().__init__()
+        self.w = w
+        self.h = h
+
         if method == 'linear':
             self.perm_type = LinearPermutation
         elif method == 'sinkhorn':
             self.perm_type = SinkhornPermutation
+        else:
+            assert False, f"Permutation method {method} not supported."
+
+        self.rank = rank
+        if self.rank == 1:
+            self.permute = self.perm_type(w*h, **kwargs)
+        elif self.rank == 2:
+            self.permute1 = self.perm_type(w, **kwargs)
+            self.permute2 = self.perm_type(h, **kwargs)
+        else:
+            assert False, "prank must be 1 or 2"
 
         if stochastic:
             self.perm_fn = self.perm_type.sample_soft_perm
@@ -207,17 +221,6 @@ class TensorPermutation(nn.Module):
         #     self.perm_fn = self.perm_type.sample_soft_perm
         # else:
         #     assert False, f"Permutation acquisition function {acqfn} not supported."
-
-        self.rank = rank
-        self.w = w
-        self.h = h
-        if self.rank == 1:
-            self.permute = self.perm_type(w*h, temp=temp)
-        elif self.rank == 2:
-            self.permute1 = self.perm_type(w, temp=temp)
-            self.permute2 = self.perm_type(h, temp=temp)
-        else:
-            assert False, "prank must be 1 or 2"
 
         if train == False:
             for p in self.parameters():
@@ -256,7 +259,7 @@ class Permutation(nn.Module):
         pass
 
 class LinearPermutation(Permutation):
-    def __init__(self, size, temp=1.0):
+    def __init__(self, size):
         super().__init__()
         self.size = size
         self.W = nn.Parameter(torch.empty(size, size))
