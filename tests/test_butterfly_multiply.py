@@ -5,7 +5,6 @@ import math
 import unittest
 
 import torch
-import torch.nn.functional as F
 
 from butterfly import Butterfly
 from cnn.models.butterfly_conv import ButterflyConv2d

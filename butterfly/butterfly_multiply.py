@@ -21,7 +21,7 @@ try:
 except:
     use_extension = False
     import warnings
-    warnings.warn("C++/CUDA extension isn't installed. Will use butterfly multiply implemented in Pytorch, which is much slower.")
+    warnings.warn("C++/CUDA extension isn't installed properly. Will use butterfly multiply implemented in Pytorch, which is much slower.")
 
 
 def butterfly_mult_torch(twiddle, input, increasing_stride=True, return_intermediates=False):
