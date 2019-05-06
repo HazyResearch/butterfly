@@ -65,7 +65,7 @@ class TrainableModel(Trainable):
         train_args += ['--warmup-init-lr', "1e-07"]
         train_args += ['--adam-betas=(0.9, 0.98)']
         train_args += ['--keep-last-epochs', '10']
-        train_args += ['-a', 'lightconv_butterfly_iwslt_de_en'] if model['name'] == 'DynamicConv' else ['-a', 'transformer_iwslt_de_en']
+        train_args += ['-a', 'lightconv_butterfly_iwslt_de_en'] if model['name'] == 'DynamicConv' else ['-a', 'transformer_butterfly_iwslt_de_en']
         train_args += ['--dropout', str(config['dropout'])]
         train_args += ['--attention-dropout', '0.1'] if model['name'] == 'DynamicConv' else []
         train_args += ['--weight-dropout', '0.1'] if model['name'] == 'DynamicConv' else []
@@ -74,16 +74,19 @@ class TrainableModel(Trainable):
         train_args += ['--seed', str(config['seed'])]
         self._save_dir = config['result_dir'] + f"/seed={config['seed']}"
         train_args += ['--save-dir', self._save_dir]
+        n_encoder_layer = 7 if model['name'] == 'DynamicConv' else 6
         structure_type = config['structure_type']
         n_encoder_structure_layer = config['n_encoder_structure_layer']
-        encoder_structure_type = ['Linear'] * (7 - n_encoder_structure_layer) + [structure_type] * n_encoder_structure_layer
+        encoder_structure_type = ['Linear'] * (n_encoder_layer - n_encoder_structure_layer) + [structure_type] * n_encoder_structure_layer
         n_decoder_structure_layer = config['n_decoder_structure_layer']
         decoder_structure_type = ['Linear'] * (6 - n_decoder_structure_layer) + [structure_type] * n_decoder_structure_layer
-        train_args += ['--encoder-structure-type-list', str(encoder_structure_type)] if model['name'] == 'DynamicConv' else []
-        train_args += ['--decoder-structure-type-list', str(decoder_structure_type)] if model['name'] == 'DynamicConv' else []
+        train_args += ['--encoder-structure-type-list', str(encoder_structure_type)]
+        train_args += ['--decoder-structure-type-list', str(decoder_structure_type)]
         if config['structured_attention']:
+            encoder_structured_attention = [False] * (6 - n_encoder_structure_layer) + [True] * n_encoder_structure_layer
+            train_args += ['--encoder-structured-attention-list', str(encoder_structured_attention)] if model['name'] != 'DynamicConv' else []
             decoder_structured_attention = [False] * (6 - n_decoder_structure_layer) + [True] * n_decoder_structure_layer
-            train_args += ['--structured-attention-list', str(decoder_structured_attention)] if model['name'] == 'DynamicConv' else []
+            train_args += ['--decoder-structured-attention-list', str(decoder_structured_attention)]
 
         avg_args = [
             '--inputs=' + self._save_dir, '--num-epoch-checkpoints=10',
@@ -163,8 +166,9 @@ def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_deco
     name=f'{model}_{model_args}_type_{structure_type}_encstruct_{n_encoder_structure_layer}_decstruct_{n_decoder_structure_layer}_attstruct_{structured_attention}'
     config={
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
-        'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))),
-        'dropout': sample_from(lambda spec: random.uniform(0.0, 0.3)),
+        'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if model == 'DynamicConv' else 1e-4,
+        # Transformer seems to need dropout 0.3
+        'dropout': sample_from(lambda spec: random.uniform(0.1, 0.3)) if model == 'DynamicConv' else 0.3,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_encoder_structure_layer': n_encoder_structure_layer,
         'n_decoder_structure_layer': n_decoder_structure_layer,
