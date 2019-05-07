@@ -2,6 +2,7 @@
 #include <utility>
 #include <cmath>
 #include <torch/extension.h>
+#include <immintrin.h>
 
 void butterfly_factor_multiply_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output);
 void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& twiddle, const at::Tensor& input,

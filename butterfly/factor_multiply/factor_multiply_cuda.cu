@@ -101,7 +101,7 @@ void butterfly_factor_multiply_cuda(const at::Tensor& twiddle, const at::Tensor&
   block.x = std::min<int64_t>(MAX_BLOCK_SIZE, n);
   block.y = div_up(MAX_BLOCK_SIZE, block.x);
   dim3 grid(div_up(n, block.x), div_up(batch_size, block.y * WORK_PER_THREAD));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_factor_multiply_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_factor_multiply_cuda", [&] {
     switch (input.dim()) {
       case 3:  // real
         {
@@ -362,7 +362,7 @@ void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::T
   block.x = std::min<int64_t>(MAX_BLOCK_SIZE, n);
   block.y = div_up(MAX_BLOCK_SIZE, block.x);
   dim3 grid(div_up(n, block.x), div_up(batch_size, block.y * WORK_PER_THREAD));
-  // AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_factor_multiply_backward_cuda", [&] {
+  // AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_factor_multiply_backward_cuda", [&] {
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_factor_multiply_backward_cuda", [&] {
     switch (input.dim()) {
       case 3:  // real
@@ -458,7 +458,7 @@ __global__ void butterfly_multiply_inplace_onestep_cuda_kernel(const at::PackedT
 void butterfly_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tensor& input) {
   const int batch_size = input.size(0);
   const int n = input.size(1);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_multiply_inplace_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_inplace_cuda", [&] {
     switch (input.dim()) {
       case 2:  // real
         {
@@ -872,7 +872,7 @@ void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor&
   const int n = output.size(3);
   const int log_n = int(log2((double) n));
   const bool complex = output.dim() == 5;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "butterfly_multiply_intermediate_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_intermediate_cuda", [&] {
     if (!complex) {  // real
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4>();
       auto output_a = output.packed_accessor<scalar_t, 4>();
@@ -1200,7 +1200,7 @@ void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, co
   const int n = output.size(3);
   const int log_n = int(log2((double) n));
   const bool complex = output.dim() == 5;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "butterfly_multiply_intermediate_backward_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_intermediate_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     if (!complex) {  // real
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4>();
@@ -1482,7 +1482,7 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
   const int n = output.size(3);
   const int log_n = int(log2((double) n));
   const bool complex = output.dim() == 5;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "butterfly_multiply_untied_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_untied_cuda", [&] {
     if (!complex) {  // real
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
       auto output_a = output.packed_accessor<scalar_t, 4>();
@@ -1832,7 +1832,7 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
   const int n = output.size(3);
   const int log_n = int(log2((double) n));
   const bool complex = output.dim() == 5;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "butterfly_multiply_untied_backward_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_untied_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     if (!complex) {  // real
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
@@ -2020,7 +2020,7 @@ void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, 
   const int nstack = input.size(1);
   const int n = input.size(2);
   const int log_n = int(log2((double) n));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_multiply_untied_forward_backward_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
     const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
@@ -2127,7 +2127,7 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
   const int stack = kernel_size*kernel_size;
   const int log_n = int(log2((double) n));
   const int batch_size = output.size(1);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(),
     "butterfly_conv2d_cuda", [&] {
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
       // batch_size, c, h, w
@@ -2271,7 +2271,7 @@ void butterfly_conv2d_backward_cuda(const at::Tensor&grad, const at::Tensor& twi
   const int stack = kernel_size*kernel_size;
   const int n = d_input.size(1); // c_in
   const int log_n = int(log2((double) n));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(),
   "butterfly_conv2d_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     const auto grad_a = grad.packed_accessor<scalar_t, 3>();
@@ -2455,7 +2455,7 @@ void butterfly_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
   const int n = d_input.size(1); // c_in
   const int log_n = int(log2((double) n));
   const int c_out_ratio = nstack / stack;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(),
   "butterfly_conv2d_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
@@ -2557,7 +2557,7 @@ void butterfly_multiply_untied_svd_cuda(const at::Tensor& twiddle, at::Tensor& o
   const int nstack = twiddle.size(0);
   const int n = output.size(3);
   const int log_n = int(log2((double) n));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "butterfly_multiply_untied_svd_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_untied_svd_cuda", [&] {
     const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
     auto output_a = output.packed_accessor<scalar_t, 4>();
     if (increasing_stride) {
@@ -2720,7 +2720,7 @@ void butterfly_multiply_untied_svd_backward_cuda(const at::Tensor& twiddle, cons
   const int nstack = output.size(2);
   const int n = output.size(3);
   const int log_n = int(log2((double) n));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "butterfly_multiply_untied_svd_backward_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_untied_svd_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
     const auto output_a = output.packed_accessor<scalar_t, 4>();
@@ -2893,7 +2893,7 @@ void butterfly_multiply_untied_svd_forward_backward_cuda(const at::Tensor& twidd
   const int nstack = input.size(1);
   const int n = input.size(2);
   const int log_n = int(log2((double) n));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_multiply_untied_svd_forward_backward_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_svd_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
     const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
@@ -3006,7 +3006,7 @@ void butterfly_conv2d_svd_cuda(const at::Tensor& twiddle,
   const int stack = kernel_size*kernel_size;
   const int log_n = int(log2((double) n));
   const int batch_size = output.size(1);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(),
     "butterfly_conv2d_svd_cuda", [&] {
       const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
       // batch_size, c, h, w
@@ -3220,7 +3220,7 @@ void butterfly_conv2d_svd_forward_backward_cuda(const at::Tensor& twiddle,
   const int n = d_input.size(1); // c_in
   const int log_n = int(log2((double) n));
   const int c_out_ratio = nstack / stack;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(),
   "butterfly_conv2d_svd_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
@@ -3294,7 +3294,7 @@ void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Te
   block.x = std::min<int64_t>(MAX_BLOCK_SIZE, n / 2);
   block.y = div_up(MAX_BLOCK_SIZE, block.x);
   dim3 grid(div_up(n / 2, block.x), div_up(batch_size, block.y * WORK_PER_THREAD));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_even_odd_multiply", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "permutation_factor_even_odd_multiply", [&] {
     const auto p_a = p.packed_accessor<scalar_t, 1>();
     switch (input.dim()) {
       case 2: // real
@@ -3388,7 +3388,7 @@ void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, 
   block.x = std::min<int64_t>(MAX_BLOCK_SIZE, n / 2);
   block.y = div_up(MAX_BLOCK_SIZE, block.x);
   dim3 grid(div_up(n / 2, block.x), div_up(batch_size, block.y * WORK_PER_THREAD));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_even_odd_multiply_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "permutation_factor_even_odd_multiply_backward", [&] {
     const auto p_a = p.packed_accessor<scalar_t, 1>();
     auto d_p_expanded_a = d_p_expanded.packed_accessor<scalar_t, 2>();
     switch (input.dim()) {
@@ -3489,7 +3489,7 @@ void permutation_factor_reverse_multiply_cuda(const at::Tensor& p, const at::Ten
   block.x = std::min<int64_t>(MAX_BLOCK_SIZE, n / 2);
   block.y = div_up(MAX_BLOCK_SIZE, block.x);
   dim3 grid(div_up(n / 4, block.x), div_up(batch_size, block.y * WORK_PER_THREAD));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_reverse_multiply", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "permutation_factor_reverse_multiply", [&] {
     const auto p_a = p.packed_accessor<scalar_t, 1>();
     switch (input.dim()) {
       case 2: // real
@@ -3582,7 +3582,7 @@ void permutation_factor_reverse_multiply_backward_cuda(const at::Tensor& grad, c
   block.x = std::min<int64_t>(MAX_BLOCK_SIZE, n / 2);
   block.y = div_up(MAX_BLOCK_SIZE, block.x);
   dim3 grid(div_up(n / 4, block.x), div_up(batch_size, block.y * WORK_PER_THREAD));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_reverse_multiply_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "permutation_factor_reverse_multiply_backward", [&] {
     const auto p_a = p.packed_accessor<scalar_t, 1>();
     auto d_p_expanded_a = d_p_expanded.packed_accessor<scalar_t, 3>();
     switch (input.dim()) {
