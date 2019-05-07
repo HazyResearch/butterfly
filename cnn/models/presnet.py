@@ -283,10 +283,11 @@ class LinearPermutation(Permutation):
         return self.W.view(*([1]*len(sample_shape)), size, size)
 
 class SinkhornPermutation(Permutation):
-    def __init__(self, size, temp=1.0):
+    def __init__(self, size, temp=1.0, samples=1):
         super().__init__()
         self.size = size
         self.temp = temp
+        self.samples = samples
         # set sinkhorn iterations based on temperature
         self.sinkhorn_iters = 20 + int(1./temp)
         self.log_alpha = nn.Parameter(torch.zeros(size, size))
@@ -303,7 +304,9 @@ class SinkhornPermutation(Permutation):
         """
         return self.sinkhorn(self.log_alpha, temp=self.temp, n_iters=self.sinkhorn_iters)
 
-    def sample_soft_perm(self, sample_shape=(5,1,1)):
+    def sample_soft_perm(self, sample_shape=()):
+        # TODO design
+        sample_shape = (self.samples, 1, 1)
         log_alpha_noise = self.add_gumbel_noise(self.log_alpha, sample_shape)
         soft_perms = self.sinkhorn(log_alpha_noise, self.temp, n_iters=self.sinkhorn_iters)
         return soft_perms
