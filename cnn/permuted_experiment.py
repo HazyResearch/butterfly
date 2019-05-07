@@ -109,15 +109,15 @@ if slack_config_path.exists():
 
 @ex.config
 def default_config():
-    dataset = 'PCIFAR10'
-    model = 'LeNet'  # Name of model, see model_utils.py
+    dataset = 'PPCIFAR10'
+    model = 'PResNet18'  # Name of model, see model_utils.py
     args = {}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'Adam'  # Which optimizer to use, either Adam or SGD
     lr_decay = True  # Whether to use learning rate decay
-    lr_decay_period = 25  # Period of learning rate decay
+    lr_decay_period = 18  # Period of learning rate decay
     weight_decay = True  # Whether to use weight decay
     ntrials = 20  # Number of trials for hyperparameter tuning
-    nmaxepochs = 100  # Maximum number of epochs
+    nmaxepochs = 72  # Maximum number of epochs
     result_dir = project_root + '/cnn/results'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
     smoke_test = False  # Finish quickly for testing
@@ -140,7 +140,7 @@ def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_perio
         'lr': 2e-4 if optimizer == 'Adam' else random.uniform(math.log(2e-3), math.log(1e-0)),
         'plr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-2)))),
         # 'lr_decay_factor': sample_from(lambda spec: random.choice([0.1, 0.2])) if lr_decay else 1.0,
-        'lr_decay_factor': 0.1 if lr_decay else 1.0,
+        'lr_decay_factor': 0.12 if lr_decay else 1.0,
         'lr_decay_period': lr_decay_period,
         # 'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if weight_decay else 0.0,
         'weight_decay': 2e-4 if weight_decay else 0.0,
