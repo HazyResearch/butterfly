@@ -151,7 +151,8 @@ class TrainableModel(Trainable):
                 # target = target.expand(output.size()[:-1]).flatten()
                 # outupt = output.flatten(0, -2)
                 # print(output.shape, target.shape)
-                target = target.repeat(output.size(0)//target.size(0))
+                # assert self.model.samples == output.size(0) // target.size(0)
+                target = target.repeat(output.size(0) // target.size(0))
                 # print(output.shape, target.shape)
                 loss = F.cross_entropy(output, target)
             loss.backward()
@@ -161,6 +162,7 @@ class TrainableModel(Trainable):
         self.model.eval()
         test_loss = 0.0
         correct = 0.0
+        total_samples = 0
         with torch.no_grad():
             for data, target in self.test_loader:
                 data, target = data.to(self.device), target.to(self.device)
@@ -174,11 +176,14 @@ class TrainableModel(Trainable):
                     test_loss += F.cross_entropy(output, target, reduction='sum').item()
                     pred = output.argmax(dim=1, keepdim=True)
                     correct += (pred == target.data.view_as(pred)).long().cpu().sum().item()
+                    total_samples += output.size(0)
             if self.unsupervised:
                 p = self.model.get_permutations()
                 print(list(p)[0])
-        test_loss = test_loss / len(self.test_loader.dataset)
-        accuracy = correct / len(self.test_loader.dataset)
+        # test_loss = test_loss / len(self.test_loader.dataset)
+        # accuracy = correct / len(self.test_loader.dataset)
+        test_loss = test_loss / total_samples
+        accuracy = correct / total_samples
         # accuracy = 0.0
         print(f"test_loss {test_loss}, accuracy {accuracy}")
         return {"mean_loss": test_loss, "mean_accuracy": accuracy}
