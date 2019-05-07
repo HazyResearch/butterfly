@@ -27,6 +27,75 @@ from ray.tune.schedulers import AsyncHyperBandScheduler
 import model_utils
 import dataset_utils
 
+def listperm2matperm(listperm):
+    """Converts permutation list to matrix form.
+
+    Args:
+    listperm: (..., n) - tensor of list permutations of the set [n].
+
+    Return:
+    matperm: (..., n, n) - permutation matrices,
+    matperm[t, i, listperm[t,i]] = 1
+    """
+    n = listperm.size(-1)
+    P = torch.eye(n, dtype=torch.long, device=listperm.device)[listperm]
+    return P
+
+def matperm2listperm(matperm):
+    """Converts permutation matrix to its enumeration (list) form.
+
+    Args:
+    matperm: (..., n, n)
+
+    Returns:
+    listperm: (..., n) - listperm[t,i] is the index of the only non-zero entry in matperm[t, i, :]
+    """
+    batch_size = matperm.size(0)
+    n = matperm.size(-1)
+    assert matperm.size(-2) == matperm.size(-1)
+
+    #argmax is the index location of each maximum value found(argmax)
+    # _, argmax = torch.max(matperm, dim=-1, keepdim=False)
+    argmax = torch.argmax(matperm, dim=-1, keepdim=False)
+    # argmax = argmax.view(batch_size, n_objects)
+    return argmax
+
+def invert_listperm(listperm):
+    return matperm2listperm(torch.transpose(listperm2matperm(listperm), -1, -2))
+
+
+
+def perm_mse(perm, true):
+    """ perm is matrix, true is list """
+    return nn.functional.mse_loss(perm, listperm2matperm(true))
+
+def perm_nll(perm, true):
+    """ perm is matrix, true is list """
+    n = true.size(-1)
+    i = torch.arange(n, device=perm.device)
+    j = true.to(perm.device)
+    elements = perm.cpu()[torch.arange(n), true]
+    return -torch.sum(torch.log(elements.to(perm.device)))
+
+def perm_dist(perm1, perm2, loss_fn=perm_nll):
+    """
+    perm1, perm2: iterable of permutations
+    """
+    # TODO: is the scaling of this consistent across permutations of multiple "ranks"?
+    loss = 0.0
+    # if not isinstance(perm1, tuple):
+    #     perm1, perm2 = (perm1,), (perm2,)
+    for p1, p2 in zip(perm1, perm2):
+        # print(p2, type(p2))
+        loss = loss + loss_fn(p1, p2)
+        print(loss, loss.type())
+    return loss
+
+def tv(x):
+    """ Image total variation
+    x: (..., w, h)
+    """
+    return torch.tensor(0.0, requires_grad=True, device=x.device)
 
 class TrainableModel(Trainable):
     """Trainable object for a Pytorch model, to be used with Ray's Hyperband tuning.
@@ -52,29 +121,41 @@ class TrainableModel(Trainable):
                                        lr=config['lr'], momentum=0.9, weight_decay=config['weight_decay'])
         self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
 
+        #
+        self.unsupervised = config['unsupervised']
+
     def _train_iteration(self):
         self.model.train()
         for data, target in self.train_loader:
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
             output = self.model(data)
-            loss = F.cross_entropy(output, target)
+            if self.unsupervised:
+                loss = tv(output)
+            else:
+                loss = F.cross_entropy(output, target)
             loss.backward()
             self.optimizer.step()
 
     def _test(self):
         self.model.eval()
         test_loss = 0.0
-        correct = 0
+        # correct = torch.tensor(0, device=self.device)
         with torch.no_grad():
             for data, target in self.test_loader:
                 data, target = data.to(self.device), target.to(self.device)
                 output = self.model(data)
-                test_loss += F.cross_entropy(output, target, reduction='sum').item()
-                pred = output.argmax(dim=1, keepdim=True)
-                correct += (pred == target.data.view_as(pred)).long().cpu().sum()
+                if self.unsupervised:
+                    # test_loss += perm_dist(self.model.get_permutations(), self.test_loader.true_permutation, loss_fn=perm_mse)
+                    test_loss += perm_dist(self.model.get_permutations(), self.test_loader.true_permutation).item()
+                else:
+                    test_loss += F.cross_entropy(output, target, reduction='sum').item()
+                    pred = output.argmax(dim=1, keepdim=True)
+                    correct += (pred == target.data.view_as(pred)).long().cpu().sum()
         test_loss = test_loss / len(self.test_loader.dataset)
-        accuracy = correct.item() / len(self.test_loader.dataset)
+        # accuracy = correct.item() / len(self.test_loader.dataset)
+        accuracy = 0.0
+        print(f"test_loss {test_loss}, accuracy {accuracy}")
         return {"mean_loss": test_loss, "mean_accuracy": accuracy}
 
     def _train(self):
@@ -121,6 +202,7 @@ def default_config():
     result_dir = project_root + '/cnn/results'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
     smoke_test = False  # Finish quickly for testing
+    unsupervised = False
 
 
 @ex.named_config
@@ -132,7 +214,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test):
+def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -149,7 +231,8 @@ def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_perio
         'model': {'name': model, 'args': args},
         # 'dataset': {'name': 'CIFAR10'}
         # 'dataset': {'name': 'PCIFAR10'}
-        'dataset': {'name': dataset}
+        'dataset': {'name': dataset},
+        'unsupervised': unsupervised,
      }
     experiment = RayExperiment(
         # name=f'pcifar10_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',

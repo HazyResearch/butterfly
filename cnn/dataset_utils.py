@@ -22,7 +22,7 @@ def bitreversal_permutation(n):
     for i in range(m):
         n1 = perm.shape[0] // 2
         perm = np.hstack((perm[:n1], perm[n1:]))
-    return perm.squeeze(0)
+    return torch.tensor(perm.squeeze(0))
 
 
 
@@ -79,17 +79,16 @@ def get_dataset(config_dataset):
         # trainset = torch.utils.data.Subset(trainset, indices[:5000])
         validset = torch.utils.data.Subset(validset, indices[-10000:])
 
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=4)
-        testloader = torch.utils.data.DataLoader(validset, batch_size=128, shuffle=False, num_workers=4)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=256, shuffle=True, num_workers=4)
+        testloader = torch.utils.data.DataLoader(validset, batch_size=256, shuffle=False, num_workers=4)
 
         if config_dataset['name'] == 'PCIFAR10':
-            trainloader.true_permutation = true_perm
+            # trainloader.true_permutation = true_perm
             testloader.true_permutation = true_perm
         elif config_dataset['name'] == 'PPCIFAR10':
-            trainloader.true_permutation1 = true_perm1
-            trainloader.true_permutation2 = true_perm2
-            testloader.true_permutation1 = true_perm1
-            testloader.true_permutation2 = true_perm2
+            # trainloader.true_permutation1 = true_perm1
+            # trainloader.true_permutation2 = true_perm2
+            testloader.true_permutation = (true_perm1, true_perm2)
         return trainloader, testloader
     else:
         assert False, 'Dataset not implemented'

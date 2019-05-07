@@ -204,10 +204,10 @@ class TensorPermutation(nn.Module):
 
         self.rank = rank
         if self.rank == 1:
-            self.permute = self.perm_type(w*h, **kwargs)
+            self.permute = nn.ModuleList([self.perm_type(w*h, **kwargs)])
         elif self.rank == 2:
-            self.permute1 = self.perm_type(w, **kwargs)
-            self.permute2 = self.perm_type(h, **kwargs)
+            self.permute = nn.ModuleList([self.perm_type(w, **kwargs), self.perm_type(h, **kwargs)])
+            # self.permute2 = self.perm_type(h, **kwargs)
         else:
             assert False, "prank must be 1 or 2"
 
@@ -230,20 +230,23 @@ class TensorPermutation(nn.Module):
     def forward(self, x):
         if self.rank == 1:
             # perm = self.permute.sample_soft_perm()
-            perm = self.perm_fn(self.permute)
+            perm = self.perm_fn(self.permute[0])
             x = x.view(-1, self.w*self.h)
             x = x @ perm
             x = x.view(-1, 3, self.w, self.h) # TODO make this channel agnostic
         elif self.rank == 2:
             x = x.transpose(-1, -2)
             # perm2 = self.permute2.sample_soft_perm()
-            perm2 = self.perm_fn(self.permute2)
+            perm2 = self.perm_fn(self.permute[1])
             x = x @ perm2
             x = x.transpose(-1, -2)
             # perm1 = self.permute1.sample_soft_perm()
-            perm1 = self.perm_fn(self.permute1)
+            perm1 = self.perm_fn(self.permute[0])
             x = x @ perm1
         return x
+
+    def get_permutations(self):
+        return map(self.perm_fn, self.permute)
 
 
 class Permutation(nn.Module):
