@@ -233,6 +233,7 @@ def default_config():
     cuda = torch.cuda.is_available()  # Whether to use GPU
     smoke_test = False  # Finish quickly for testing
     unsupervised = False
+    batch = 128
 
 
 @ex.named_config
@@ -244,7 +245,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised):
+def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -261,7 +262,7 @@ def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_perio
         'model': {'name': model, 'args': args},
         # 'dataset': {'name': 'CIFAR10'}
         # 'dataset': {'name': 'PCIFAR10'}
-        'dataset': {'name': dataset},
+        'dataset': {'name': dataset, 'batch': batch},
         'unsupervised': unsupervised,
      }
     experiment = RayExperiment(

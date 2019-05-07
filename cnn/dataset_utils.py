@@ -79,8 +79,8 @@ def get_dataset(config_dataset):
         # trainset = torch.utils.data.Subset(trainset, indices[:5000])
         validset = torch.utils.data.Subset(validset, indices[-10000:])
 
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=256, shuffle=True, num_workers=4)
-        testloader = torch.utils.data.DataLoader(validset, batch_size=256, shuffle=False, num_workers=4)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=config_dataset['batch'], shuffle=True, num_workers=4)
+        testloader = torch.utils.data.DataLoader(validset, batch_size=config_dataset['batch'], shuffle=False, num_workers=4)
 
         if config_dataset['name'] == 'PCIFAR10':
             # trainloader.true_permutation = true_perm
