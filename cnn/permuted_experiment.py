@@ -75,7 +75,9 @@ def perm_nll(perm, true):
     i = torch.arange(n, device=perm.device)
     j = true.to(perm.device)
     elements = perm.cpu()[torch.arange(n), true]
-    return -torch.sum(torch.log(elements.to(perm.device)))
+    nll = -torch.sum(torch.log(elements.to(perm.device)))
+    # print("nll", nll)
+    return nll
 
 def perm_dist(perm1, perm2, loss_fn=perm_nll):
     """
@@ -88,14 +90,27 @@ def perm_dist(perm1, perm2, loss_fn=perm_nll):
     for p1, p2 in zip(perm1, perm2):
         # print(p2, type(p2))
         loss = loss + loss_fn(p1, p2)
-        print(loss, loss.type())
+    print(loss, loss.type())
     return loss
 
-def tv(x):
+def tv(x, norm=2):
     """ Image total variation
     x: (..., w, h)
     """
-    return torch.tensor(0.0, requires_grad=True, device=x.device)
+    dx = x[..., 1:, :] - x[..., :-1, :]
+    dy = x[..., :, 1:] - x[..., :, :-1]
+    delta = x.new_zeros(*x.size(), 2) # torch.zeros_like(x)
+    # delta[..., :-1, :] += torch.abs(dx) ** norm
+    # delta[..., :, :-1] += torch.abs(dy) ** norm
+    # delta = delta ** (1/norm)
+    # delta[..., :-1, :] += torch.abs(dx)
+    # delta[..., :, :-1] += torch.abs(dy)
+    delta[..., :-1, :, 0] = torch.abs(dx)
+    delta[..., :, :-1, 1] = torch.abs(dy)
+    pv = torch.norm(delta, dim=-1, p=norm)
+    tv = pv.sum() / x.size(0)
+    return tv
+    # return torch.tensor(1.0, requires_grad=True, device=x.device)
 
 class TrainableModel(Trainable):
     """Trainable object for a Pytorch model, to be used with Ray's Hyperband tuning.
@@ -140,21 +155,25 @@ class TrainableModel(Trainable):
     def _test(self):
         self.model.eval()
         test_loss = 0.0
-        # correct = torch.tensor(0, device=self.device)
+        correct = 0.0
         with torch.no_grad():
             for data, target in self.test_loader:
                 data, target = data.to(self.device), target.to(self.device)
                 output = self.model(data)
                 if self.unsupervised:
-                    # test_loss += perm_dist(self.model.get_permutations(), self.test_loader.true_permutation, loss_fn=perm_mse)
-                    test_loss += perm_dist(self.model.get_permutations(), self.test_loader.true_permutation).item()
+                    test_loss += tv(output).item()
+                    p = self.model.get_permutations()
+                    correct += perm_dist(self.model.get_permutations(), self.test_loader.true_permutation).item()
                 else:
                     test_loss += F.cross_entropy(output, target, reduction='sum').item()
                     pred = output.argmax(dim=1, keepdim=True)
-                    correct += (pred == target.data.view_as(pred)).long().cpu().sum()
+                    correct += (pred == target.data.view_as(pred)).long().cpu().sum().item()
+            if self.unsupervised:
+                p = self.model.get_permutations()
+                print(list(p)[0])
         test_loss = test_loss / len(self.test_loader.dataset)
-        # accuracy = correct.item() / len(self.test_loader.dataset)
-        accuracy = 0.0
+        accuracy = correct / len(self.test_loader.dataset)
+        # accuracy = 0.0
         print(f"test_loss {test_loss}, accuracy {accuracy}")
         return {"mean_loss": test_loss, "mean_accuracy": accuracy}
 
@@ -256,6 +275,7 @@ def run(model, result_dir, nmaxepochs):
     try:
         with open('../config/redis_address', 'r') as f:
             address = f.read().strip()
+            # ray.init(redis_address=address, temp_dir='/tmp/ray2/')
             ray.init(redis_address=address)
     except:
         ray.init()
