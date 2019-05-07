@@ -160,7 +160,9 @@ class PResNet(nn.Module):
     def forward(self, x):
         # print(x.size())
         # print(x)
+        batch = x.size(0)
         x = self.permute(x)
+        x = x.view(-1, 3, 32, 32)
 
         # print(x.size())
         x = self.conv1(x)
@@ -186,6 +188,8 @@ class PResNet(nn.Module):
         # x = F.relu(self.fc(x))
         x = self.logits(x)
         # print(x.size())
+
+        # x = x.view(-1, batch, self.num_classes)
 
         return x
 
@@ -276,7 +280,7 @@ class LinearPermutation(Permutation):
     #     return self.W
 
     def sample_soft_perm(self, sample_shape=()):
-        return self.W # TODO do this properly
+        return self.W.view(*([1]*len(sample_shape)), size, size)
 
 class SinkhornPermutation(Permutation):
     def __init__(self, size, temp=1.0):
@@ -299,7 +303,7 @@ class SinkhornPermutation(Permutation):
         """
         return self.sinkhorn(self.log_alpha, temp=self.temp, n_iters=self.sinkhorn_iters)
 
-    def sample_soft_perm(self, sample_shape=()):
+    def sample_soft_perm(self, sample_shape=(5,1,1)):
         log_alpha_noise = self.add_gumbel_noise(self.log_alpha, sample_shape)
         soft_perms = self.sinkhorn(log_alpha_noise, self.temp, n_iters=self.sinkhorn_iters)
         return soft_perms

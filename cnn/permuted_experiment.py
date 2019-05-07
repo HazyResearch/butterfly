@@ -148,6 +148,11 @@ class TrainableModel(Trainable):
             if self.unsupervised:
                 loss = tv(output)
             else:
+                # target = target.expand(output.size()[:-1]).flatten()
+                # outupt = output.flatten(0, -2)
+                # print(output.shape, target.shape)
+                target = target.repeat(output.size(0)//target.size(0))
+                # print(output.shape, target.shape)
                 loss = F.cross_entropy(output, target)
             loss.backward()
             self.optimizer.step()
@@ -165,6 +170,7 @@ class TrainableModel(Trainable):
                     p = self.model.get_permutations()
                     correct += perm_dist(self.model.get_permutations(), self.test_loader.true_permutation).item()
                 else:
+                    target = target.repeat(output.size(0)//target.size(0))
                     test_loss += F.cross_entropy(output, target, reduction='sum').item()
                     pred = output.argmax(dim=1, keepdim=True)
                     correct += (pred == target.data.view_as(pred)).long().cpu().sum().item()
