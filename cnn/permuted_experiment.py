@@ -75,7 +75,7 @@ def perm_nll(perm, true):
     i = torch.arange(n, device=perm.device)
     j = true.to(perm.device)
     elements = perm.cpu()[torch.arange(n), true]
-    nll = -torch.sum(torch.log(elements.to(perm.device)))
+    nll = -torch.sum(torch.log2(elements.to(perm.device)))
     # print("nll", nll)
     return nll
 
@@ -90,7 +90,7 @@ def perm_dist(perm1, perm2, loss_fn=perm_nll):
     for p1, p2 in zip(perm1, perm2):
         # print(p2, type(p2))
         loss = loss + loss_fn(p1, p2)
-    print(loss, loss.type())
+    # print(loss, loss.type())
     return loss
 
 def tv(x, norm=2):
@@ -169,8 +169,7 @@ class TrainableModel(Trainable):
                 output = self.model(data)
                 if self.unsupervised:
                     test_loss += tv(output).item()
-                    p = self.model.get_permutations()
-                    correct += perm_dist(self.model.get_permutations(), self.test_loader.true_permutation).item()
+                    # p = self.model.get_permutations()
                 else:
                     target = target.repeat(output.size(0)//target.size(0))
                     test_loss += F.cross_entropy(output, target, reduction='sum').item()
@@ -178,14 +177,20 @@ class TrainableModel(Trainable):
                     correct += (pred == target.data.view_as(pred)).long().cpu().sum().item()
                     total_samples += output.size(0)
             if self.unsupervised:
+                correct = perm_dist(self.model.get_permutations(), self.test_loader.true_permutation).item()
+                total_samples = 1
                 p = self.model.get_permutations()
-                print(list(p)[0])
+                p0 = list(p)[0]
+                print(p0)
+                true = self.test_loader.true_permutation[0]
+                elements = p0[torch.arange(len(true)), true]
+                print(elements)
         # test_loss = test_loss / len(self.test_loader.dataset)
         # accuracy = correct / len(self.test_loader.dataset)
         test_loss = test_loss / total_samples
         accuracy = correct / total_samples
         # accuracy = 0.0
-        print(f"test_loss {test_loss}, accuracy {accuracy}")
+        # print(f"test_loss {test_loss}, accuracy {accuracy}")
         return {"mean_loss": test_loss, "mean_accuracy": accuracy}
 
     def _train(self):
