@@ -202,13 +202,15 @@ class ResNet(nn.Module):
 
         features = [nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
             , bn(64) , nn.ReLU(inplace=True) , nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-            , self._make_layer(block, int(64*k), layers[0],
-                is_structured=self.is_structured[0])
-            , self._make_layer(block, int(128*k), layers[1], stride=2, is_structured=self.is_structured[1])
+            , self._make_layer(block, int(64*k), layers[0], is_structured=self.is_structured[0],
+                structure_type=structure_type, nblocks=nblocks, param=param)
+            , self._make_layer(block, int(128*k), layers[1], stride=2, is_structured=self.is_structured[1],
+                structure_type=structure_type, nblocks=nblocks, param=param)
             # Only stacking butterflies in the 3rd layer for now
             , self._make_layer(block, int(256*k), layers[2], stride=2, is_structured=self.is_structured[2],
                 structure_type=structure_type, nblocks=nblocks, param=param)
-            , self._make_layer(block, int(512*k), layers[3], stride=2, is_structured=self.is_structured[3])]
+            , self._make_layer(block, int(512*k), layers[3], stride=2, is_structured=self.is_structured[3],
+                structure_type=structure_type, nblocks=nblocks, param=param)]
         out_sz = int(512*k) * block.expansion
 
         if vgg_head:
