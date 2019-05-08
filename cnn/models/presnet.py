@@ -300,9 +300,9 @@ class SinkhornPermutation(Permutation):
         self.samples = samples
         # set sinkhorn iterations based on temperature
         self.sinkhorn_iters = 20 + int(1./temp)
-        self.log_alpha = nn.Parameter(torch.zeros(size, size))
+        self.log_alpha = nn.Parameter(add_gumbel_noise(torch.zeros(size, size)))
+        # nn.init.kaiming_uniform_(self.log_alpha)
         self.log_alpha.is_perm_param = True
-        nn.init.kaiming_uniform_(self.log_alpha)
         # TODO: test effect of random initialization
 
     def mean_perm(self):
@@ -346,7 +346,7 @@ def sinkhorn(log_alpha, temp=1.0, n_iters=20):
     return torch.exp(log_alpha)
 
 def sample_gumbel(shape, eps=1e-10):
-    U = torch.rand(shape, dtype=torch.float, device=device)
+    U = torch.rand(shape, dtype=torch.float)
     return -torch.log(eps - torch.log(U + eps))
 
 def add_gumbel_noise(log_alpha, sample_shape=()):
@@ -362,7 +362,7 @@ def add_gumbel_noise(log_alpha, sample_shape=()):
     # batch = log_alpha.size(0)
     n = log_alpha.size(-1)
     noise = sample_gumbel(sample_shape + log_alpha.shape)
-    log_alpha_noise = log_alpha + noise
+    log_alpha_noise = log_alpha + noise.to(log_alpha.device)
     return log_alpha_noise
 
 
