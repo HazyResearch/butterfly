@@ -72,22 +72,28 @@ def perm_mse(perm, true):
 def perm_nll(perm, true):
     """ perm is matrix, true is list """
     n = true.size(-1)
-    i = torch.arange(n, device=perm.device)
-    j = true.to(perm.device)
-    elements = perm.cpu()[torch.arange(n), true]
+    # i = torch.arange(n, device=perm.device)
+    # j = true.to(perm.device)
+    # print("perm_nll:", perm.size(), true.size())
+    elements = perm.cpu()[..., torch.arange(n), true]
+    # elements = perm.cpu()[torch.arange(n), true]
     nll = -torch.sum(torch.log2(elements.to(perm.device)))
     # print("nll", nll)
     return nll
 
 def perm_dist(perm1, perm2, loss_fn=perm_nll):
     """
-    perm1, perm2: iterable of permutations
+    perm1: iterable of permutation tensors
+           each tensor can have shape (n, n) or (s, n, n)
+    perm2: iterable of permutation lists (n)
     """
     # TODO: is the scaling of this consistent across permutations of multiple "ranks"?
     loss = 0.0
     # if not isinstance(perm1, tuple):
     #     perm1, perm2 = (perm1,), (perm2,)
     for p1, p2 in zip(perm1, perm2):
+        # print(p1.size(), p1.type())
+        # print(p2.size(), p2.type())
         # print(p2, type(p2))
         loss = loss + loss_fn(p1, p2)
     # print(loss, loss.type())
@@ -177,14 +183,20 @@ class TrainableModel(Trainable):
                     correct += (pred == target.data.view_as(pred)).long().cpu().sum().item()
                     total_samples += output.size(0)
             if self.unsupervised:
-                correct = perm_dist(self.model.get_permutations(), self.test_loader.true_permutation).item()
                 total_samples = 1
-                p = self.model.get_permutations()
-                p0 = list(p)[0]
+                # gp = self.model.get_permutations()
+                # import pdb; pdb.set_trace()
+                p = self.model.get_permutations() # (rank, sample, n, n)
+                # print(f"PERMUTATIONS SHAPE {p.shape}")
+                p0 = p[0]
+                # if len(p0.size()) > 2: p0 = p0[0]
                 print(p0)
                 true = self.test_loader.true_permutation[0]
-                elements = p0[torch.arange(len(true)), true]
+                elements = p0[..., torch.arange(len(true)), true]
                 print(elements)
+
+                correct = perm_dist(p, self.test_loader.true_permutation).item()
+                # print(elements)
         # test_loss = test_loss / len(self.test_loader.dataset)
         # accuracy = correct / len(self.test_loader.dataset)
         test_loss = test_loss / total_samples

@@ -242,16 +242,26 @@ class TensorPermutation(nn.Module):
             x = x.transpose(-1, -2)
             # perm2 = self.permute2.sample_soft_perm()
             perm2 = self.perm_fn(self.permute[1])
-            x = x @ perm2
+            # print("Permutation:", perm2.shape)
+            # x = x @ perm2
+            x = x @ perm2.unsqueeze(-3).unsqueeze(-3)
+            # unsqueeze to explicitly call matmul, can use einsum too
             x = x.transpose(-1, -2)
             # perm1 = self.permute1.sample_soft_perm()
             perm1 = self.perm_fn(self.permute[0])
-            x = x @ perm1
+            # x = x @ perm1
+            x = x @ perm1.unsqueeze(-3).unsqueeze(-3)
+            # collapse samples with batch
+            x = x.view(-1, 3, self.w, self.h) # TODO make this channel agnostic
         return x
 
     def get_permutations(self):
-        return map(self.perm_fn, self.permute)
-
+        # return shape (rank, s, n, n)
+        # softperm will return (s, 1, 1, n, n), squeeze for now
+        # perms = torch.stack([self.perm_fn(p).squeeze() for p in self.permute], dim=0)
+        perms = torch.stack([self.perm_fn(p) for p in self.permute], dim=0)
+        print("get_permutations:", perms.shape)
+        return perms
 
 class Permutation(nn.Module):
 
@@ -306,7 +316,8 @@ class SinkhornPermutation(Permutation):
 
     def sample_soft_perm(self, sample_shape=()):
         # TODO design
-        sample_shape = (self.samples, 1, 1)
+        # sample_shape = (self.samples, 1, 1)
+        sample_shape = (self.samples,)
         log_alpha_noise = self.add_gumbel_noise(self.log_alpha, sample_shape)
         soft_perms = self.sinkhorn(log_alpha_noise, self.temp, n_iters=self.sinkhorn_iters)
         return soft_perms
