@@ -104,6 +104,16 @@ def perm_dist(perm1, perm2, loss_fn=perm_nll):
     # print(loss, loss.type())
     return loss
 
+def perm_entropy(p):
+    """
+    p: (..., n, n)
+    Returns: avg
+    Note: Max entropy of n x n matrix is n\log(n)
+    """
+    n = p.size(-1)
+    p = p.view(-1, n, n)
+    return -torch.sum(p * torch.log2(p)) / p.size(0)
+
 def tv(x, norm=2, p=2):
     """ Image total variation
     x: (b, c, w, h)
@@ -205,6 +215,7 @@ class TrainableModel(Trainable):
                 p0 = p[0]
                 # if len(p0.size()) > 2: p0 = p0[0]
                 print(p0)
+                print("ENTROPY ", perm_entropy(p))
                 true = self.test_loader.true_permutation[0]
                 elements = p0[..., torch.arange(len(true)), true]
                 print(elements)
