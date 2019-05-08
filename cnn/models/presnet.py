@@ -262,8 +262,15 @@ class TensorPermutation(nn.Module):
         # softperm will return (s, 1, 1, n, n), squeeze for now
         # perms = torch.stack([self.perm_fn(p).squeeze() for p in self.permute], dim=0)
         perms = torch.stack([self.perm_fn(p) for p in self.permute], dim=0)
-        print("get_permutations:", perms.shape)
+        # print("get_permutations:", perms.shape)
         return perms
+
+    def get_mean_perms(self):
+        # TODO do this properly
+        perms = torch.stack([p.mean_perm() for p in self.permute], dim=0)
+        return perms
+        # def mean(s):
+        #     return sinkhorn(s.log_alpha, temp=1.0, n_iters=s.sinkhorn_iters)
 
 class Permutation(nn.Module):
 

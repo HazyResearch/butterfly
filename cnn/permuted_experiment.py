@@ -100,16 +100,20 @@ class TrainableModel(Trainable):
                 # print(f"PERMUTATIONS SHAPE {p.shape}")
                 p0 = p[0]
                 # if len(p0.size()) > 2: p0 = p0[0]
-                print(p0)
-                print("ENTROPY ", perm.entropy(p, reduction='mean'))
-                print("TRANSPORT ", perm.dist(p, self.test_loader.true_permutation, fn='was'))
+                # print(p0)
+                print("sample ENTROPY ", perm.entropy(p, reduction='mean'))
+                print("sample TRANSPORT ", perm.dist(p, self.test_loader.true_permutation, fn='was'))
                 true = self.test_loader.true_permutation[0]
                 elements = p0[..., torch.arange(len(true)), true]
-                print(elements)
+                print("max in true perm elements", elements.max(dim=-1)[0])
 
                 correct = perm.dist(p, self.test_loader.true_permutation).item()
                 correct = correct * total_samples # hack to normalize properly
-                # print(elements)
+
+                p = self.model.get_mean_perms() # (rank, sample, n, n)
+                print("mean ENTROPY ", perm.entropy(p, reduction='mean'))
+                print("mean TRANSPORT ", perm.dist(p, self.test_loader.true_permutation, fn='was'))
+
         # test_loss = test_loss / len(self.test_loader.dataset)
         # accuracy = correct / len(self.test_loader.dataset)
         test_loss = test_loss / total_samples
