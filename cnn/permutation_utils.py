@@ -159,6 +159,6 @@ def tv(x, norm=2, p=2):
         v = torch.sum(delta ** norm, dim=-1)
     else:
         v = torch.norm(torch.abs(delta), dim=-1, p=norm)
-    tv = v.sum() / x.size(0)
+    tv = v.sum() # / x.size(0)
     return tv
     # return torch.tensor(1.0, requires_grad=True, device=x.device)
