@@ -172,6 +172,8 @@ def default_config():
     complex = False  # Whether to use complex factorization or real factorization
     fixed_order = True  # Whether the order of the factors are fixed
     param = 'regular' # How to constrain the parameters
+    lr_min = 1e-2
+    lr_max = 5e-1
     ntrials = 20  # Number of trials for hyperparameter tuning
     nsteps = 400  # Number of steps per epoch
     nepochsvalid = 5  # Frequency of validation (polishing), in terms of epochs
@@ -183,7 +185,7 @@ def default_config():
 
 
 @ex.capture
-def transform_experiment(model, target, size, complex, param, ntrials, nsteps, nepochsvalid, result_dir, cuda, nthreads, smoke_test):
+def transform_experiment(model, target, size, complex, param, lr_min, lr_max, ntrials, nsteps, nepochsvalid, result_dir, cuda, nthreads, smoke_test):
     # assert model in ['B', 'BP', 'PBT', 'BPP', 'BPBP', 'BBT', 'BBB'], f'Model {model} not implemented'
     config={
         'model': model,
@@ -194,7 +196,7 @@ def transform_experiment(model, target, size, complex, param, ntrials, nsteps, n
         'share_logit': True,
         'param': param,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-2), math.log(5e-1)))),
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(lr_min), math.log(lr_max)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'n_steps_per_epoch': nsteps,
         'n_epochs_per_validation': nepochsvalid,
