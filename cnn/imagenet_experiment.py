@@ -5,6 +5,7 @@ sys.path.insert(0, project_root)
 os.environ['PYTHONPATH'] = project_root + ":" + os.environ.get('PYTHONPATH', '')
 
 import argparse, shutil, time, warnings
+import subprocess
 from datetime import datetime
 from pathlib import Path
 import numpy as np
@@ -87,10 +88,13 @@ args = get_parser().parse_args()
 logging.basicConfig(
 level=logging.INFO,
 handlers=[
-    logging.FileHandler(f'{args.save_dir}/nlayers_{args.num_structured_layers}_{args.structure_type}_blocks_{args.nblocks}.log'),
+    logging.FileHandler(f'{args.save_dir}/main_thread.log'),
     logging.StreamHandler()
 ])
 logger = logging.getLogger()
+logger.info(args) 
+label = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode('ascii').strip()
+logger.info(f'Git hash: {label}')
 
 def get_loaders(traindir, valdir, use_val_sampler=True, min_scale=0.08):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -163,13 +167,13 @@ def main():
     optimizer = torch.optim.SGD([{'params': structured_params, 'weight_decay': 0.0},
             {'params': unstructured_params}], args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     logger.info('Created optimizer')
-    best_prec1 = 0
+    best_acc1 = 0
     # optionally resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
             checkpoint = torch.load(args.resume, map_location = lambda storage, loc: storage.cuda(args.gpu))
             args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
+            best_acc1 = checkpoint['best_acc1']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
         else: logger.info("=> no checkpoint found at '{}'".format(args.resume))
@@ -210,14 +214,14 @@ def main():
             train(train_loader, model, criterion, optimizer, epoch)
 
         if args.prof: break
-        prec1 = validate(val_loader, model, criterion, epoch, start_time)
+        acc1 = validate(val_loader, model, criterion, epoch, start_time)
 
         if args.rank == 0:
-            is_best = prec1 > best_prec1
-            best_prec1 = max(prec1, best_prec1)
+            is_best = acc1 > best_acc1
+            best_acc1 = max(acc1, best_acc1)
             save_checkpoint({
                 'epoch': epoch + 1, 'arch': args.arch, 'state_dict': model.state_dict(),
-                'best_prec1': best_prec1, 'optimizer' : optimizer.state_dict(),
+                'best_acc1': best_acc1, 'optimizer' : optimizer.state_dict(),
             }, is_best)
 
 # item() is a recent addition, so this helps with backward compatibility.
@@ -285,18 +289,18 @@ def train(train_loader, model, criterion, optimizer, epoch):
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss
-        prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+        acc1, acc5 = accuracy(output.data, target, topk=(1, 5))
 
         if args.distributed:
             reduced_loss = reduce_tensor(loss.data)
-            prec1 = reduce_tensor(prec1)
-            prec5 = reduce_tensor(prec5)
+            acc1 = reduce_tensor(acc1)
+            acc5 = reduce_tensor(acc5)
         else:
             reduced_loss = loss.data
 
         losses.update(to_python_float(reduced_loss), input.size(0))
-        top1.update(to_python_float(prec1), input.size(0))
-        top5.update(to_python_float(prec5), input.size(0))
+        top1.update(to_python_float(acc1), input.size(0))
+        top5.update(to_python_float(acc5), input.size(0))
 
         loss = loss*args.loss_scale
         # compute gradient and do SGD step
@@ -316,8 +320,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                  'Acc@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                  'Acc@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                    epoch, i, len(train_loader), batch_time=batch_time,
                    data_time=data_time, loss=losses, top1=top1, top5=top5))
 
@@ -349,14 +353,14 @@ def validate(val_loader, model, criterion, epoch, start_time):
         reduced_loss = reduce_tensor(loss.data)
 
         # measure accuracy and record loss
-        prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+        acc1, acc5 = accuracy(output.data, target, topk=(1, 5))
 
-        reduced_prec1 = reduce_tensor(prec1)
-        reduced_prec5 = reduce_tensor(prec5)
+        reduced_acc1 = reduce_tensor(acc1)
+        reduced_acc5 = reduce_tensor(acc5)
 
         losses.update(to_python_float(reduced_loss), input.size(0))
-        top1.update(to_python_float(prec1), input.size(0))
-        top5.update(to_python_float(prec5), input.size(0))
+        top1.update(to_python_float(acc1), input.size(0))
+        top5.update(to_python_float(acc5), input.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -366,8 +370,8 @@ def validate(val_loader, model, criterion, epoch, start_time):
             logger.info('Test: [{0}/{1}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                  'Acc@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                  'Acc@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                    i, len(val_loader), batch_time=batch_time, loss=losses,
                    top1=top1, top5=top5))
 
@@ -375,7 +379,7 @@ def validate(val_loader, model, criterion, epoch, start_time):
 
     time_diff = datetime.now()-start_time
     logger.info(f'Epoch {epoch}: {float(time_diff.total_seconds())} sec')
-    logger.info(f' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}\n')
+    logger.info(f' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}\n')
 
     return top1.avg
 
@@ -415,7 +419,7 @@ def adjust_learning_rate(optimizer, epoch):
 
 
 def accuracy(output, target, topk=(1,)):
-    """Computes the precision@k for the specified values of k"""
+    """Computes the acccuracy@k for the specified values of k"""
     maxk = max(topk)
     batch_size = target.size(0)
 

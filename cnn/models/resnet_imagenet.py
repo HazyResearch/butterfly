@@ -3,7 +3,7 @@
 import torch.nn as nn
 import math
 import torch.utils.model_zoo as model_zoo
-from .layers import *
+from .layers import Flatten
 
 from .butterfly_conv import ButterflyConv2d, ButterflyConv2dBBT
 

@@ -1,3 +1,5 @@
+# https://github.com/fastai/imagenet-fast/blob/master/imagenet_nv/distributed.py 
+
 import torch
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 import torch.distributed as dist

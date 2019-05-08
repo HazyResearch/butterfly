@@ -1,3 +1,5 @@
+# modified from https://github.com/fastai/imagenet-fast/blob/master/imagenet_nv/multiproc.py
+
 import argparse
 import torch
 import sys
