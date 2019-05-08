@@ -99,12 +99,17 @@ def perm_dist(perm1, perm2, loss_fn=perm_nll):
     # print(loss, loss.type())
     return loss
 
-def tv(x, norm=2):
+def tv(x, norm=2, p=2):
     """ Image total variation
     x: (b, c, w, h)
+
+    If D = (dx, dy) is the vector of differences at a given pixel,
+    sum up ||D||_norm^p over image
     """
-    dx = x[..., 1:, :] - x[..., :-1, :]
-    dy = x[..., :, 1:] - x[..., :, :-1]
+    # each pixel wants all channels as part of its delta vector
+    x = x.transpose(-3, -2).transpose(-2, -1) # (b, w, h, c)
+    dx = x[:, 1:, :, :] - x[:, :-1, :, :]
+    dy = x[:, :, 1:, :] - x[:, :, :-1, :]
 
     # delta = torch.zeros_like(x)
     # delta[..., :-1, :] += torch.abs(dx) ** norm
@@ -112,10 +117,14 @@ def tv(x, norm=2):
     # delta = delta ** (1/norm)
     # tv = delta.sum() / x.size(0)
     delta = x.new_zeros(*x.size(), 2) # torch.zeros_like(x)
-    delta[..., :-1, :, 0] = torch.abs(dx)
-    delta[..., :, :-1, 1] = torch.abs(dy)
-    pv = torch.norm(delta, dim=-1, p=norm)
-    tv = pv.sum() / x.size(0)
+    delta[:, :-1, :, :, 0] = torch.abs(dx)
+    delta[:, :, :-1, :, 1] = torch.abs(dy)
+    delta = delta.flatten(-2, -1) # (b, w, h, 2*c)
+    if norm == p:
+        v = torch.sum(delta ** norm, dim=-1)
+    else:
+        v = torch.norm(torch.abs(delta), dim=-1, p=norm)
+    tv = v.sum() / x.size(0)
     return tv
     # return torch.tensor(1.0, requires_grad=True, device=x.device)
 
