@@ -101,16 +101,17 @@ def perm_dist(perm1, perm2, loss_fn=perm_nll):
 
 def tv(x, norm=2):
     """ Image total variation
-    x: (..., w, h)
+    x: (b, c, w, h)
     """
     dx = x[..., 1:, :] - x[..., :-1, :]
     dy = x[..., :, 1:] - x[..., :, :-1]
-    delta = x.new_zeros(*x.size(), 2) # torch.zeros_like(x)
+
+    # delta = torch.zeros_like(x)
     # delta[..., :-1, :] += torch.abs(dx) ** norm
     # delta[..., :, :-1] += torch.abs(dy) ** norm
     # delta = delta ** (1/norm)
-    # delta[..., :-1, :] += torch.abs(dx)
-    # delta[..., :, :-1] += torch.abs(dy)
+    # tv = delta.sum() / x.size(0)
+    delta = x.new_zeros(*x.size(), 2) # torch.zeros_like(x)
     delta[..., :-1, :, 0] = torch.abs(dx)
     delta[..., :, :-1, 1] = torch.abs(dy)
     pv = torch.norm(delta, dim=-1, p=norm)
