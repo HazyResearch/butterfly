@@ -21,6 +21,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import models.resnet_imagenet as models # only use imagenet models
 from distributed import DistributedDataParallel as DDP
+import logging
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
@@ -49,7 +50,7 @@ def get_parser():
     parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                         metavar='W', help='weight decay (default: 1e-4)')
     parser.add_argument('--print-freq', '-p', default=10, type=int,
-                        metavar='N', help='print frequency (default: 10)')
+                        metavar='N', help='Print frequency (default: 10)')
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
     parser.add_argument('--small', action='store_true', help='start with smaller images')
@@ -83,6 +84,13 @@ def get_parser():
 
 cudnn.benchmark = True
 args = get_parser().parse_args()
+logging.basicConfig(
+level=logging.INFO,
+handlers=[
+    logging.FileHandler(f'{args.save_dir}/nlayers_{args.num_structured_layers}_{args.structure_type}_blocks_{args.nblocks}.log'),
+    logging.StreamHandler()
+])
+logger = logging.getLogger()
 
 def get_loaders(traindir, valdir, use_val_sampler=True, min_scale=0.08):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -114,7 +122,6 @@ def get_loaders(traindir, valdir, use_val_sampler=True, min_scale=0.08):
 
 
 def main():
-    print("~~epoch\thours\ttop1Accuracy\n")
     start_time = datetime.now()
     args.distributed = True #args.world_size > 1
     args.gpu = 0
@@ -122,15 +129,15 @@ def main():
         import socket
         args.gpu = args.rank % torch.cuda.device_count()
         torch.cuda.set_device(args.gpu)
-        print('| distributed init (rank {}): {}'.format(args.rank, args.distributed_init_method), flush=True)
+        logger.info('| distributed init (rank {}): {}'.format(args.rank, args.distributed_init_method))
         dist.init_process_group( backend=args.dist_backend, init_method=args.distributed_init_method,
             world_size=args.world_size, rank=args.rank, )
-        print('| initialized host {} as rank {}'.format(socket.gethostname(), args.rank))
+        logger.info('| initialized host {} as rank {}'.format(socket.gethostname(), args.rank))
         #args.gpu = args.rank % torch.cuda.device_count()
         #torch.cuda.set_device(args.gpu)
-        #print('initializing...')
+        #logger.info('initializing...')
         #dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size)
-        #print('initialized')
+        #logger.info('initialized')
 
     # create model
     if args.pretrained: model = models.__dict__[args.arch](pretrained=True)
@@ -139,12 +146,12 @@ def main():
 
     model = model.cuda()
     n_dev = torch.cuda.device_count()
-    print('Created model')
+    logger.info('Created model')
     if args.distributed: model = DDP(model)
     elif args.dp:
         model = nn.DataParallel(model)
         args.batch_size *= n_dev
-    print('Set up data parallel')
+    logger.info('Set up data parallel')
 
     global structured_params
     global unstructured_params
@@ -155,7 +162,7 @@ def main():
     criterion = nn.CrossEntropyLoss().cuda()
     optimizer = torch.optim.SGD([{'params': structured_params, 'weight_decay': 0.0},
             {'params': unstructured_params}], args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    print('Created optimizer')
+    logger.info('Created optimizer')
     best_prec1 = 0
     # optionally resume from a checkpoint
     if args.resume:
@@ -165,7 +172,7 @@ def main():
             best_prec1 = checkpoint['best_prec1']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-        else: print("=> no checkpoint found at '{}'".format(args.resume))
+        else: logger.info("=> no checkpoint found at '{}'".format(args.resume))
 
     if args.small:
         traindir = os.path.join(args.data+'-sz/160', 'train')
@@ -177,11 +184,11 @@ def main():
         args.sz = 224
 
     train_loader,val_loader,train_sampler,val_sampler = get_loaders(traindir, valdir, use_val_sampler=True)
-    print('Loaded data')
+    logger.info('Loaded data')
     if args.evaluate: return validate(val_loader, model, criterion, epoch, start_time)
 
     for epoch in range(args.start_epoch, args.epochs):
-        print('Epoch', epoch)
+        logger.info(f'Epoch {epoch}')
         adjust_learning_rate(optimizer, epoch)
         if epoch==int(args.epochs*0.4+0.5):
             traindir = os.path.join(args.data, 'train')
@@ -305,7 +312,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
         input, target = prefetcher.next()
 
         if args.rank == 0 and i % args.print_freq == 0 and i > 1:
-            print('Epoch: [{0}][{1}/{2}]\t'
+            logger.info('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
@@ -356,7 +363,7 @@ def validate(val_loader, model, criterion, epoch, start_time):
         end = time.time()
 
         if args.rank == 0 and i % args.print_freq == 0:
-            print('Test: [{0}/{1}]\t'
+            logger.info('Test: [{0}/{1}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
@@ -367,8 +374,8 @@ def validate(val_loader, model, criterion, epoch, start_time):
         input, target = prefetcher.next()
 
     time_diff = datetime.now()-start_time
-    print(f'Epoch {epoch}: {float(time_diff.total_seconds())} sec')
-    print(f' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}\n')
+    logger.info(f'Epoch {epoch}: {float(time_diff.total_seconds())} sec')
+    logger.info(f' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}\n')
 
     return top1.avg
 
