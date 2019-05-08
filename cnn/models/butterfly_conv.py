@@ -54,7 +54,7 @@ class ButterflyConv2d(ButterflyBmm):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True,
                  tied_weight=True, increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
-                 fused_unfold=False):
+                 fused_unfold=True):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
