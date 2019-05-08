@@ -86,7 +86,7 @@ def perm_nll(perm, true):
     # print("nll", nll)
     return nll
 
-def perm_dist(perm1, perm2, loss_fn=perm_nll):
+def perm_dist(perm1, perm2, fn='nll'):
     """
     perm1: iterable of permutation tensors
            each tensor can have shape (n, n) or (s, n, n)
@@ -96,6 +96,14 @@ def perm_dist(perm1, perm2, loss_fn=perm_nll):
     loss = 0.0
     # if not isinstance(perm1, tuple):
     #     perm1, perm2 = (perm1,), (perm2,)
+    if fn == 'nll':
+        loss_fn = perm_nll
+    elif fn == 'mse':
+        loss_fn = perm_mse
+    elif fn == 'was':
+        loss_fn = perm_transport
+    else: assert False, f"perm.dist: fn {fn} not supported."
+
     for p1, p2 in zip(perm1, perm2):
         # print(p1.size(), p1.type())
         # print(p2.size(), p2.type())
@@ -104,15 +112,48 @@ def perm_dist(perm1, perm2, loss_fn=perm_nll):
     # print(loss, loss.type())
     return loss
 
-def perm_entropy(p):
+def perm_entropy(p, reduction='mean'):
     """
     p: (..., n, n)
     Returns: avg
     Note: Max entropy of n x n matrix is n\log(n)
     """
     n = p.size(-1)
-    p = p.view(-1, n, n)
-    return -torch.sum(p * torch.log2(p)) / p.size(0)
+    entropy = -(p * torch.log2(p)).sum(dim=-1).sum(dim=-1) # can dim be list?
+    if reduction is None:
+        return entropy
+    elif reduction == 'sum':
+        return torch.sum(entropy)
+    elif reduction == 'mean':
+        return torch.mean(entropy) # entropy / p.view(-1, n, n).size(0)
+    else: assert False, f"perm.entropy: reduction {reduction} not supported."
+
+def perm_transport(ds, p, reduction='mean'):
+    """
+    "Transport" distance between a doubly-stochastic matrix and a permutation
+    ds: (..., n, n)
+    p: (n)
+    Returns: avg
+    Note:
+      uniform ds has transport distance (n^2-1)/3
+      ds[...,i,p[i]] = 1 has transport 0
+    """
+    n = p.size(-1)
+    dist = torch.arange(n).repeat(n,1).t() - p.repeat(n,1) # dist[i,j] = i - p[j]
+    dist = torch.abs(dist).to(ds.device, dtype=torch.float)
+    # dist = torch.tensor(dist, dtype=torch.float, device=ds.device)
+    t1 = torch.sum(ds * dist, dim=[-2,-1])
+    t2 = torch.sum(ds.transpose(-1,-2) * dist, dim=[-2,-1])
+    print("transport: ", t1, t2)
+    t = t1 + t2 # TODO: figure out right scaling for this. also transport between "rank 2" permutations
+
+    if reduction is None:
+        return t
+    elif reduction == 'sum':
+        return torch.sum(t)
+    elif reduction == 'mean':
+        return torch.mean(t)
+    else: assert False, f"perm.transport: reduction {reduction} not supported."
 
 def tv(x, norm=2, p=2):
     """ Image total variation
@@ -215,7 +256,8 @@ class TrainableModel(Trainable):
                 p0 = p[0]
                 # if len(p0.size()) > 2: p0 = p0[0]
                 print(p0)
-                print("ENTROPY ", perm_entropy(p))
+                print("ENTROPY ", perm_entropy(p, reduction='mean'))
+                print("TRANSPORT ", perm_dist(p, self.test_loader.true_permutation, fn='was'))
                 true = self.test_loader.true_permutation[0]
                 elements = p0[..., torch.arange(len(true)), true]
                 print(elements)
