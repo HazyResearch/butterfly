@@ -156,6 +156,8 @@ def default_config():
     optimizer = 'Adam'  # Which optimizer to use, either Adam or SGD
     lr_decay = True  # Whether to use learning rate decay
     lr_decay_period = 18  # Period of learning rate decay
+    plr_min = 1e-4
+    plr_max = 1e-2
     weight_decay = True  # Whether to use weight decay
     ntrials = 20  # Number of trials for hyperparameter tuning
     nmaxepochs = 72  # Maximum number of epochs
@@ -175,13 +177,13 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch):
+def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-2)) if optimizer == 'Adam'
         'lr': 2e-4 if optimizer == 'Adam' else random.uniform(math.log(2e-3), math.log(1e-0)),
-        'plr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-2)))),
+        'plr': sample_from(lambda spec: math.exp(random.uniform(math.log(plr_min), math.log(plr_max)))),
         # 'lr_decay_factor': sample_from(lambda spec: random.choice([0.1, 0.2])) if lr_decay else 1.0,
         'lr_decay_factor': 0.12 if lr_decay else 1.0,
         'lr_decay_period': lr_decay_period,
