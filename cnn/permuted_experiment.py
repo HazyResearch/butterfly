@@ -70,7 +70,10 @@ def perm_mse(perm, true):
     return nn.functional.mse_loss(perm, listperm2matperm(true))
 
 def perm_nll(perm, true):
-    """ perm is matrix, true is list """
+    """
+    perm: (n, n) or (s, n, n)
+    true: (n)
+    """
     n = true.size(-1)
     # i = torch.arange(n, device=perm.device)
     # j = true.to(perm.device)
@@ -78,6 +81,8 @@ def perm_nll(perm, true):
     elements = perm.cpu()[..., torch.arange(n), true]
     # elements = perm.cpu()[torch.arange(n), true]
     nll = -torch.sum(torch.log2(elements.to(perm.device)))
+    if perm.dim() == 3: # normalize by number samples
+        nll = nll / perm.size(0)
     # print("nll", nll)
     return nll
 
@@ -183,6 +188,7 @@ class TrainableModel(Trainable):
             for data, target in self.test_loader:
                 data, target = data.to(self.device), target.to(self.device)
                 output = self.model(data)
+                total_samples += output.size(0)
                 if self.unsupervised:
                     test_loss += tv(output).item()
                     # p = self.model.get_permutations()
@@ -191,9 +197,7 @@ class TrainableModel(Trainable):
                     test_loss += F.cross_entropy(output, target, reduction='sum').item()
                     pred = output.argmax(dim=1, keepdim=True)
                     correct += (pred == target.data.view_as(pred)).long().cpu().sum().item()
-                    total_samples += output.size(0)
             if self.unsupervised:
-                total_samples = 1
                 # gp = self.model.get_permutations()
                 # import pdb; pdb.set_trace()
                 p = self.model.get_permutations() # (rank, sample, n, n)
@@ -206,6 +210,7 @@ class TrainableModel(Trainable):
                 print(elements)
 
                 correct = perm_dist(p, self.test_loader.true_permutation).item()
+                correct = correct * total_samples # hack to normalize properly
                 # print(elements)
         # test_loss = test_loss / len(self.test_loader.dataset)
         # accuracy = correct / len(self.test_loader.dataset)
