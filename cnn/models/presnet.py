@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 import torch.nn.functional as F
 
+from butterfly import Butterfly
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
@@ -366,11 +368,82 @@ def add_gumbel_noise(log_alpha, sample_shape=()):
     return log_alpha_noise
 
 
+class ButterflyPermutation(Permutation):
+    def __init__(self, size, sig='BT1', param='ortho2', temp=1.0, samples=1):
+        super().__init__()
+        self.size = size
+        self.temp = temp
+        self.samples = samples
+        self.param = param
+        self.m = int(math.ceil(math.log2(size)))
+        assert size == (1<<self.m), "ButterflyPermutation: Only power of 2 supported."
+
+        self.strides
+        # assume square matrices so 'nstack' is always 1
+        if sig == 'BT' and (sig[2:]).isdigit(): # TODO: empty number indicates 1
+            depth = int(sig[2:])
+            self.twiddle_core_shape = (2*depth, 1, m, self.size//2)
+            self.strides = [0,1] * depth # 1 for increasing, 0 for decreasing
+        elif sig[0] == 'B' and (sig[1:]).isdigit():
+            depth = int(sig[1:])
+            self.twiddle_core_shape = (depth, 1, m, self.size//2)
+            self.strides = [1] * depth # 1 for increasing, 0 for decreasing
+        elif sig[1] == 'T' and (sig[1:]).isdigit():
+            depth = int(sig[1:])
+            self.twiddle_core_shape = (depth, 1, m, self.size//2)
+            self.strides = [0] * depth # 1 for increasing, 0 for decreasing
+        else:
+            assert False, f"ButterflyPermutation: signature {sig} not supported."
+        # self.twiddle has shape (depth, 1, log n, n/2)
+
+        if self.param == 'ds':
+            self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape))
+        elif self.param == 'logit':
+            self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape)*2-1)
+        elif param == 'ortho2':
+            self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * 2*math.pi)
+        else:
+            assert False, f"ButterflyPermutation: Parameter type {self.param} not supported."
 
 
 
+    def map_twiddle(self, twiddle): # TODO static
+        if self.param=='ds':
+            return twiddle
+        elif self.param=='logit':
+            return 1.0/(1.0 + torch.exp(-twiddle.data))
+        elif self.param=='ortho2':
+            return torch.cos(twiddle.data)**2
+        else:
+            assert False, f"Unreachable"
 
+    def compute_perm(self, twiddle, strides):
+        """
+        twiddle: (depth, 1, log n, n/2)
+        strides: (depth,) bool
 
+        Returns: (n, n)
+        """
+        P = torch.eye(self.size).unsqueeze(1) # (n, 1, n) for the 'nstack' parameter of butterfly_mult
+        for t, stride in zip(twiddle, strides):
+            twiddle_factor_mat = torch.stack((torch.stack((t, 1-t), dim=-1),
+                                              torch.stack((1-t, t), dim=-1)), dim=-2) # TODO efficiency by stacking other order?
+            P = butterfly_mult_untied(twiddle_factor_mat, P, increasing_stride=stride)
+
+        return P.view(self.size, self.size)
+
+    def mean_perm(self):
+        _twiddle = self.map_twiddle(self.twiddle)
+        return compute_perm(_twiddle, self.strides)
+
+    def sample_soft_perm(self):
+        sample_shape = (self.samples,)
+        _twiddle = self.map_twiddle(self.twiddle)
+        logits = torch.stack((torch.log(tw), torch.zeros_like(tw)), dim=-1) # (depth, 1, log n, n/2, 2)
+        logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
+        sample_twiddle = torch.softmax(logits_noise / self.temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
+        perms = torch.stack([compute_perm(twiddle, self.strides) for twiddle in sample_twiddle], dim=0) # (s, n, n)
+        return perms
 
 
 def PResNet18(pretrained=False, **kwargs):
