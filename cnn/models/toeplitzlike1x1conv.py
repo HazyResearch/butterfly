@@ -97,32 +97,43 @@ def toeplitz_mult(G, H, x, cycle=True):
 
 class ToeplitzlikeLinear(nn.Module):
 
-    def __init__(self, size, nstack=1, rank=4, corner=False):
+    def __init__(self, in_size, out_size, rank=4, bias=True, corner=False):
         super().__init__()
-        self.size = size
-        self.nstack = nstack
+        self.in_size = in_size
+        self.out_size = out_size
+        self.nstack = int(math.ceil(out_size / self.in_size))
         self.rank = rank
         assert not corner, 'corner not currently supported'
         self.corner = corner
-        init_stddev = math.sqrt(1. / (rank * size))
-        self.G = nn.Parameter(torch.randn(nstack, rank, size) * init_stddev)
-        self.H = nn.Parameter(torch.randn(nstack, rank, size) * init_stddev)
+        init_stddev = math.sqrt(1. / (rank * in_size))
+        self.G = nn.Parameter(torch.randn(self.nstack, rank, in_size) * init_stddev)
+        self.H = nn.Parameter(torch.randn(self.nstack, rank, in_size) * init_stddev)
         self.G._is_structured = True  # Flag to avoid weight decay
         self.H._is_structured = True
-        self.register_buffer('reverse_idx', torch.arange(size - 1, -1, -1))
+        self.register_buffer('reverse_idx', torch.arange(in_size - 1, -1, -1))
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(out_size))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        """Initialize bias the same way as torch.nn.Linear."""
+        if self.bias is not None:
+            bound = 1 / math.sqrt(self.in_size)
+            nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input):
         """
         Parameters:
-            input: (batch, size)
+            input: (batch, in_size)
         Return:
-            output: (batch, nstack * size)
+            output: (batch, out_size)
         """
         batch = input.shape[0]
         # output = toeplitz_mult(self.G, self.H, input, self.corner)
         # return output.reshape(batch, self.nstack * self.size)
-
-        n = self.size
+        n = self.in_size
         v = self.H
         u = input
         # u_f = torch.rfft(torch.cat((u.flip(1), torch.zeros_like(u)), dim=-1), 1)
@@ -137,7 +148,8 @@ class ToeplitzlikeLinear(nn.Module):
         v_f = torch.rfft(torch.cat((v, torch.zeros_like(v)), dim=-1), 1)
         wv_sum_f = complex_mul(w_f, v_f).sum(dim=2)
         output = torch.irfft(wv_sum_f, 1, signal_sizes=(2 * n, ))[..., :n]
-        return output.reshape(batch, self.nstack * self.size)
+        output = output.reshape(batch, self.nstack * self.in_size)[:, :self.out_size]
+        return output if self.bias is None else output + self.bias
 
 
 class Toeplitzlike1x1Conv(ToeplitzlikeLinear):
@@ -149,6 +161,7 @@ class Toeplitzlike1x1Conv(ToeplitzlikeLinear):
         Return:
             output: (batch, nstack * c, h, w)
         """
+        # TODO: this is for old code with square Toeplitzlike, need to be updated
         batch, c, h, w = input.shape
         input_reshape = input.view(batch, c, h * w).transpose(1, 2).reshape(-1, c)
         output = super().forward(input_reshape)
