@@ -468,7 +468,7 @@ class ButterflyPermutation(Permutation):
     def generate_perm(self):
         """ Generate (a batch of) permutations for training """
         # TODO add the extra dimension even with mean for consistency
-        return self.generate_fn(self)
+        return self.generate_fn()
 
 
     def map_twiddle(self, twiddle): # TODO static
