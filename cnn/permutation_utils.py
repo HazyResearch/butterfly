@@ -161,28 +161,30 @@ def tv(x, norm=2, p=1, symmetric=False):
     """
     # each pixel wants all channels as part of its delta vector
     x = x.transpose(-3, -2).transpose(-2, -1) # (b, w, h, c)
-    dx = x[:, 1:, :, :] - x[:, :-1, :, :]
-    dy = x[:, :, 1:, :] - x[:, :, :-1, :]
-
-    # delta = torch.zeros_like(x)
-    # delta[..., :-1, :] += torch.abs(dx) ** norm
-    # delta[..., :, :-1] += torch.abs(dy) ** norm
-    # delta = delta ** (1/norm)
-    # tv = delta.sum() / x.size(0)
-    delta = x.new_zeros(*x.size(), 4) # TODO do casework on symmetric to either 2 or 4?
-    delta[:, :-1, :, :, 0] = torch.abs(dx)
-    delta[:, :, :-1, :, 1] = torch.abs(dy)
-    if symmetric:
-        dx_ =  x[:, :-1, :, :] - x[:, 1:, :, :]
-        dy_ =  x[:, :, :-1, :] - x[:, :, 1:, :]
-        delta[:, 1:, :, :, 0] = torch.abs(dx_)
-        delta[:, :, 1:, :, 1] = torch.abs(dy_)
+    delta = x.new_zeros(*x.size(), 2)
+    if not symmetric:
+        dx = x[:, 1:, :, :] - x[:, :-1, :, :]
+        dy = x[:, :, 1:, :] - x[:, :, :-1, :]
+        delta[:, :-1, :, :, 0] = dx
+        delta[:, :, :-1, :, 1] = dy
+    else:
+        dx = x[:, 2:, :, :] - x[:, :-2, :, :]
+        dy = x[:, :, 2:, :] - x[:, :, :-2, :]
+        delta[:, 1:-1, :, :, 0] = dx / 2.0
+        delta[:, :, 1:-1, :, 1] = dy / 2.0
+        # old symmetric version (4-sided)
+    # delta = x.new_zeros(*x.size(), 4) # TODO do casework on symmetric to either 2 or 4?
+    # dx_ =  x[:, :-1, :, :] - x[:, 1:, :, :]
+    # dy_ =  x[:, :, :-1, :] - x[:, :, 1:, :]
+    # delta[:, 1:, :, :, 0] = torch.abs(dx_)
+    # delta[:, :, 1:, :, 1] = torch.abs(dy_)
 
     delta = delta.flatten(-2, -1) # (b, w, h, 2*c [or 4*c])
     if norm == p:
-        v = torch.sum(delta ** norm, dim=-1)
+        v = torch.sum(torch.abs(delta) ** norm, dim=-1)
     else:
         v = torch.norm(torch.abs(delta), dim=-1, p=norm)
+        if p != 1:
+            v = v ** p
     tv = v.sum() # / x.size(0)
     return tv
-    # return torch.tensor(1.0, requires_grad=True, device=x.device)
