@@ -151,7 +151,7 @@ class TrainableModel(Trainable):
                     "mean_loss": mean_loss / total_samples,
                     "mean_ent": mean_ent.item(),
                     "mean_nll": mean_nll.item(),
-                    "mean_was2": mean_was1.item(),
+                    "mean_was1": mean_was1.item(),
                     "mean_was2": mean_was2.item(),
                     "mle_loss": mle_loss / total_samples,
                     # "mle_ent": mle_ent.item(),
