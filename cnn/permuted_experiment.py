@@ -55,6 +55,7 @@ class TrainableModel(Trainable):
 
         #
         self.unsupervised = config['unsupervised']
+        self.tv = config['tv']
 
     def _train_iteration(self):
         self.model.train()
@@ -63,7 +64,7 @@ class TrainableModel(Trainable):
             self.optimizer.zero_grad()
             output = self.model(data)
             if self.unsupervised:
-                loss = perm.tv(output)
+                loss = perm.tv(output, norm=self.tv['norm'], p=self.tv['p'], symmetric=self.tv['sym'])
             else:
                 # target = target.expand(output.size()[:-1]).flatten()
                 # outupt = output.flatten(0, -2)
@@ -193,6 +194,9 @@ def default_config():
     smoke_test = False  # Finish quickly for testing
     unsupervised = False
     batch = 128
+    tv_norm = 2
+    tv_p = 1
+    tv_sym = False
 
 
 @ex.named_config
@@ -204,7 +208,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch):
+def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -223,10 +227,11 @@ def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_perio
         # 'dataset': {'name': 'PCIFAR10'}
         'dataset': {'name': dataset, 'batch': batch},
         'unsupervised': unsupervised,
+        'tv': {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym}
      }
     experiment = RayExperiment(
         # name=f'pcifar10_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
-        name=f'{dataset.lower()}_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
+        name=f'{dataset.lower()}_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_plr_{plr_min}-{plr_max}_tvsym_{tv_sym}',
         run=TrainableModel,
         local_dir=result_dir,
         num_samples=ntrials,

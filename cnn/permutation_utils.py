@@ -134,7 +134,7 @@ def transport(ds, p, reduction='mean'):
         return torch.mean(t)
     else: assert False, f"perm.transport: reduction {reduction} not supported."
 
-def tv(x, norm=2, p=2):
+def tv(x, norm=2, p=1, symmetric=False):
     """ Image total variation
     x: (b, c, w, h)
 
@@ -151,10 +151,16 @@ def tv(x, norm=2, p=2):
     # delta[..., :, :-1] += torch.abs(dy) ** norm
     # delta = delta ** (1/norm)
     # tv = delta.sum() / x.size(0)
-    delta = x.new_zeros(*x.size(), 2) # torch.zeros_like(x)
+    delta = x.new_zeros(*x.size(), 4) # TODO do casework on symmetric to either 2 or 4?
     delta[:, :-1, :, :, 0] = torch.abs(dx)
     delta[:, :, :-1, :, 1] = torch.abs(dy)
-    delta = delta.flatten(-2, -1) # (b, w, h, 2*c)
+    if symmetric:
+        dx_ =  x[:, :-1, :, :] - x[:, 1:, :, :]
+        dy_ =  x[:, :, :-1, :] - x[:, :, 1:, :]
+        delta[:, 1:, :, :, 0] = torch.abs(dx_)
+        delta[:, :, 1:, :, 1] = torch.abs(dy_)
+
+    delta = delta.flatten(-2, -1) # (b, w, h, 2*c [or 4*c])
     if norm == p:
         v = torch.sum(delta ** norm, dim=-1)
     else:
