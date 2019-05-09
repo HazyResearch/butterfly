@@ -40,7 +40,13 @@ class TrainableModel(Trainable):
         torch.manual_seed(config['seed'])
         if self.device == 'cuda':
             torch.cuda.manual_seed(config['seed'])
-        self.model = model_utils.get_model(config['model']).to(device)
+
+        self.model = model_utils.get_model(config['model'])
+        # restore permutation
+        if config['restore_perm'] is not None:
+            self.model.permute.load_state_dict(torch.load(config['restore_perm']))
+        self.model.to(device)
+
         self.train_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
         permutation_params = filter(lambda p: hasattr(p, '_is_perm_param') and p._is_perm_param, self.model.parameters())
         unstructured_params = filter(lambda p: not (hasattr(p, '_is_perm_param') and p._is_perm_param), self.model.parameters())
@@ -165,6 +171,9 @@ class TrainableModel(Trainable):
                  'optimizer': self.optimizer.state_dict(),
                  'scheduler': self.scheduler.state_dict()}
         torch.save(state, checkpoint_path)
+
+        model_path = os.path.join(checkpoint_dir, "saved_model")
+        torch.save(self.model.state_dict(), model_path)
         return checkpoint_path
 
     def _restore(self, checkpoint_path):
@@ -206,6 +215,7 @@ def default_config():
     tv_p = 1
     tv_sym = False
     anneal_entropy = 0.0
+    restore_perm = None
 
 
 @ex.named_config
@@ -217,8 +227,9 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, anneal_entropy):
+def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, anneal_entropy, restore_perm):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
+    if restore_perm is not None: restore_perm = 'saved_perms/' + restore_perm
     config={
         'optimizer': optimizer,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-2)) if optimizer == 'Adam'
@@ -227,17 +238,16 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         # 'lr_decay_factor': sample_from(lambda spec: random.choice([0.1, 0.2])) if lr_decay else 1.0,
         'lr_decay_factor': 0.12 if lr_decay else 1.0,
         'lr_decay_period': lr_decay_period,
-        # 'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if weight_decay else 0.0,
-        'weight_decay': 2e-4 if weight_decay else 0.0,
-        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
-        'device': 'cuda' if cuda else 'cpu',
-        'model': {'name': model, 'args': args},
-        # 'dataset': {'name': 'CIFAR10'}
-        # 'dataset': {'name': 'PCIFAR10'}
-        'dataset': {'name': dataset, 'batch': batch},
-        'unsupervised': unsupervised,
-        'tv': {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
-        'anneal_entropy': anneal_entropy,
+        # 'weight_decay':  sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if weight_decay else 0.0,
+        'weight_decay':    2e-4 if weight_decay else 0.0,
+        'seed':            sample_from(lambda spec: random.randint(0, 1 << 16)),
+        'device':          'cuda' if cuda else 'cpu',
+        'model':           {'name': model, 'args': args},
+        'dataset':         {'name': dataset, 'batch': batch},
+        'unsupervised':    unsupervised,
+        'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
+        'anneal_entropy':  anneal_entropy,
+        'restore_perm':    restore_perm,
      }
     timestamp = datetime.datetime.now().replace(microsecond=0).isoformat()
     commit_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip().decode('utf-8')
