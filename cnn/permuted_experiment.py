@@ -123,7 +123,7 @@ class TrainableModel(Trainable):
                 # correct = perm.dist(p, self.test_loader.true_permutation).item()
                 # correct = correct * total_samples # hack to normalize properly
 
-                mean = self.model.get_mean_perms() # (rank, sample, n, n)
+                mean = self.model.get_permutations(perm='mean') # (rank, sample, n, n)
                 mean_ent = perm.entropy(mean, reduction='mean')
                 mean_nll = perm.dist(mean, self.test_loader.true_permutation, fn='nll')
                 mean_was = perm.dist(mean, self.test_loader.true_permutation, fn='was')
@@ -131,7 +131,8 @@ class TrainableModel(Trainable):
                 print("mean NLL ", mean_nll)
                 print("mean TRANSPORT ", mean_was)
 
-                mle = self.model.get_mle_perms() # (rank, sample, n, n)
+                # mle = self.model.get_mle_perms() # (rank, sample, n, n)
+                mle = self.model.get_permutations(perm='mle') # (rank, sample, n, n)
                 mle_ent = perm.entropy(mle, reduction='mean')
                 mle_nll = perm.dist(mle, self.test_loader.true_permutation, fn='nll')
                 mle_was = perm.dist(mle, self.test_loader.true_permutation, fn='was')

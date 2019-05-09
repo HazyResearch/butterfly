@@ -203,7 +203,7 @@ class PResNet(nn.Module):
         return x
 
 class TensorPermutation(nn.Module):
-    def __init__(self, w, h, method='linear', rank=2, stochastic=False, train=True, **kwargs):
+    def __init__(self, w, h, method='linear', rank=2, train=True, **kwargs):
         super().__init__()
         self.w = w
         self.h = h
@@ -226,10 +226,10 @@ class TensorPermutation(nn.Module):
         else:
             assert False, "prank must be 1 or 2"
 
-        if stochastic:
-            self.perm_fn = self.perm_type.sample_soft_perm
-        else:
-            self.perm_fn =self.perm_type.mean_perm
+        # if stochastic:
+        #     self.perm_fn = self.perm_type.sample_soft_perm
+        # else:
+        #     self.perm_fn =self.perm_type.mean_perm
         # elif acqfn == 'mean':
         #     self.perm_fn =self.perm_type.mean_perm
         # elif acqfn == 'sample':
@@ -242,52 +242,71 @@ class TensorPermutation(nn.Module):
                 p.requires_grad = False
 
 
-    def forward(self, x):
+    def forward(self, x, perm=None):
+        if perm is None:
+            perm_fn = self.perm_type.generate_perm
+        elif perm == 'mean':
+            perm_fn = self.perm_type.mean_perm
+        elif perm == 'mle':
+            perm_fn = self.perm_type.mle_perm
+        elif perm == 'sample':
+            perm_fn = self.perm_type.sample_perm
+        else: assert False, f"Permutation type {perm} not supported."
+
         if self.rank == 1:
             # perm = self.permute.sample_soft_perm()
-            perm = self.perm_fn(self.permute[0])
+            perm = perm_fn(self.permute[0])
             x = x.view(-1, self.w*self.h)
             x = x @ perm
             x = x.view(-1, 3, self.w, self.h) # TODO make this channel agnostic
         elif self.rank == 2:
             x = x.transpose(-1, -2)
             # perm2 = self.permute2.sample_soft_perm()
-            perm2 = self.perm_fn(self.permute[1])
+            perm2 = perm_fn(self.permute[1])
             # print("Permutation:", perm2.shape)
             # x = x @ perm2
             x = x @ perm2.unsqueeze(-3).unsqueeze(-3)
             # unsqueeze to explicitly call matmul, can use einsum too
             x = x.transpose(-1, -2)
             # perm1 = self.permute1.sample_soft_perm()
-            perm1 = self.perm_fn(self.permute[0])
+            perm1 = perm_fn(self.permute[0])
             # x = x @ perm1
             x = x @ perm1.unsqueeze(-3).unsqueeze(-3)
             # collapse samples with batch
             x = x.view(-1, 3, self.w, self.h) # TODO make this channel agnostic
         return x
 
-    def get_permutations(self):
+    def get_permutations(self, perm=None):
+        if perm is None:
+            perm_fn = self.perm_type.generate_perm
+        elif perm == 'mean':
+            perm_fn = self.perm_type.mean_perm
+        elif perm == 'mle':
+            perm_fn = self.perm_type.mle_perm
+        elif perm == 'sample':
+            perm_fn = self.perm_type.sample_perm
+        else: assert False, f"Permutation type {perm} not supported."
         # return shape (rank, s, n, n)
         # softperm will return (s, 1, 1, n, n), squeeze for now
         # perms = torch.stack([self.perm_fn(p).squeeze() for p in self.permute], dim=0)
-        perms = torch.stack([self.perm_fn(p) for p in self.permute], dim=0)
+        perms = torch.stack([perm_fn(p) for p in self.permute], dim=0)
         # print("get_permutations:", perms.shape)
         return perms
 
-    def get_mean_perms(self):
-        # TODO do this properly
-        perms = torch.stack([p.mean_perm() for p in self.permute], dim=0)
-        return perms
+    # def get_mean_perms(self):
+    #     # TODO do this properly
+    #     perms = torch.stack([p.mean_perm() for p in self.permute], dim=0)
+    #     return perms
 
-    def get_mle_perms(self):
-        # TODO do this properly
-        perms = torch.stack([p.mle_perm() for p in self.permute], dim=0)
-        return perms
-        # return self.get_mean_perms()
-        # def mle(s):
-        #     return sinkhorn(s.log_alpha, temp=0.03, n_iters=100)
-        # perms = torch.stack([mle(p) for p in self.permute], dim=0)
-        # return perms
+    # def get_mle_perms(self):
+    #     # TODO do this properly
+    #     perms = torch.stack([p.mle_perm() for p in self.permute], dim=0)
+    #     return perms
+    #     # return self.get_mean_perms()
+    #     # def mle(s):
+    #     #     return sinkhorn(s.log_alpha, temp=0.03, n_iters=100)
+    #     # perms = torch.stack([mle(p) for p in self.permute], dim=0)
+    #     # return perms
 
 
 class Permutation(nn.Module):
@@ -320,17 +339,33 @@ class LinearPermutation(Permutation):
         return self.W.view(*([1]*len(sample_shape)), size, size)
 
 class SinkhornPermutation(Permutation):
-    def __init__(self, size, temp=1.0, samples=1):
+    def __init__(self, size, stochastic=False, temp=1.0, samples=1):
         super().__init__()
         self.size = size
-        self.temp = temp
+        self.stochastic = stochastic
         self.samples = samples
+        if self.stochastic:
+            self.mean_temp = 1.0
+            self.sample_temp = temp
+            self.generate_fn = self.sample_soft_perm # add this attr for efficiency (avoid casing in every call to generate())
+        else:
+            self.mean_temp = temp
+            self.generate_fn = self.mean_perm
+            # no sample_temp; soft perm shouldn't be called in the non-stochastic case
+        self.hard_temp = 0.02
+        self.hard_iters = int(1./self.hard_temp)
+
         # set sinkhorn iterations based on temperature
         self.sinkhorn_iters = 20 + int(1./temp)
         self.log_alpha = nn.Parameter(add_gumbel_noise(torch.zeros(size, size)))
         # nn.init.kaiming_uniform_(self.log_alpha)
         self.log_alpha.is_perm_param = True
         # TODO: test effect of random initialization
+
+    def generate_perm(self):
+        """ Generate (a batch of) permutations for training """
+        # TODO add the extra dimension even with mean for consistency
+        return self.generate_fn(self)
 
     def mean_perm(self):
         """
@@ -339,19 +374,30 @@ class SinkhornPermutation(Permutation):
           - sinkhorn(l, tau=1.0) is the mean of this distribution
           - sinkhorn(l, tau->0) is the max likelihood of this distribution
         """
-        return sinkhorn(self.log_alpha, temp=self.temp, n_iters=self.sinkhorn_iters)
+        return sinkhorn(self.log_alpha, temp=self.mean_temp, n_iters=self.sinkhorn_iters)
 
     def mle_perm(self):
         # TODO needs refactor
-        return sinkhorn(self.log_alpha, temp=0.03, n_iters=100)
+        return sinkhorn(self.log_alpha, temp=self.hard_temp, n_iters=self.hard_iters)
+
+    def sample_perm(self, sample_shape=()):
+        if self.stochastic:
+            return self.sample_soft_perm()
+        else:
+            return self.sample_hard_perm()
 
     def sample_soft_perm(self, sample_shape=()):
         # TODO design: in case we want to sample differently for each elem of batch
         # sample_shape = (self.samples, 1, 1)
         sample_shape = (self.samples,)
         log_alpha_noise = add_gumbel_noise(self.log_alpha, sample_shape)
-        soft_perms = sinkhorn(log_alpha_noise, self.temp, n_iters=self.sinkhorn_iters)
+        soft_perms = sinkhorn(log_alpha_noise, self.sample_temp, n_iters=self.sinkhorn_iters)
         return soft_perms
+
+    def sample_hard_perm(self, sample_shape=()):
+        sample_shape = (self.samples,)
+        log_alpha_noise = add_gumbel_noise(self.log_alpha, sample_shape)
+        soft_perms = sinkhorn(log_alpha_noise, self.hard_temp, n_iters=self.hard_iters)
 
     # def hard_perm(self):
     #     """ Round to nearest permutation (in this case, MLE) """
