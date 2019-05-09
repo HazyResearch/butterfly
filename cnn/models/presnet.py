@@ -416,14 +416,28 @@ def add_gumbel_noise(log_alpha, sample_shape=()):
 
 
 class ButterflyPermutation(Permutation):
-    def __init__(self, size, sig='BT1', param='ortho2', temp=1.0, samples=1):
+    def __init__(self, size, sig='BT1', param='ortho2', stochastic=False, temp=1.0, samples=1):
         super().__init__()
         self.size = size
+        self.stochastic = stochastic # TODO align this block
         self.temp = temp
         self.samples = samples
         self.param = param
         self.m = int(math.ceil(math.log2(size)))
         assert size == (1<<self.m), "ButterflyPermutation: Only power of 2 supported."
+
+        if self.stochastic:
+            self.mean_temp = 1.0
+            self.sample_temp = temp
+            self.generate_fn = self.sample_soft_perm # add this attr for efficiency (avoid casing in every call to generate())
+            self.sample_method = 'gumbel'
+        else:
+            self.mean_temp = temp
+            self.generate_fn = self.mean_perm
+            # no sample_temp; soft perm shouldn't be called in the non-stochastic case
+        self.hard_temp = 0.02
+        self.hard_iters = int(1./self.hard_temp)
+
 
         # assume square matrices so 'nstack' is always 1
         if sig[:2] == 'BT' and (sig[2:]).isdigit(): # TODO: empty number indicates 1
@@ -451,6 +465,10 @@ class ButterflyPermutation(Permutation):
         else:
             assert False, f"ButterflyPermutation: Parameter type {self.param} not supported."
 
+    def generate_perm(self):
+        """ Generate (a batch of) permutations for training """
+        # TODO add the extra dimension even with mean for consistency
+        return self.generate_fn(self)
 
 
     def map_twiddle(self, twiddle): # TODO static
@@ -494,14 +512,36 @@ class ButterflyPermutation(Permutation):
         p = self.compute_perm(hard_twiddle, self.strides)
         return p
 
-    def sample_soft_perm(self):
+    def sample_perm(self, sample_shape=()):
+        if self.stochastic:
+            return self.sample_soft_perm()
+        else:
+            return self.sample_hard_perm()
+
+    def sample_soft_perm(self, sample_shape=()):
         sample_shape = (self.samples,)
         _twiddle = self.map_twiddle(self.twiddle)
-        logits = torch.stack((torch.log(tw), torch.zeros_like(tw)), dim=-1) # (depth, 1, log n, n/2, 2)
-        logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
-        sample_twiddle = torch.softmax(logits_noise / self.temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
+
+        if self.sample_method == 'gumbel':
+            logits = torch.stack((torch.log(_twiddle), torch.zeros_like(_twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
+            logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
+            sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
+        elif self.sample_method == 'uniform':
+            raise NotImplementedError
+
         perms = torch.stack([self.compute_perm(twiddle, self.strides) for twiddle in sample_twiddle], dim=0) # (s, n, n)
         return perms
+
+    def sample_hard_perm(self, sample_shape=()):
+        sample_shape = (self.samples,)
+        _twiddle = self.map_twiddle(self.twiddle)
+
+        logits = torch.stack((torch.log(tw), torch.zeros_like(tw)), dim=-1) # (depth, 1, log n, n/2, 2)
+        logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
+        logits_noise = logits_noise[..., 0] - logits_noise[..., 1]
+        sample_twiddle = torch.where(logits_noise>0, torch.tensor(1.0, device=_twiddle.device), torch.tensor(0.0, device=_twiddle.device)) # shape (s, depth, 1, log n, n/2)
+        return sample_twiddle
+
 
 
 def PResNet18(pretrained=False, **kwargs):
