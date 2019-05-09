@@ -1950,7 +1950,6 @@ __global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const Cud
     __syncthreads();
     const scalar_t twiddle_val[2][2] = {{s_twiddle[tid_x][0][0], s_twiddle[tid_x][0][1]},
                                         {s_twiddle[tid_x][1][0], s_twiddle[tid_x][1][1]}};
-    __syncthreads();  // otherwise some thread might go back to writing to s_twiddle before other thread can read
     if (b < batch_size) {
       input_val_storage[idx - first_idx][0] = s_input[pos];
       input_val_storage[idx - first_idx][1] = s_input[pos + stride];
@@ -1958,8 +1957,10 @@ __global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const Cud
       s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
       s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
     }
+    __syncthreads();
+    // otherwise some thread might go back to writing to s_twiddle before other thread can read
+    // or s_s_input will be overwritten with s_grad before some thread can read
   }
-  __syncthreads(); // Otherwise s_input will be overwritten with s_grad before some thread can read
   // Backward pass
   scalar_t* s_grad = &s_input[0]; // Reusing the same storage as s_input
   accscalar_t* s_d_twiddle = (accscalar_t *)&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
