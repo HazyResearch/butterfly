@@ -1,9 +1,16 @@
+import os, sys
+import math
+
 import torch
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 import torch.nn.functional as F
 
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+os.environ['PYTHONPATH'] = project_root + ":" + os.environ.get('PYTHONPATH', '')
 from butterfly import Butterfly
+from butterfly.butterfly_multiply import butterfly_mult_untied
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -205,6 +212,8 @@ class TensorPermutation(nn.Module):
             self.perm_type = LinearPermutation
         elif method == 'sinkhorn':
             self.perm_type = SinkhornPermutation
+        elif method == 'butterfly':
+            self.perm_type = ButterflyPermutation
         else:
             assert False, f"Permutation method {method} not supported."
 
@@ -398,30 +407,29 @@ class ButterflyPermutation(Permutation):
         self.m = int(math.ceil(math.log2(size)))
         assert size == (1<<self.m), "ButterflyPermutation: Only power of 2 supported."
 
-        self.strides
         # assume square matrices so 'nstack' is always 1
-        if sig == 'BT' and (sig[2:]).isdigit(): # TODO: empty number indicates 1
+        if sig[:2] == 'BT' and (sig[2:]).isdigit(): # TODO: empty number indicates 1
             depth = int(sig[2:])
-            self.twiddle_core_shape = (2*depth, 1, m, self.size//2)
+            self.twiddle_core_shape = (2*depth, 1, self.m, self.size//2)
             self.strides = [0,1] * depth # 1 for increasing, 0 for decreasing
         elif sig[0] == 'B' and (sig[1:]).isdigit():
             depth = int(sig[1:])
-            self.twiddle_core_shape = (depth, 1, m, self.size//2)
+            self.twiddle_core_shape = (depth, 1, self.m, self.size//2)
             self.strides = [1] * depth # 1 for increasing, 0 for decreasing
         elif sig[1] == 'T' and (sig[1:]).isdigit():
             depth = int(sig[1:])
-            self.twiddle_core_shape = (depth, 1, m, self.size//2)
+            self.twiddle_core_shape = (depth, 1, self.m, self.size//2)
             self.strides = [0] * depth # 1 for increasing, 0 for decreasing
         else:
             assert False, f"ButterflyPermutation: signature {sig} not supported."
         # self.twiddle has shape (depth, 1, log n, n/2)
 
         if self.param == 'ds':
-            self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape))
+            self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape))
         elif self.param == 'logit':
-            self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape)*2-1)
+            self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape)*2-1)
         elif param == 'ortho2':
-            self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * 2*math.pi)
+            self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape) * 2*math.pi)
         else:
             assert False, f"ButterflyPermutation: Parameter type {self.param} not supported."
 
@@ -431,9 +439,9 @@ class ButterflyPermutation(Permutation):
         if self.param=='ds':
             return twiddle
         elif self.param=='logit':
-            return 1.0/(1.0 + torch.exp(-twiddle.data))
+            return 1.0/(1.0 + torch.exp(-twiddle))
         elif self.param=='ortho2':
-            return torch.cos(twiddle.data)**2
+            return torch.cos(twiddle)**2
         else:
             assert False, f"Unreachable"
 
@@ -444,17 +452,29 @@ class ButterflyPermutation(Permutation):
 
         Returns: (n, n)
         """
-        P = torch.eye(self.size).unsqueeze(1) # (n, 1, n) for the 'nstack' parameter of butterfly_mult
+        # print("compute_perm twiddle REQUIRES GRAD: ", twiddle.requires_grad)
+        P = torch.eye(self.size, device=twiddle.device).unsqueeze(1) # (n, 1, n) for the 'nstack' parameter of butterfly_mult
+        # print("compute_perm REQUIRES GRAD: ", P.requires_grad)
         for t, stride in zip(twiddle, strides):
             twiddle_factor_mat = torch.stack((torch.stack((t, 1-t), dim=-1),
                                               torch.stack((1-t, t), dim=-1)), dim=-2) # TODO efficiency by stacking other order?
             P = butterfly_mult_untied(twiddle_factor_mat, P, increasing_stride=stride)
+            # print("REQUIRES GRAD: ", P.requires_grad)
 
         return P.view(self.size, self.size)
 
     def mean_perm(self):
+        # print("mean_perm twiddle REQUIRES GRAD: ", self.twiddle.requires_grad)
         _twiddle = self.map_twiddle(self.twiddle)
-        return compute_perm(_twiddle, self.strides)
+        p = self.compute_perm(_twiddle, self.strides)
+        # print("mean_perm REQUIRES GRAD: ", p.requires_grad)
+        return p
+
+    def mle_perm(self):
+        _twiddle = self.map_twiddle(self.twiddle)
+        hard_twiddle = torch.where(_twiddle > 0.5, torch.tensor(1.0, device=_twiddle.device), torch.tensor(0.0, device=_twiddle.device))
+        p = self.compute_perm(hard_twiddle, self.strides)
+        return p
 
     def sample_soft_perm(self):
         sample_shape = (self.samples,)
@@ -462,7 +482,7 @@ class ButterflyPermutation(Permutation):
         logits = torch.stack((torch.log(tw), torch.zeros_like(tw)), dim=-1) # (depth, 1, log n, n/2, 2)
         logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
         sample_twiddle = torch.softmax(logits_noise / self.temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
-        perms = torch.stack([compute_perm(twiddle, self.strides) for twiddle in sample_twiddle], dim=0) # (s, n, n)
+        perms = torch.stack([self.compute_perm(twiddle, self.strides) for twiddle in sample_twiddle], dim=0) # (s, n, n)
         return perms
 
 
