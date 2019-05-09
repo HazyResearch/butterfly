@@ -2,7 +2,7 @@ Code to accompany the paper <a href="https://arxiv.org/abs/1903.05895">Learning 
 
 ## Requirements
 Python 3.6+  
-PyTorch >=1.0  
+PyTorch >=1.1  
 Numpy
 
 ## Usage
