@@ -108,6 +108,7 @@ def entropy(p, reduction='mean'):
     else: assert False, f"perm.entropy: reduction {reduction} not supported."
 
 def transport(ds, p, reduction='mean'):
+    # TODO: figure out correct transport between "rank 2" permutations
     """
     "Transport" distance between a doubly-stochastic matrix and a permutation
     ds: (..., n, n)
@@ -116,15 +117,32 @@ def transport(ds, p, reduction='mean'):
     Note:
       uniform ds has transport distance (n^2-1)/3
       ds[...,i,p[i]] = 1 has transport 0
+    If distance raised to power p, average case becomes 2n^{p+1}/(p+1)(p+2)
+
+    Scratchwork:
+    true p permuted input with inp = orig[p], i.e. inp[i] = orig[p[i]]
+    want to restore out[i] = orig[i] = inp[pinv[i]]
+    model multiplies by input by some DS,
+      out[i] = inp[j]ds[j,i] = inp[pinv[j]]ds[pinv[j], i]
+    want ds[pinv[i],i] = 1, rest = 0
+      define this matrix as P
+    i.e. P[i, p[i]] = 1
+    what's an acceptable error? can handle
+      out[i] = orig[i+d] = inp[pinv[i+d]]
+    i.e. ds[pinv[i+d], i] = 1
+    i.e. ds[j, p[j]+-d] = 1
+    so penalization function should be cost[i,j] = f(j - p[i])
+    equivalent to optimal transport between rows of ds and P
     """
     n = p.size(-1)
-    dist = torch.arange(n).repeat(n,1).t() - p.repeat(n,1) # dist[i,j] = i - p[j]
+    # dist = torch.arange(n).repeat(n,1).t() - p.repeat(n,1) # dist[i,j] = i - p[j]
+    dist = torch.arange(n).repeat(n,1) - p.repeat(n,1).t() # dist[i,j] = j - p[i]
     dist = torch.abs(dist).to(ds.device, dtype=torch.float)
     # dist = torch.tensor(dist, dtype=torch.float, device=ds.device)
     t1 = torch.sum(ds * dist, dim=[-2,-1])
     t2 = torch.sum(ds.transpose(-1,-2) * dist, dim=[-2,-1])
-    print("transport: ", t1, t2)
-    t = t1 + t2 # TODO: figure out right scaling for this. also transport between "rank 2" permutations
+    print("TRANSPORT: ", t1.cpu(), t2.cpu())
+    t = t1
 
     if reduction is None:
         return t
