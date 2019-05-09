@@ -494,7 +494,7 @@ class ButterflyPermutation(Permutation):
         for t, stride in zip(twiddle, strides):
             twiddle_factor_mat = torch.stack((torch.stack((t, 1-t), dim=-1),
                                               torch.stack((1-t, t), dim=-1)), dim=-2) # TODO efficiency by stacking other order?
-            P = butterfly_mult_untied(twiddle_factor_mat, P, increasing_stride=stride)
+            P = butterfly_mult_untied(twiddle_factor_mat, P, stride, self.training)
             # print("REQUIRES GRAD: ", P.requires_grad)
 
         return P.view(self.size, self.size)
