@@ -216,7 +216,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, anneal_entropy):
+def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, anneal_entropy):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -240,7 +240,7 @@ def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_perio
      }
     experiment = RayExperiment(
         # name=f'pcifar10_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
-        name=f'{dataset.lower()}_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_plr_{plr_min}-{plr_max}_tvsym_{tv_sym}',
+        name=f'{dataset.lower()}_{model}_{args}_{optimizer}_epochs_{nmaxepochs}_lr_decay_{lr_decay}_plr_{plr_min}-{plr_max}_tvsym_{tv_sym}',
         run=TrainableModel,
         local_dir=result_dir,
         num_samples=ntrials,
