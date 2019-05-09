@@ -272,10 +272,13 @@ class TensorPermutation(nn.Module):
 
     def get_mle_perms(self):
         # TODO do this properly
-        def mle(s):
-            return sinkhorn(s.log_alpha, temp=0.03, n_iters=100)
-        perms = torch.stack([mle(p) for p in self.permute], dim=0)
+        perms = torch.stack([p.mle_perm() for p in self.permute], dim=0)
         return perms
+        # return self.get_mean_perms()
+        # def mle(s):
+        #     return sinkhorn(s.log_alpha, temp=0.03, n_iters=100)
+        # perms = torch.stack([mle(p) for p in self.permute], dim=0)
+        # return perms
 
 
 class Permutation(nn.Module):
@@ -328,6 +331,10 @@ class SinkhornPermutation(Permutation):
           - sinkhorn(l, tau->0) is the max likelihood of this distribution
         """
         return sinkhorn(self.log_alpha, temp=self.temp, n_iters=self.sinkhorn_iters)
+
+    def mle_perm(self):
+        # TODO needs refactor
+        return sinkhorn(self.log_alpha, temp=0.03, n_iters=100)
 
     def sample_soft_perm(self, sample_shape=()):
         # TODO design: in case we want to sample differently for each elem of batch
