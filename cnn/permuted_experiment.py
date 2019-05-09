@@ -56,15 +56,22 @@ class TrainableModel(Trainable):
         #
         self.unsupervised = config['unsupervised']
         self.tv = config['tv']
+        self.anneal_entropy_factor = config['anneal_entropy']
 
     def _train_iteration(self):
         self.model.train()
+        inv_temp = self.anneal_entropy_factor * self._iteration
+        print(f"ITERATION {self._iteration} INV TEMP {inv_temp}")
         for data, target in self.train_loader:
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
             output = self.model(data)
             if self.unsupervised:
-                loss = perm.tv(output, norm=self.tv['norm'], p=self.tv['p'], symmetric=self.tv['sym'])
+                p = self.model.get_permutations()
+                # print("train_iteration REQUIRES GRAD: ", p.requires_grad)
+                loss = perm.tv(output, norm=self.tv['norm'], p=self.tv['p'], symmetric=self.tv['sym']) \
+                    + inv_temp * perm.entropy(p, reduction='mean')
+                # print("LOSS ", loss.item())
             else:
                 # target = target.expand(output.size()[:-1]).flatten()
                 # outupt = output.flatten(0, -2)
@@ -197,6 +204,7 @@ def default_config():
     tv_norm = 2
     tv_p = 1
     tv_sym = False
+    anneal_entropy = 0.0
 
 
 @ex.named_config
@@ -208,7 +216,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym):
+def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, anneal_entropy):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -227,7 +235,8 @@ def cifar10_experiment(dataset, model, args, optimizer, lr_decay, lr_decay_perio
         # 'dataset': {'name': 'PCIFAR10'}
         'dataset': {'name': dataset, 'batch': batch},
         'unsupervised': unsupervised,
-        'tv': {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym}
+        'tv': {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
+        'anneal_entropy': anneal_entropy,
      }
     experiment = RayExperiment(
         # name=f'pcifar10_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
