@@ -254,26 +254,19 @@ class TensorPermutation(nn.Module):
         else: assert False, f"Permutation type {perm} not supported."
 
         if self.rank == 1:
-            # perm = self.permute.sample_soft_perm()
             perm = perm_fn(self.permute[0])
             x = x.view(-1, self.w*self.h)
             x = x @ perm
             x = x.view(-1, 3, self.w, self.h) # TODO make this channel agnostic
         elif self.rank == 2:
             x = x.transpose(-1, -2)
-            # perm2 = self.permute2.sample_soft_perm()
             perm2 = perm_fn(self.permute[1])
-            # print("Permutation:", perm2.shape)
-            # x = x @ perm2
-            x = x @ perm2.unsqueeze(-3).unsqueeze(-3)
-            # unsqueeze to explicitly call matmul, can use einsum too
+            x = x @ perm2.unsqueeze(-3).unsqueeze(-3) # unsqueeze to explicitly call matmul, can use einsum too
             x = x.transpose(-1, -2)
-            # perm1 = self.permute1.sample_soft_perm()
             perm1 = perm_fn(self.permute[0])
-            # x = x @ perm1
             x = x @ perm1.unsqueeze(-3).unsqueeze(-3)
             # collapse samples with batch
-            x = x.view(-1, 3, self.w, self.h) # TODO make this channel agnostic
+            x = x.view(-1, 3, self.w, self.h)
         return x
 
     def get_permutations(self, perm=None):
@@ -287,26 +280,10 @@ class TensorPermutation(nn.Module):
             perm_fn = self.perm_type.sample_perm
         else: assert False, f"Permutation type {perm} not supported."
         # return shape (rank, s, n, n)
-        # softperm will return (s, 1, 1, n, n), squeeze for now
-        # perms = torch.stack([self.perm_fn(p).squeeze() for p in self.permute], dim=0)
         perms = torch.stack([perm_fn(p) for p in self.permute], dim=0)
         # print("get_permutations:", perms.shape)
         return perms
 
-    # def get_mean_perms(self):
-    #     # TODO do this properly
-    #     perms = torch.stack([p.mean_perm() for p in self.permute], dim=0)
-    #     return perms
-
-    # def get_mle_perms(self):
-    #     # TODO do this properly
-    #     perms = torch.stack([p.mle_perm() for p in self.permute], dim=0)
-    #     return perms
-    #     # return self.get_mean_perms()
-    #     # def mle(s):
-    #     #     return sinkhorn(s.log_alpha, temp=0.03, n_iters=100)
-    #     # perms = torch.stack([mle(p) for p in self.permute], dim=0)
-    #     # return perms
 
 
 class Permutation(nn.Module):
@@ -399,11 +376,6 @@ class SinkhornPermutation(Permutation):
         log_alpha_noise = add_gumbel_noise(self.log_alpha, sample_shape)
         soft_perms = sinkhorn(log_alpha_noise, self.hard_temp, n_iters=self.hard_iters)
 
-    # def hard_perm(self):
-    #     """ Round to nearest permutation (in this case, MLE) """
-    #     # l = self.log_alpha.detach()
-    #     P = self.sinkhorn(self.log_alpha, temp=0.01, n_iters=100)
-    #     return P
 
 def sinkhorn(log_alpha, temp=1.0, n_iters=20):
     """

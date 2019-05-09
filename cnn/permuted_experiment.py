@@ -85,24 +85,24 @@ class TrainableModel(Trainable):
 
     def _test(self):
         self.model.eval()
-        test_loss = 0.0
-        correct = 0.0
+        test_loss     = 0.0
+        correct       = 0.0
         total_samples = 0
         if self.unsupervised:
             mean_loss = 0.0
-            mle_loss = 0.0
+            mle_loss  = 0.0
         with torch.no_grad():
             for data, target in self.test_loader:
                 data, target = data.to(self.device), target.to(self.device)
                 output = self.model(data)
                 total_samples += output.size(0)
                 if self.unsupervised:
-                    test_loss += perm.tv(output).item()
+                    test_loss  += perm.tv(output).item()
 
-                    mean_output = self.model(data, perm='mean')
-                    mean_loss += perm.tv(mean_output).item()
-                    mle_output = self.model(data, perm='mle')
-                    mle_loss += perm.tv(mle_output).item()
+                    mean_output = self.model(data, perm ='mean')
+                    mean_loss  += perm.tv(mean_output).item()
+                    mle_output  = self.model(data, perm ='mle')
+                    mle_loss   += perm.tv(mle_output).item()
                 else:
                     target = target.repeat(output.size(0)//target.size(0))
                     test_loss += F.cross_entropy(output, target, reduction='sum').item()
@@ -111,58 +111,46 @@ class TrainableModel(Trainable):
 
             if self.unsupervised:
                 true = self.test_loader.true_permutation[0]
-                # gp = self.model.get_permutations()
-                # import pdb; pdb.set_trace()
                 p = self.model.get_permutations() # (rank, sample, n, n)
-                # print(f"PERMUTATIONS SHAPE {p.shape}")
                 # p0 = p[0]
                 # elements = p0[..., torch.arange(len(true)), true]
                 # print("max in true perm elements", elements.max(dim=-1)[0])
-                # if len(p0.size()) > 2: p0 = p0[0]
                 # print(p0)
                 sample_ent = perm.entropy(p, reduction='mean')
                 sample_nll = perm.dist(p, self.test_loader.true_permutation, fn='nll')
                 sample_was = perm.dist(p, self.test_loader.true_permutation, fn='was')
-                # print("sample ENTROPY ", sample_ent)
-                # print("sample NLL ", sample_nll)
-                # print("sample TRANSPORT ", sample_was)
-
-                # correct = perm.dist(p, self.test_loader.true_permutation).item()
-                # correct = correct * total_samples # hack to normalize properly
 
                 mean = self.model.get_permutations(perm='mean') # (rank, sample, n, n)
                 mean_ent = perm.entropy(mean, reduction='mean')
                 mean_nll = perm.dist(mean, self.test_loader.true_permutation, fn='nll')
                 mean_was = perm.dist(mean, self.test_loader.true_permutation, fn='was')
-                print("mean LOSS ", mean_loss)
-                print("mean ENTROPY ", mean_ent)
-                print("mean NLL ", mean_nll)
-                print("mean TRANSPORT ", mean_was)
 
-                # mle = self.model.get_mle_perms() # (rank, sample, n, n)
                 mle = self.model.get_permutations(perm='mle') # (rank, sample, n, n)
-                mle_ent = perm.entropy(mle, reduction='mean')
-                mle_nll = perm.dist(mle, self.test_loader.true_permutation, fn='nll')
+                # mle_ent = perm.entropy(mle, reduction='mean')
+                # mle_nll = perm.dist(mle, self.test_loader.true_permutation, fn='nll')
                 mle_was = perm.dist(mle, self.test_loader.true_permutation, fn='was')
-                print("mle LOSS ", mle_loss)
-                print("mle ENTROPY ", mle_ent)
-                print("mle NLL ", mle_nll)
-                print("mle TRANSPORT ", mle_was)
 
-
-                return {"sample_loss": test_loss / total_samples,
-                        "sample_ent": sample_ent.item(), "sample_nll": sample_nll.item(), "sample_was": sample_was.item,
-                        "mean_loss": mean_loss / total_samples, "mean_ent": mean_ent.item(), "mean_nll": mean_nll.item(), "mean_was": mean_was.item(),
-                        "mle_loss": mle_loss / total_samples, "mle_ent": mle_ent.item(), "mle_nll": mle_nll.item(), "mle_was": mle_was.item(),
-                        # "mean_accuracy": 1364.0-mean_was.item(),
+                # TODO calculate average case wasserstein automatically in terms of rank/dims and power p
+                return {
+                    "sample_loss": test_loss / total_samples,
+                    "sample_ent": sample_ent.item(),
+                    "sample_nll": sample_nll.item(),
+                    "sample_was": sample_was.item(),
+                    "mean_loss": mean_loss / total_samples,
+                    "mean_ent": mean_ent.item(),
+                    "mean_nll": mean_nll.item(),
+                    "mean_was": mean_was.item(),
+                    "mle_loss": mle_loss / total_samples,
+                    # "mle_ent": mle_ent.item(),
+                    # "mle_nll": mle_nll.item(),
+                    "mle_was": mle_was.item(),
+                    "mean_accuracy": 682.0-mean_was.item(),
                 }
 
         # test_loss = test_loss / len(self.test_loader.dataset)
         # accuracy = correct / len(self.test_loader.dataset)
         test_loss = test_loss / total_samples
         accuracy = correct / total_samples
-        # accuracy = 0.0
-        # print(f"test_loss {test_loss}, accuracy {accuracy}")
         return {"mean_loss": test_loss, "mean_accuracy": accuracy}
 
     def _train(self):
