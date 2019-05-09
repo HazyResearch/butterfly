@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, subprocess
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 # Add to $PYTHONPATH in addition to sys.path so that ray workers can see
@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 import pickle
 import random
+import datetime
 
 import numpy as np
 
@@ -238,9 +239,11 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         'tv': {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
         'anneal_entropy': anneal_entropy,
      }
+    timestamp = datetime.datetime.now().replace(microsecond=0).isoformat()
+    commit_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip().decode('utf-8')
     experiment = RayExperiment(
         # name=f'pcifar10_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
-        name=f'{dataset.lower()}_{model}_{args}_{optimizer}_epochs_{nmaxepochs}_lr_decay_{lr_decay}_plr_{plr_min}-{plr_max}_tvsym_{tv_sym}',
+        name=f'{dataset.lower()}_{model}_{args}_{optimizer}_epochs_{nmaxepochs}_lr_decay_{lr_decay}_plr_{plr_min}-{plr_max}_tvsym_{tv_sym}_{timestamp}_{commit_id}',
         run=TrainableModel,
         local_dir=result_dir,
         num_samples=ntrials,
