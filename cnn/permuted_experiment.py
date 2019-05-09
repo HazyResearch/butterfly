@@ -125,33 +125,40 @@ class TrainableModel(Trainable):
                 # print(p0)
                 sample_ent = perm.entropy(p, reduction='mean')
                 sample_nll = perm.dist(p, self.test_loader.true_permutation, fn='nll')
-                sample_was = perm.dist(p, self.test_loader.true_permutation, fn='was')
+                # sample_was = perm.dist(p, self.test_loader.true_permutation, fn='was')
+                sample_was1, sample_was2 = perm.dist(p, self.test_loader.true_permutation, fn='was')
 
                 mean = self.model.get_permutations(perm='mean') # (rank, sample, n, n)
                 mean_ent = perm.entropy(mean, reduction='mean')
                 mean_nll = perm.dist(mean, self.test_loader.true_permutation, fn='nll')
-                mean_was = perm.dist(mean, self.test_loader.true_permutation, fn='was')
+                # mean_was = perm.dist(mean, self.test_loader.true_permutation, fn='was')
+                mean_was1, mean_was2 = perm.dist(mean, self.test_loader.true_permutation, fn='was')
 
                 mle = self.model.get_permutations(perm='mle') # (rank, sample, n, n)
                 # mle_ent = perm.entropy(mle, reduction='mean')
                 # mle_nll = perm.dist(mle, self.test_loader.true_permutation, fn='nll')
-                mle_was = perm.dist(mle, self.test_loader.true_permutation, fn='was')
+                # mle_was = perm.dist(mle, self.test_loader.true_permutation, fn='was')
+                mle_was1, mle_was2 = perm.dist(mle, self.test_loader.true_permutation, fn='was')
 
                 # TODO calculate average case wasserstein automatically in terms of rank/dims and power p
                 return {
                     "sample_loss": test_loss / total_samples,
                     "sample_ent": sample_ent.item(),
                     "sample_nll": sample_nll.item(),
-                    "sample_was": sample_was.item(),
+                    # "sample_was": sample_was.item(),
+                    "sample_was1": sample_was1.item(),
+                    "sample_was2": sample_was2.item(),
                     "mean_loss": mean_loss / total_samples,
                     "mean_ent": mean_ent.item(),
                     "mean_nll": mean_nll.item(),
-                    "mean_was": mean_was.item(),
+                    "mean_was2": mean_was1.item(),
+                    "mean_was2": mean_was2.item(),
                     "mle_loss": mle_loss / total_samples,
                     # "mle_ent": mle_ent.item(),
                     # "mle_nll": mle_nll.item(),
-                    "mle_was": mle_was.item(),
-                    "mean_accuracy": 682.0-mean_was.item(),
+                    "mle_was1": mle_was1.item(),
+                    "mle_was2": mle_was2.item(),
+                    "mean_accuracy": 682.0-mean_was2.item(),
                 }
 
         # test_loss = test_loss / len(self.test_loader.dataset)

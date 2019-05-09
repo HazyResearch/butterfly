@@ -83,13 +83,22 @@ def dist(perm1, perm2, fn='nll'):
         loss_fn = transport
     else: assert False, f"perm.dist: fn {fn} not supported."
 
+    loss1, loss2 = 0.0, 0.0
     for p1, p2 in zip(perm1, perm2):
         # print(p1.size(), p1.type())
         # print(p2.size(), p2.type())
         # print(p2, type(p2))
-        loss = loss + loss_fn(p1, p2)
+        if fn == 'was': # temporary casework
+            l1, l2 = loss_fn(p1, p2)
+            loss1 += l1
+            loss2 += l2
+        else:
+            loss = loss + loss_fn(p1, p2)
     # print(loss, loss.type())
-    return loss
+    if fn == 'was':
+        return loss1, loss2
+    else:
+        return loss
 
 def entropy(p, reduction='mean'):
     """
@@ -135,21 +144,24 @@ def transport(ds, p, reduction='mean'):
     equivalent to optimal transport between rows of ds and P
     """
     n = p.size(-1)
-    # dist = torch.arange(n).repeat(n,1).t() - p.repeat(n,1) # dist[i,j] = i - p[j]
-    dist = torch.arange(n).repeat(n,1) - p.repeat(n,1).t() # dist[i,j] = j - p[i]
+    dist = torch.arange(n).repeat(n,1).t() - p.repeat(n,1) # dist[i,j] = i - p[j]
+    # TODO transposing dist should switch t1 and t2
+    # dist = torch.arange(n).repeat(n,1) - p.repeat(n,1).t() # dist[i,j] = j - p[i]
     dist = torch.abs(dist).to(ds.device, dtype=torch.float)
     # dist = torch.tensor(dist, dtype=torch.float, device=ds.device)
     t1 = torch.sum(ds * dist, dim=[-2,-1])
     t2 = torch.sum(ds.transpose(-1,-2) * dist, dim=[-2,-1])
     print("TRANSPORT: ", t1.cpu(), t2.cpu())
-    t = t1
+    t = t1+t2
 
     if reduction is None:
         return t
     elif reduction == 'sum':
         return torch.sum(t)
     elif reduction == 'mean':
-        return torch.mean(t)
+        # return torch.mean(t)
+        # QUICK DEBUG
+        return (torch.mean(t1), torch.mean(t2))
     else: assert False, f"perm.transport: reduction {reduction} not supported."
 
 def tv(x, norm=2, p=1, symmetric=False):
