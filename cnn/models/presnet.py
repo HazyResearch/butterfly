@@ -269,8 +269,14 @@ class TensorPermutation(nn.Module):
         # TODO do this properly
         perms = torch.stack([p.mean_perm() for p in self.permute], dim=0)
         return perms
-        # def mean(s):
-        #     return sinkhorn(s.log_alpha, temp=1.0, n_iters=s.sinkhorn_iters)
+
+    def get_mle_perms(self):
+        # TODO do this properly
+        def mle(s):
+            return sinkhorn(s.log_alpha, temp=0.03, n_iters=100)
+        perms = torch.stack([mle(p) for p in self.permute], dim=0)
+        return perms
+
 
 class Permutation(nn.Module):
 
