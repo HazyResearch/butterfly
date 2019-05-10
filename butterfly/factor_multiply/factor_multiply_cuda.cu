@@ -2373,107 +2373,6 @@ void butterfly_conv2d_backward_cuda(const at::Tensor&grad, const at::Tensor& twi
      cudaGetLastError());
 }
 
-template <typename scalar_t, typename accscalar_t, bool increasing_stride,
-            typename Function0, typename Function1, typename Function2>
-__global__ void butterfly_conv2d_forward_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                              const at::PackedTensorAccessor<scalar_t, 4> input_a,
-                                                              Function0 load_input,
-                                                              Function1 load_grad,
-                                                              at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-                                                              // at::PackedTensorAccessor<scalar_t, 4> d_input_a,
-                                                              Function2 save_d_input,
-                                                              int log_max_stride,
-                                                              int b_out,
-                                                              int log_n,
-                                                              int kernel_size,
-                                                              int padding,
-                                                              int h_out,
-                                                              int w_out) {
-  const int stack = blockIdx.z;
-  const int s = blockIdx.y + gridDim.y * blockIdx.z;
-  const int max_stride = 1 << log_max_stride;
-  const int input_base_idx = 0;
-  __shared__ scalar_t s_input[ELEMENTARY_SIZE * 2];
-  __shared__ accscalar_t s_twiddle[ELEMENTARY_SIZE][2][2];  // Use accscalar_t instead of scalar_t since we'll reuse the storage for s_d_twiddle
-  // Forward pass to compute the intermediate values
-  scalar_t input_val_storage[MAX_N_FACTORS][2];  // Storing inputs for backward pass
-  int b = blockIdx.x * blockDim.y + threadIdx.y;
-  load_input(s_input);
-  int tid_x = threadIdx.x;
-  int tid_y = threadIdx.y;
-  int first_idx = increasing_stride ? 0 : log_n - 1 - log_max_stride;
-  for (int idx = first_idx; idx <= first_idx + log_max_stride; ++idx) {  // Let's not skip steps for now
-    int log_stride = increasing_stride ? idx : log_n - 1 - idx;
-    int stride = 1 << log_stride;
-    if (tid_y == 0) {
-      s_twiddle[tid_x][0][0] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0];
-      s_twiddle[tid_x][0][1] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1];
-      s_twiddle[tid_x][1][0] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0];
-      s_twiddle[tid_x][1][1] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1];
-    }
-    int low_order_bits = tid_x & (stride - 1);  // int low_order_bits = tid_x % stride;
-    int pos_x = 2 * (tid_x - low_order_bits) + low_order_bits;
-    int pos_y = tid_y * max_stride * 2;
-    int pos = pos_x + pos_y;
-    __syncthreads();
-    const scalar_t twiddle_val[2][2] = {{s_twiddle[tid_x][0][0], s_twiddle[tid_x][0][1]},
-                                        {s_twiddle[tid_x][1][0], s_twiddle[tid_x][1][1]}};
-    __syncthreads();  // otherwise some thread might go back to writing to s_twiddle before other thread can read
-    if (b < b_out) {
-      input_val_storage[idx - first_idx][0] = s_input[pos];
-      input_val_storage[idx - first_idx][1] = s_input[pos + stride];
-      const scalar_t input_val[2] = {s_input[pos], s_input[pos + stride]};
-      s_input[pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
-      s_input[pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
-    }
-  }
-  __syncthreads(); // Otherwise s_input will be overwritten with s_grad before some thread can read
-  // Backward pass
-  scalar_t* s_grad = &s_input[0]; // Reusing the same storage as s_input
-  accscalar_t* s_d_twiddle = (accscalar_t *)&s_twiddle[0][0][0];  // Reusing the same storage as s_twiddle, have to be careful if we change the implemetnation.
-  load_grad(s_grad);
-  for (int idx = first_idx + log_max_stride; idx >= first_idx; --idx) {
-    int log_stride = increasing_stride ? idx : log_n - 1 - idx;
-    int stride = 1 << log_stride;
-    if (tid_y == 0) {
-      s_twiddle[tid_x][0][0] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0];
-      s_twiddle[tid_x][0][1] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1];
-      s_twiddle[tid_x][1][0] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0];
-      s_twiddle[tid_x][1][1] = twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1];
-    }
-    int low_order_bits = tid_x & (stride - 1);  // int low_order_bits = tid_x % stride;
-    int pos_x = 2 * (tid_x - low_order_bits) + low_order_bits;
-    int pos_y = tid_y * max_stride * 2;
-    int pos = pos_x + pos_y;
-    __syncthreads();
-    const scalar_t twiddle_val[2][2] = {{s_twiddle[tid_x][0][0], s_twiddle[tid_x][0][1]},
-                                        {s_twiddle[tid_x][1][0], s_twiddle[tid_x][1][1]}};
-    // Don't need to sync here since we sync later at sum_strided_atomic, so no writing to s_twiddle can occur until then
-    accscalar_t d_twiddle_val[2][2] = {{0, 0}, {0, 0}};
-    if (b < b_out) {
-      const scalar_t grad_val[2] = {s_grad[pos], s_grad[pos + stride]};
-      s_grad[pos] = twiddle_val[0][0] * grad_val[0] + twiddle_val[1][0] * grad_val[1];
-      s_grad[pos + stride] = twiddle_val[0][1] * grad_val[0] + twiddle_val[1][1] * grad_val[1];
-      const scalar_t input_val[2] = {input_val_storage[idx - first_idx][0], input_val_storage[idx - first_idx][1]};
-      d_twiddle_val[0][0] = grad_val[0] * input_val[0];
-      d_twiddle_val[0][1] = grad_val[0] * input_val[1];
-      d_twiddle_val[1][0] = grad_val[1] * input_val[0];
-      d_twiddle_val[1][1] = grad_val[1] * input_val[1];
-    }
-    int tid = threadIdx.x + threadIdx.y * blockDim.x;
-    int nthreads = blockDim.x * blockDim.y;
-    sum_strided_atomic(reinterpret_cast<accscalar_t (&)[4]>(d_twiddle_val), s_d_twiddle, max_stride, nthreads, tid);
-    if (tid_y == 0) {
-      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][0], s_d_twiddle[tid_x]);
-      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][0][1], s_d_twiddle[tid_x + max_stride]);
-      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][0], s_d_twiddle[tid_x + 2 * max_stride]);
-      atomicAdd(&d_twiddle_a[s][log_stride][input_base_idx / 2 + tid_x][1][1], s_d_twiddle[tid_x + 3 * max_stride]);
-    }
-    __syncthreads();  // Otherwise s_d_twiddle will be overwritten with s_twiddle before some thread can read
-  }
-  save_d_input(s_grad);
-}
-
 void butterfly_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
     const at::Tensor& input, const at::Tensor&grad,
     at::Tensor& d_twiddle, at::Tensor& d_input,
@@ -2490,11 +2389,6 @@ void butterfly_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(),
   "butterfly_conv2d_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    // const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
-    // const auto input_a = input.packed_accessor<scalar_t, 4>();
-    // const auto grad_a = grad.packed_accessor<scalar_t, 3>();
-    // auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5>();
-    // auto d_input_a = d_input.packed_accessor<scalar_t, 4>();
     const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
     const auto input_a = input.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
     const auto grad_a = grad.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
@@ -2613,15 +2507,6 @@ void butterfly_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
                           : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 9>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       }
-    // increasing_stride ?
-    //   butterfly_conv2d_forward_backward_cuda_kernel<scalar_t, accscalar_t, true>
-    //   <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-    //     twiddle_a, input_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size,
-    //     log_n, kernel_size, padding, h_out, w_out) :
-    //   butterfly_conv2d_forward_backward_cuda_kernel<scalar_t, accscalar_t, false>
-    //     <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-    //     twiddle_a, input_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size,
-    //     log_n, kernel_size, padding, h_out, w_out);
   });
   AT_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_conv2d_backward_cuda failed with error code ",
