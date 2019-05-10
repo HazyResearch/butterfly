@@ -11,6 +11,7 @@ sys.path.insert(0, project_root)
 os.environ['PYTHONPATH'] = project_root + ":" + os.environ.get('PYTHONPATH', '')
 from butterfly import Butterfly
 from butterfly.butterfly_multiply import butterfly_mult_untied
+import permutation_utils as perm
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -284,6 +285,10 @@ class TensorPermutation(nn.Module):
         # print("get_permutations:", perms.shape)
         return perms
 
+    def entropy(self, p):
+        ents = torch.stack([perm.entropy(p) for perm in self.permute], dim=0) # (rank,)
+        return torch.mean(ents)
+
 
 
 class Permutation(nn.Module):
@@ -465,6 +470,26 @@ class ButterflyPermutation(Permutation):
             self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape) * 2*math.pi)
         else:
             assert False, f"ButterflyPermutation: Parameter type {self.param} not supported."
+
+
+    def entropy(self, p=None):
+        """ TODO: How does this compare to the matrix entropy of the expanded mean matrix? """
+        if p == 'logits':
+            def binary_ent(p):
+                return -(p * torch.log(p) + (1-p)*torch.log(1-p))
+            _twiddle = self.map_twiddle(self.twiddle)
+            return torch.sum(binary_ent(_twiddle))
+
+        if p is None:
+            perms = self.generate_perm()
+        elif p == 'mean':
+            perms = self.mean_perm()
+        elif p == 'mle':
+            perms = self.mle_perm()
+        elif p == 'sample':
+            perms = self.sample_perm()
+        else: assert False, f"Permutation type {p} not supported."
+        return perm.entropy(perms, reduction='mean')
 
     def generate_perm(self):
         """ Generate (a batch of) permutations for training """

@@ -74,10 +74,13 @@ class TrainableModel(Trainable):
             self.optimizer.zero_grad()
             output = self.model(data)
             if self.unsupervised:
-                p = self.model.get_permutations()
+                # p = self.model.get_permutations()
+                # assert p.requires_grad
                 # print("train_iteration REQUIRES GRAD: ", p.requires_grad)
-                loss = perm.tv(output, norm=self.tv['norm'], p=self.tv['p'], symmetric=self.tv['sym']) \
-                    + inv_temp * perm.entropy(p, reduction='mean')
+                # H = perm.entropy(p, reduction='mean')
+                H = self.model.entropy(p=None)
+                assert H.requires_grad
+                loss = perm.tv(output, norm=self.tv['norm'], p=self.tv['p'], symmetric=self.tv['sym']) + inv_temp * H
                 # print("LOSS ", loss.item())
             else:
                 # target = target.expand(output.size()[:-1]).flatten()
