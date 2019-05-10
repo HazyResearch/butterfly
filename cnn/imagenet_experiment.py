@@ -147,7 +147,6 @@ def main():
     if args.pretrained: model = models.__dict__[args.arch](pretrained=True)
     else: model = models.__dict__[args.arch](num_structured_layers=args.num_structured_layers,
             structure_type=args.structure_type, nblocks=args.nblocks, param=args.param)
-
     model = model.cuda()
     n_dev = torch.cuda.device_count()
     logger.info('Created model')
@@ -191,6 +190,12 @@ def main():
     logger.info('Loaded data')
     if args.evaluate: return validate(val_loader, model, criterion, epoch, start_time)
 
+    logger.info(model)
+    logger.info('| model {}, criterion {}'.format(args.arch, criterion.__class__.__name__))
+    logger.info('| num. model params: {} (num. trained: {})'.format(
+        sum(p.numel() for p in model.parameters()),
+        sum(p.numel() for p in model.parameters() if p.requires_grad),
+    ))
     for epoch in range(args.start_epoch, args.epochs):
         logger.info(f'Epoch {epoch}')
         adjust_learning_rate(optimizer, epoch)
@@ -385,9 +390,9 @@ def validate(val_loader, model, criterion, epoch, start_time):
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
-    torch.save(state, filename)
+    torch.save(state, os.path.join(args.save_dir, filename))
     if is_best:
-        shutil.copyfile(filename, f'{args.save_dir}/model_best.pth.tar')
+        shutil.copyfile(os.path.join(args.save_dir, filename), f'{args.save_dir}/model_best.pth.tar')
 
 
 class AverageMeter(object):
