@@ -158,7 +158,8 @@ class TrainableModel(Trainable):
                     # "mle_nll": mle_nll.item(),
                     "mle_was1": mle_was1.item(),
                     "mle_was2": mle_was2.item(),
-                    "mean_accuracy": 682.0-mean_was2.item(),
+                    # "mean_accuracy": 682.0-mean_was2.item(),
+                    "neg_sample_loss": -test_loss / total_samples,
                 }
 
         # test_loss = test_loss / len(self.test_loader.dataset)
@@ -267,15 +268,15 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         checkpoint_at_end=True,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
-        resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
-        stop={"training_iteration": 1 if smoke_test else 9999},
+        resources_per_trial={'cpu': 4, 'gpu': 0.5 if cuda else 0},
+        stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         config=config,
     )
     return experiment
 
 
 @ex.automain
-def run(model, result_dir, nmaxepochs):
+def run(model, result_dir, nmaxepochs, unsupervised):
     experiment = cifar10_experiment()
     try:
         with open('../config/redis_address', 'r') as f:
@@ -284,7 +285,10 @@ def run(model, result_dir, nmaxepochs):
             ray.init(redis_address=address)
     except:
         ray.init()
-    ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
+    if unsupervised:
+        ahb = AsyncHyperBandScheduler(reward_attr='neg_sample_loss', max_t=nmaxepochs, grace_period=50, reduction_factor=2, brackets=3)
+    else:
+        ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
     trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     accuracy = [trial.last_result.get('mean_accuracy', float('-inf')) for trial in trials]
