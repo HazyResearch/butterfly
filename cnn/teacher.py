@@ -21,7 +21,8 @@ import models.resnet_imagenet as models # only use imagenet models
 from models.butterfly_conv import ButterflyConv2d, ButterflyConv2dBBT
 import logging
 import torchvision.models as torch_models
-from train_utils import AverageMeter, data_prefetcher
+from train_utils import AverageMeter, data_prefetcher, strip_prefix_if_present
+import models.resnet_imagenet as models # only use imagenet models
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
@@ -47,6 +48,8 @@ def get_parser():
                         help='Layers to save inputs and outputs for.'
                              'Use as a list: e.g. layer1,layer2,layer3.'
                              'More layers takes longer.')
+    parser.add_argument('--model-path', type=str, required=True,
+                        help='Path for teacher model.')
     return parser
 
 cudnn.benchmark = True
@@ -150,7 +153,11 @@ def get_teacher_intermediates(teacher_model, train_loader, layers_to_replace):
 
 def main():
     # load pretrained teacher model from torchvision
-    teacher_model = torch_models.__dict__[args.arch](pretrained=True)
+    # teacher_model = torch_models.__dict__[args.arch](pretrained=True)
+    teacher_model = models.__dict__[args.arch]()
+    loaded_state_dict = torch.load(args.model_path)['state_dict']
+    loaded_state_dict = strip_prefix_if_present(loaded_state_dict, prefix="module.")
+    teacher_model.load_state_dict(loaded_state_dict)
 
     teacher_model.cuda()
     logging.info(teacher_model)
@@ -177,7 +184,7 @@ def main():
             transforms.RandomHorizontalFlip(),
         ] + tensor_tfm))
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=False,
+        train_dataset, batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=True)
     logger.info('Loaded data')
 

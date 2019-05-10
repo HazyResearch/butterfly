@@ -1,4 +1,14 @@
 import torch
+from collections import OrderedDict
+
+def strip_prefix_if_present(state_dict, prefix):
+    keys = sorted(state_dict.keys())
+    if not all(key.startswith(prefix) for key in keys):
+        return state_dict
+    stripped_state_dict = OrderedDict()
+    for key, value in state_dict.items():
+        stripped_state_dict[key.replace(prefix, "")] = value
+    return stripped_state_dict
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
