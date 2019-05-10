@@ -224,6 +224,8 @@ def default_config():
     tv_sym = False
     anneal_entropy = 0.0
     restore_perm = None
+    temp_min = 1.0
+    temp_max = 1.0
 
 
 @ex.named_config
@@ -235,9 +237,12 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, anneal_entropy, restore_perm):
+def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, anneal_entropy, restore_perm, temp_min, temp_max):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     if restore_perm is not None: restore_perm = 'saved_perms/' + restore_perm
+    args_rand = args.copy()
+    args_rand['temp'] = sample_from(lambda spec: math.exp(random.uniform(math.log(temp_min), math.log(temp_max))))
+    # args_rand['sig'] = sample_from(lambda _: np.random.choice(('BT1', 'BT4')))
     config={
         'optimizer': optimizer,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-2)) if optimizer == 'Adam'
@@ -250,7 +255,9 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         'weight_decay':    2e-4 if weight_decay else 0.0,
         'seed':            sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device':          'cuda' if cuda else 'cpu',
-        'model':           {'name': model, 'args': args},
+        'model':           {'name': model, 'args': args_rand},
+        # 'model':           {'name': model, 'args': args.update({'temp': sample_from(lambda spec: math.exp(random.uniform(math.log(temp_min), math.log(temp_max))))})},
+
         'dataset':         {'name': dataset, 'batch': batch},
         'unsupervised':    unsupervised,
         'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
@@ -262,6 +269,7 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
     experiment = RayExperiment(
         # name=f'pcifar10_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
         name=f'{dataset.lower()}_{model}_{args}_{optimizer}_epochs_{nmaxepochs}_lr_decay_{lr_decay}_plr_{plr_min}-{plr_max}_tvsym_{tv_sym}_{timestamp}_{commit_id}',
+        # name=f'{dataset.lower()}_{model}_{args_orig}_{optimizer}_epochs_{nmaxepochs}_lr_decay_{lr_decay}_plr_{plr_min}-{plr_max}_tvsym_{tv_sym}_{timestamp}_{commit_id}',
         run=TrainableModel,
         local_dir=result_dir,
         num_samples=ntrials,
