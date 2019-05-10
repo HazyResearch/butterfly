@@ -1909,12 +1909,11 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
      cudaGetLastError());
 }
 
-template <typename scalar_t, typename accscalar_t, bool increasing_stride>
+template <typename scalar_t, typename accscalar_t, bool increasing_stride, int log_max_stride>
 __global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const CudaAcsr<scalar_t, 5> twiddle_a,
                                                                        const CudaAcsr<scalar_t, 3> input_a,
                                                                        CudaAcsr<scalar_t, 5> d_twiddle_a,
-                                                                       CudaAcsr<scalar_t, 3> d_input_a,
-                                                                       int log_max_stride) {
+                                                                       CudaAcsr<scalar_t, 3> d_input_a) {
   const int batch_size = input_a.size(0);
   const int s = blockIdx.z;
   const int max_stride = 1 << log_max_stride;
@@ -1931,6 +1930,7 @@ __global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const Cud
   }
   int tid_x = threadIdx.x;
   int tid_y = threadIdx.y;
+  #pragma unroll
   for (int idx = 0; idx <= log_max_stride; ++idx) {  // Let's not skip steps for now
     int log_stride = increasing_stride ? idx : log_max_stride - idx;
     int stride = 1 << log_stride;
@@ -1966,6 +1966,7 @@ __global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const Cud
       s_grad[i + threadIdx.y * max_stride * 2] = d_input_a[b][s][input_base_idx + i];
     }
   }
+  #pragma unroll
   for (int idx = log_max_stride; idx >= 0; --idx) {
     int log_stride = increasing_stride ? idx : log_max_stride - idx;
     int stride = 1 << log_stride;
@@ -2033,10 +2034,59 @@ void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, 
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
     dim3 grid(div_up(batch_size, block.y), div_up(n / 2, stride), nstack);
-    increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true>
-      <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a, log_stride)
-                      : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false>
-      <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a, log_stride);
+    switch (log_stride)
+      {
+      case 0:
+        increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true, 0>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a)
+                          : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 0>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a); break;
+      case 1:
+        increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true, 1>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a)
+                          : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 1>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a); break;
+      case 2:
+        increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true, 2>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a)
+                          : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 2>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a); break;
+      case 3:
+        increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true, 3>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a)
+                          : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 3>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a); break;
+      case 4:
+        increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true, 4>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a)
+                          : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 4>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a); break;
+      case 5:
+        increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true, 5>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a)
+                          : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 5>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a); break;
+      case 6:
+        increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true, 6>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a)
+                          : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 6>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a); break;
+      case 7:
+        increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true, 7>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a)
+                          : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 7>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a); break;
+      case 8:
+        increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true, 8>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a)
+                          : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 8>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a); break;
+      case 9:
+        increasing_stride ? butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, true, 9>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a)
+                          : butterfly_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, false, 9>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a); break;
+      }
   });
   AT_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_forward_backward_cuda failed with error code ",
