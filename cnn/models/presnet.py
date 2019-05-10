@@ -416,12 +416,13 @@ def add_gumbel_noise(log_alpha, sample_shape=()):
 
 
 class ButterflyPermutation(Permutation):
-    def __init__(self, size, sig='BT1', param='ortho2', stochastic=False, temp=1.0, samples=1):
+    def __init__(self, size, sig='BT1', param='ortho2', stochastic=False, temp=1.0, samples=1, sample_method='gumbel'):
         super().__init__()
         self.size = size
         self.stochastic = stochastic # TODO align this block
         self.temp = temp
         self.samples = samples
+        self.sample_method = sample_method
         self.param = param
         self.m = int(math.ceil(math.log2(size)))
         assert size == (1<<self.m), "ButterflyPermutation: Only power of 2 supported."
@@ -430,7 +431,7 @@ class ButterflyPermutation(Permutation):
             self.mean_temp = 1.0
             self.sample_temp = temp
             self.generate_fn = self.sample_soft_perm # add this attr for efficiency (avoid casing in every call to generate())
-            self.sample_method = 'gumbel'
+            # self.sample_method = 'gumbel'
         else:
             self.mean_temp = temp
             self.generate_fn = self.mean_perm
@@ -523,11 +524,14 @@ class ButterflyPermutation(Permutation):
         _twiddle = self.map_twiddle(self.twiddle)
 
         if self.sample_method == 'gumbel':
-            logits = torch.stack((torch.log(_twiddle), torch.zeros_like(_twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
+            logits = torch.stack((torch.log(_twiddle), torch.log(1.-_twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
             logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
             sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
         elif self.sample_method == 'uniform':
-            raise NotImplementedError
+            r = torch.rand(_twiddle.size())
+            _twiddle = _twiddle - r
+            sample_twiddle = 1.0 / (1.0 + torch.exp(-_twiddle / self.sample_temp))
+        else: assert False, "sample_method {self.sample_method} not supported"
 
         perms = torch.stack([self.compute_perm(twiddle, self.strides) for twiddle in sample_twiddle], dim=0) # (s, n, n)
         return perms
