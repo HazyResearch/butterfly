@@ -11,6 +11,7 @@ try:
     from factor_multiply import butterfly_multiply_intermediate, butterfly_multiply_intermediate_backward
     from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_backward
     from factor_multiply import butterfly_multiply_untied_forward_backward
+    from factor_multiply import bbt_multiply_untied, bbt_multiply_untied_forward_backward
     from factor_multiply import butterfly_multiply_untied_svd, butterfly_multiply_untied_svd_backward
     from factor_multiply import butterfly_multiply_untied_svd_forward_backward
     from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
@@ -193,6 +194,55 @@ class ButterflyMultUntied(torch.autograd.Function):
         return d_coefficients, d_input, None, None  # Autograd requires 3 gradients
 
 butterfly_mult_untied = ButterflyMultUntied.apply if use_extension else butterfly_mult_untied_torch
+
+
+class BbtMultUntied(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, twiddle, input):
+        """
+        Parameters:
+            twiddle: (nstack, 2 * log n, n / 2, 2, 2)
+            input: (batch_size, nstack, n)
+        Returns:
+            output: (batch_size, nstack, n)
+        """
+        output = bbt_multiply_untied(twiddle, input)
+        ctx.save_for_backward(twiddle, input)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad):
+        """
+        Parameters:
+            grad: (batch_size, nstack, n)
+        Return:
+            d_twiddle: (nstack, 2 * log n, n / 2, 2, 2)
+            d_input: (batch_size, nstack, n)
+        """
+        # twiddle, output_and_intermediate = ctx.saved_tensors
+        twiddle, input = ctx.saved_tensors
+        d_coefficients, d_input = bbt_multiply_untied_forward_backward(twiddle, input, grad)
+        return d_coefficients, d_input
+
+
+def bbt_mult_untied(twiddle, input):
+    n = input.shape[2]
+    m = int(math.log2(n))
+    if n <= 1024 and input.is_cuda:
+        return BbtMultUntied.apply(twiddle, input)
+    else:
+        output = butterfly_mult_untied(twiddle[:, :m].flip(1), input, False)
+        output = butterfly_mult_untied(twiddle[:, m:], output, True)
+        return output
+
+
+def bbt_mult_untied_torch(twiddle, input):
+    n = input.shape[2]
+    m = int(math.log2(n))
+    output = butterfly_mult_untied_torch(twiddle[:, :m].flip(1), input, increasing_stride=False)
+    output = butterfly_mult_untied_torch(twiddle[:, m:], output, increasing_stride=True)
+    return output
 
 
 def twiddle_svd2regular(twiddle):

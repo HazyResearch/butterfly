@@ -18,6 +18,9 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
                                              at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
 void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input, const at::Tensor& grad,
                                                      at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
+void bbt_multiply_untied_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output);
+void bbt_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input, const at::Tensor& grad,
+                                               at::Tensor& d_twiddle, at::Tensor& d_input);
 void butterfly_conv2d_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output,
                            const int kernel_size, const int padding, const int h_out,
                            const int w_out, bool increasing_stride, bool return_intermediates);
@@ -1045,6 +1048,65 @@ std::vector<at::Tensor> butterfly_multiply_untied_forward_backward(const at::Ten
   return {d_twiddle, d_input} ;
 }
 
+at::Tensor bbt_multiply_untied(const at::Tensor& twiddle, const at::Tensor& input) {
+  /* Specialized implementation for n <= 1024, CUDA only, real only, probably float only (no double, not sure).
+     Do both the forward and the backward pass. //
+     Hopefully this is the fastest implementation.
+     Parameters:
+         twiddle: (nstack, 2 * log n, n/2, 2, 2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2.
+         input: (batch_size, nstack, n)
+     Returns:
+         output: (batch_size, nstack, n)
+  */
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
+  AT_CHECK(n <= 1024, "bbt_multiply_untied: only supports n <= 1024");
+  const int log_n = int(log2((double) n));
+  AT_CHECK(twiddle.dim() == 5 && input.dim() == 3,
+           "bbt_multiply_untied: twiddle, and input, must have dimension 5,3");
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(input);
+  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_untied: twiddle must have shape (nstack, 2 * log n, n/2, 2, 2)");
+  auto output = torch::empty_like(input);
+  AT_CHECK(input.is_cuda(), "bbt_multiply_untied: only supports CUDA");
+  bbt_multiply_untied_cuda(twiddle, input, output);
+  return output;
+}
+
+std::vector<at::Tensor> bbt_multiply_untied_forward_backward(const at::Tensor& twiddle, const at::Tensor& input,
+                                                             const at::Tensor& grad) {
+  /* Specialized implementation for n <= 1024, CUDA only, real only, probably float only (no double, not sure).
+     Do both the forward and the backward pass. //
+     Hopefully this is the fastest implementation.
+     Parameters:
+         twiddle: (nstack, 2 * log n, n/2, 2, 2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2.
+         input: (batch_size, nstack, n)
+         grad: (batch_size, nstack, n)
+     Returns:
+         d_twiddle: (nstack, 2 * log n, n / 2, 2, 2)
+         d_input: (batch_size, nstack, n)
+  */
+  const auto batch_size = input.size(0);
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
+  AT_CHECK(n <= 1024, "bbt_multiply_untied_forward_backward: only supports n <= 1024");
+  const int log_n = int(log2((double) n));
+  AT_CHECK(twiddle.dim() == 5 && input.dim() == 3 && grad.dim() == 3,
+           "bbt_multiply_untied_forward_backward: twiddle, input, and grad must have dimension 5,3,3");
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(input);
+  CHECK_DEVICE(grad);
+  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_untied_forward_backward: twiddle must have shape (nstack, 2 * log n, n/2, 2, 2)");
+  AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "bbt_multiply_untied_forward_backward: grad must have shape (batch_size, nstack, n)");
+  auto d_input = torch::empty_like(input);
+  auto d_twiddle = torch::zeros_like(twiddle);
+  AT_CHECK(input.is_cuda(), "bbt_multiply_untied_forward_backward: only supports CUDA");
+  bbt_multiply_untied_forward_backward_cuda(twiddle, input, grad, d_twiddle, d_input);
+  return {d_twiddle, d_input} ;
+}
+
 at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   const size_t kernel_size, const size_t padding, bool increasing_stride,
   bool return_intermediates) {
@@ -1859,20 +1921,22 @@ void complex_test(at::Tensor& input) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_factor_multiply", &butterfly_factor_multiply, "Butterfly factor multiply forward");
   m.def("butterfly_factor_multiply_backward", &butterfly_factor_multiply_backward, "Butterfly factor multiply backward");
-  m.def("butterfly_multiply_inplace", &butterfly_multiply_inplace, "Butterfly factor multiply inplace forward");
-  m.def("butterfly_multiply_inplace_backward", &butterfly_multiply_inplace_backward, "Butterfly factor multiply inplace backward");
-  m.def("butterfly_multiply_intermediate", &butterfly_multiply_intermediate, "Butterfly factor multiply intermediate forward");
-  m.def("butterfly_multiply_intermediate_backward", &butterfly_multiply_intermediate_backward, "Butterfly factor multiply intermediate backward");
-  m.def("butterfly_multiply_untied", &butterfly_multiply_untied, "Butterfly factor multiply untied forward");
   m.def("butterfly_multiply_untied_eval", &butterfly_multiply_untied_eval, "Butterfly factor multiply untied eval forward");
-  m.def("butterfly_multiply_untied_backward", &butterfly_multiply_untied_backward, "Butterfly factor multiply untied backward");
-  m.def("butterfly_multiply_untied_forward_backward", &butterfly_multiply_untied_forward_backward, "Butterfly factor multiply untied forward+backward");
+  m.def("butterfly_multiply_inplace", &butterfly_multiply_inplace, "Butterfly multiply inplace forward");
+  m.def("butterfly_multiply_inplace_backward", &butterfly_multiply_inplace_backward, "Butterfly multiply inplace backward");
+  m.def("butterfly_multiply_intermediate", &butterfly_multiply_intermediate, "Butterfly multiply intermediate forward");
+  m.def("butterfly_multiply_intermediate_backward", &butterfly_multiply_intermediate_backward, "Butterfly multiply intermediate backward");
+  m.def("butterfly_multiply_untied", &butterfly_multiply_untied, "Butterfly multiply untied forward");
+  m.def("butterfly_multiply_untied_backward", &butterfly_multiply_untied_backward, "Butterfly multiply untied backward");
+  m.def("butterfly_multiply_untied_forward_backward", &butterfly_multiply_untied_forward_backward, "Butterfly multiply untied forward+backward");
+  m.def("bbt_multiply_untied", &bbt_multiply_untied, "Bbt multiply untied forward");
+  m.def("bbt_multiply_untied_forward_backward", &bbt_multiply_untied_forward_backward, "Bbt multiply untied forward+backward");
   m.def("butterfly_conv2d", &butterfly_conv2d, "Butterfly conv2d forward");
   m.def("butterfly_conv2d_backward", &butterfly_conv2d_backward, "Butterfly conv2d backward");
   m.def("butterfly_conv2d_forward_backward", &butterfly_conv2d_forward_backward, "Butterfly conv2d forward backward");
-  m.def("butterfly_multiply_untied_svd", &butterfly_multiply_untied_svd, "Butterfly factor multiply untied SVD forward");
-  m.def("butterfly_multiply_untied_svd_backward", &butterfly_multiply_untied_svd_backward, "Butterfly factor multiply untied SVD backward");
-  m.def("butterfly_multiply_untied_svd_forward_backward", &butterfly_multiply_untied_svd_forward_backward, "Butterfly factor multiply untied SVD forward+backward");
+  m.def("butterfly_multiply_untied_svd", &butterfly_multiply_untied_svd, "Butterfly multiply untied SVD forward");
+  m.def("butterfly_multiply_untied_svd_backward", &butterfly_multiply_untied_svd_backward, "Butterfly multiply untied SVD backward");
+  m.def("butterfly_multiply_untied_svd_forward_backward", &butterfly_multiply_untied_svd_forward_backward, "Butterfly multiply untied SVD forward+backward");
   m.def("butterfly_conv2d_svd", &butterfly_conv2d_svd, "Butterfly conv2d_svd forward");
   m.def("butterfly_conv2d_svd_forward_backward", &butterfly_conv2d_svd_forward_backward, "Butterfly conv2d_svd forward backward");
   m.def("permutation_factor_even_odd_multiply", &permutation_factor_even_odd_multiply, "Permutation factor (even odd) multiply forward");
