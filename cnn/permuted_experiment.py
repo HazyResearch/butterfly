@@ -131,13 +131,16 @@ class TrainableModel(Trainable):
                 # sample_was = perm.dist(p, self.test_loader.true_permutation, fn='was')
                 sample_was1, sample_was2 = perm.dist(p, self.test_loader.true_permutation, fn='was')
 
-                mean = self.model.get_permutations(perm='mean') # (rank, sample, n, n)
+                mean = self.model.get_permutations(perm='mean') # (rank, n, n)
                 mean_ent = perm.entropy(mean, reduction='mean')
                 mean_nll = perm.dist(mean, self.test_loader.true_permutation, fn='nll')
                 # mean_was = perm.dist(mean, self.test_loader.true_permutation, fn='was')
                 mean_was1, mean_was2 = perm.dist(mean, self.test_loader.true_permutation, fn='was')
+                unif = torch.ones_like(mean) / mean.size(-1)
+                # mean_unif_dist = nn.functional.mse_loss(mean, unif, reduction='sum')
+                mean_unif_dist = torch.sum((mean-unif)**2) / mean.size(0)
 
-                mle = self.model.get_permutations(perm='mle') # (rank, sample, n, n)
+                mle = self.model.get_permutations(perm='mle') # (rank, n, n)
                 # mle_ent = perm.entropy(mle, reduction='mean')
                 # mle_nll = perm.dist(mle, self.test_loader.true_permutation, fn='nll')
                 # mle_was = perm.dist(mle, self.test_loader.true_permutation, fn='was')
@@ -163,6 +166,7 @@ class TrainableModel(Trainable):
                     "mle_was2": mle_was2.item(),
                     # "mean_accuracy": 682.0-mean_was2.item(),
                     "neg_sample_loss": -test_loss / total_samples,
+                    "mean_unif_dist": mean_unif_dist.item(),
                 }
 
         # test_loss = test_loss / len(self.test_loader.dataset)
