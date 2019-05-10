@@ -232,7 +232,8 @@ def default_config():
     tv_norm = 2
     tv_p = 1
     tv_sym = False
-    anneal_entropy = 0.0
+    anneal_ent_min = 0.5
+    anneal_ent_max = 4.0
     restore_perm = None
     temp_min = 1.0
     temp_max = 1.0
@@ -247,7 +248,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, anneal_entropy, restore_perm, temp_min, temp_max):
+def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, restore_perm, temp_min, temp_max, anneal_ent_min, anneal_ent_max): # TODO clean up and set min,max to pairs/dicts
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     if restore_perm is not None: restore_perm = 'saved_perms/' + restore_perm
     args_rand = args.copy()
@@ -271,7 +272,8 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         'dataset':         {'name': dataset, 'batch': batch},
         'unsupervised':    unsupervised,
         'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
-        'anneal_entropy':  anneal_entropy,
+        # 'anneal_entropy':  anneal_entropy,
+        'anneal_entropy':  sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
         'restore_perm':    restore_perm,
      }
     timestamp = datetime.datetime.now().replace(microsecond=0).isoformat()
@@ -304,7 +306,7 @@ def run(model, result_dir, nmaxepochs, unsupervised):
     except:
         ray.init()
     if unsupervised:
-        ahb = AsyncHyperBandScheduler(reward_attr='neg_sample_loss', max_t=nmaxepochs, grace_period=50, reduction_factor=2, brackets=3)
+        ahb = AsyncHyperBandScheduler(reward_attr='mean_was2_abs', max_t=nmaxepochs, grace_period=100, reduction_factor=2, brackets=3)
     else:
         ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
     trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
