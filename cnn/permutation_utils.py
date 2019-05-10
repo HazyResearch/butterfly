@@ -72,6 +72,7 @@ def dist(perm1, perm2, fn='nll'):
     perm2: iterable of permutation lists (n)
     """
     # TODO: is the scaling of this consistent across permutations of multiple "ranks"?
+
     loss = 0.0
     # if not isinstance(perm1, tuple):
     #     perm1, perm2 = (perm1,), (perm2,)
@@ -85,13 +86,19 @@ def dist(perm1, perm2, fn='nll'):
 
     loss1, loss2 = 0.0, 0.0
     for p1, p2 in zip(perm1, perm2):
+        n = p2.size(-1)
         # print(p1.size(), p1.type())
         # print(p2.size(), p2.type())
         # print(p2, type(p2))
         if fn == 'was': # temporary casework
             l1, l2 = loss_fn(p1, p2)
-            loss1 += l1
-            loss2 += l2
+            l1_, l2_ = loss_fn(p1, n-1-p2) # reversed permutation also good
+            if l2_ > l2:
+                loss1 += l1_
+                loss2 += l2_
+            else:
+                loss1 += l1
+                loss2 += l2_
         else:
             loss = loss + loss_fn(p1, p2)
     # print(loss, loss.type())
