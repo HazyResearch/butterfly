@@ -123,20 +123,18 @@ def get_teacher_intermediates(teacher_model, train_loader, layers_to_replace):
     input, _ = prefetcher.next()
     end = time.time()
     while input is not None:
-        if batch_idx != 0:
-            input = torch.Tensor(143,3,224,224)
         input = input.cuda()
         teacher_model(input)
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        input, _ = prefetcher.next()
         if batch_idx % args.print_freq == 0:
             logger.info('Batch:{0}/{1}\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})'.format(
                    batch_idx, len(train_loader), batch_time=batch_time))
         batch_idx += 1
         data_idx += input.size(0) # for variable size batches
+        input, _ = prefetcher.next()
     logging.info("Computed teacher intermediates. ")
 
     # write sizes to disk for easy loading of memory maps at a later time
