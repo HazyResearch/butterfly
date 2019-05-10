@@ -92,7 +92,7 @@ handlers=[
     logging.StreamHandler()
 ])
 logger = logging.getLogger()
-logger.info(args) 
+logger.info(args)
 label = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode('ascii').strip()
 logger.info(f'Git hash: {label}')
 
