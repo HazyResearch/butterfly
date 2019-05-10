@@ -164,12 +164,14 @@ def transport(ds, p, reduction='mean'):
         return (torch.mean(t1), torch.mean(t2))
     else: assert False, f"perm.transport: reduction {reduction} not supported."
 
-def tv(x, norm=2, p=1, symmetric=False):
+def tv(x, norm=2, p=1, symmetric=False, reduction='mean'):
     """ Image total variation
     x: (b, c, w, h)
 
     If D = (dx, dy) is the vector of differences at a given pixel,
     sum up ||D||_norm^p over image
+
+    Note that reduction='mean' only averages over the batch dimension
     """
     # each pixel wants all channels as part of its delta vector
     x = x.transpose(-3, -2).transpose(-2, -1) # (b, w, h, c)
@@ -198,5 +200,11 @@ def tv(x, norm=2, p=1, symmetric=False):
         v = torch.norm(torch.abs(delta), dim=-1, p=norm)
         if p != 1:
             v = v ** p
-    tv = v.sum() # / x.size(0)
-    return tv
+
+    if reduction is None:
+        return v
+    elif reduction == 'sum':
+        return torch.sum(v)
+    elif reduction == 'mean':
+        return torch.sum(v) / v.size(0)
+    else: assert False, f"perm.tv: reduction {reduction} not supported."
