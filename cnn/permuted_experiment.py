@@ -196,9 +196,13 @@ class TrainableModel(Trainable):
         return {"mean_loss": test_loss, "mean_accuracy": accuracy}
 
     def _train(self):
-        self.scheduler.step()
+        # self.scheduler.step()
+        # self._train_iteration()
+        # return self._test()
         self._train_iteration()
-        return self._test()
+        metrics = self._test()
+        self.scheduler.step()
+        return metrics
 
     def _save(self, checkpoint_dir):
         checkpoint_path = os.path.join(checkpoint_dir, "model_optimizer.pth")
