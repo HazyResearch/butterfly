@@ -67,11 +67,29 @@ args = get_parser().parse_args()
 logging.basicConfig(
 level=logging.INFO,
 handlers=[
-    logging.StreamHandler()
+    logging.StreamHandler(),
+    logging.FileHandler(f'{args.output_dir}/'
+                        f'butterfly_{args.layer}_{args.structure_type}'
+                        f'_{args.nblocks}_{args.param}.log')
 ])
 logger = logging.getLogger()
 logger.info(args)
 
+def eval(butterfly, train_loader, criterion):
+    start = time.time()
+    batch_time = AverageMeter()
+    for i, (teacher_input, teacher_output) in enumerate(train_loader):
+        teacher_output = teacher_output.cuda()
+        teacher_input = teacher_input.cuda()
+        data_time = time.time() - start
+        student_output = butterfly(teacher_input)
+        loss = criterion(student_output, teacher_output)
+        batch_time.update(time.time() - start)
+        start = time.time()
+        if i % args.print_freq == 0 and i > 0:
+            logging.info(f'Epoch[{epoch}]: {i}/{len(train_loader)}\t'
+                        f'Time Data: {data_time:.3f}, Batch Avg: {batch_time.avg:.3f}\t'
+                        f'Loss: {loss:.5f}')
 
 def train_student(butterfly, train_loader, criterion, optimizer, epoch):
     start = time.time()
@@ -113,7 +131,10 @@ def load_teacher(traindir):
 
 def main():
     # load pretrained teacher model from torchvision
-    teacher_model = torch_models.__dict__[args.arch](pretrained=True)
+    teacher_model = models.__dict__[args.arch]()
+
+    modules = set([name for name, _ in teacher_model.named_modules()])
+    assert args.layer in modules, "Layer not in network"
 
     # get parameters from layer to replace to use in butterfly
     for name, module in teacher_model.named_modules():
@@ -130,14 +151,16 @@ def main():
     # create butterfly for specific layer and train
     if args.structure_type == 'B':
         butterfly = ButterflyConv2d(in_channels, out_channels,
-            kernel_size=kernel_size, stride=stride, padding=1,
+            kernel_size=kernel_size, stride=stride, padding=padding,
             bias=False, tied_weight=False, ortho_init=True,
             param=args.param)
     elif args.structure_type == 'BBT' or args.nblocks > 1:
         butterfly = ButterflyConv2dBBT(in_channels, out_channels,
-            kernel_size=kernel_size, stride=stride, padding=1,
+            kernel_size=kernel_size, stride=stride, padding=padding,
             bias=False, nblocks=args.nblocks, tied_weight=False,
             ortho_init=True, param=args.param)
+    else:
+        raise ValueError("Invalid butterfly structure!")
 
     butterfly.train()
     butterfly.cuda()
@@ -148,15 +171,15 @@ def main():
 
     # define loss function (criterion) and optimizer
     criterion = nn.MSELoss().cuda()
-    optimizer = torch.optim.SGD(butterfly.parameters(), args.lr)
+    optimizer = torch.optim.SGD(butterfly.parameters(), lr=args.lr, momentum=args.momentum)
     logger.info('Created optimizer')
 
+    ckpt_file = f'{args.output_dir}/butterfly_{args.layer}_{args.structure_type}_{args.nblocks}_{args.param}.pt'
     for epoch in range(args.epochs):
         train_student(butterfly, train_loader, criterion, optimizer, epoch)
 
-    # save butterfly weights to be loaded in weight surgery to pretrained model
-    filename = f'{args.output_dir}/butterfly_{args.layer}_{args.structure_type}_{args.nblocks}_{args.param}.pt'
-    torch.save(butterfly, filename)
+        # save butterfly weights to be loaded in weight surgery to pretrained model
+        torch.save(butterfly, ckpt_file)
 
 if __name__ == '__main__': main()
 

@@ -10,6 +10,15 @@ def strip_prefix_if_present(state_dict, prefix):
         stripped_state_dict[key.replace(prefix, "")] = value
     return stripped_state_dict
 
+def add_prefix(state_dict, prefix):
+    keys = sorted(state_dict.keys())
+    if all(key.startswith(prefix) for key in keys):
+        return state_dict
+    stripped_state_dict = OrderedDict()
+    for key, value in state_dict.items():
+        stripped_state_dict[prefix + key] = value
+    return stripped_state_dict
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self):

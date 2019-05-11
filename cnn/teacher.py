@@ -50,6 +50,8 @@ def get_parser():
                              'More layers takes longer.')
     parser.add_argument('--model-path', type=str, required=True,
                         help='Path for teacher model.')
+    parser.add_argument('--max_batches', type=int, help='Maximum number of batches'
+                        'to collect activations for')
     return parser
 
 cudnn.benchmark = True
@@ -69,7 +71,10 @@ def get_size(input):
     return input_sizes
 
 def get_teacher_intermediates(teacher_model, train_loader, layers_to_replace):
-    num_batches = len(train_loader)
+    if args.max_batches is not None:
+        num_batches = args.max_batches
+    else:
+        num_batches = len(train_loader)
 
     # define hook to capture intermediate inputs/activations and intermediate outputs
     # serialize outputs
@@ -97,7 +102,7 @@ def get_teacher_intermediates(teacher_model, train_loader, layers_to_replace):
     data_idx = 0
     # TODO: store only inputs or outputs (otherwise we may be storing duplicate info
     # if we already stored neighboring layer)
-    # won't cause answers to be wrong, but wasteful
+    # won't cause answers to be wrong, but could be wasteful
     def hook(module, input, output):
         current_batch_size = output.size(0)
         mod_id = id(module)
@@ -111,6 +116,7 @@ def get_teacher_intermediates(teacher_model, train_loader, layers_to_replace):
         if mod_id not in teacher_input_size:
             teacher_input_size[mod_id] = input_size
             teacher_output_size[mod_id] = output_size
+
         # save inputs to memory mapped files
         # TODO: input always a length-1 tuple?
         teacher_inputs[mod_id][data_idx:data_idx+current_batch_size] = input[0].cpu().detach()
@@ -134,9 +140,11 @@ def get_teacher_intermediates(teacher_model, train_loader, layers_to_replace):
         if batch_idx % args.print_freq == 0:
             logger.info('Batch:{0}/{1}\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})'.format(
-                   batch_idx, len(train_loader), batch_time=batch_time))
+                   batch_idx, num_batches, batch_time=batch_time))
         batch_idx += 1
         data_idx += input.size(0) # for variable size batches
+        if args.max_batches is not None and batch_idx == args.max_batches:
+            break
         input, _ = prefetcher.next()
     logging.info("Computed teacher intermediates. ")
 
