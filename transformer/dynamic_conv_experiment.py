@@ -25,7 +25,7 @@ from sacred import Experiment
 from sacred.observers import FileStorageObserver, SlackObserver
 
 import ray
-from ray.tune import Trainable, Experiment as RayExperiment, sample_from
+from ray.tune import Trainable, Experiment as RayExperiment, sample_from, grid_search
 from ray.tune.schedulers import AsyncHyperBandScheduler
 
 # # Fairseq scripts
@@ -76,12 +76,17 @@ class TrainableModel(Trainable):
         train_args += ['--save-dir', self._save_dir]
         n_encoder_layer = 7 if model['name'] == 'DynamicConv' else 6
         structure_type = config['structure_type']
+        structure_nblocks = config['structure_nblocks']
         n_encoder_structure_layer = config['n_encoder_structure_layer']
         encoder_structure_type = ['Linear'] * (n_encoder_layer - n_encoder_structure_layer) + [structure_type] * n_encoder_structure_layer
+        encoder_structure_nblocks = [0] * (n_encoder_layer - n_encoder_structure_layer) + [structure_nblocks] * n_encoder_structure_layer
         n_decoder_structure_layer = config['n_decoder_structure_layer']
         decoder_structure_type = ['Linear'] * (6 - n_decoder_structure_layer) + [structure_type] * n_decoder_structure_layer
+        decoder_structure_nblocks = [0] * (6 - n_decoder_structure_layer) + [structure_nblocks] * n_decoder_structure_layer
         train_args += ['--encoder-structure-type-list', str(encoder_structure_type)]
         train_args += ['--decoder-structure-type-list', str(decoder_structure_type)]
+        train_args += ['--encoder-structure-nblocks-list', str(encoder_structure_nblocks)] if model['name'] != 'DynamicConv' else []
+        train_args += ['--decoder-structure-nblocks-list', str(decoder_structure_nblocks)] if model['name'] != 'DynamicConv' else []
         if config['structured_attention']:
             encoder_structured_attention = [False] * (6 - n_encoder_structure_layer) + [True] * n_encoder_structure_layer
             train_args += ['--encoder-structured-attention-list', str(encoder_structured_attention)] if model['name'] != 'DynamicConv' else []
@@ -152,6 +157,7 @@ def default_config():
     n_encoder_structure_layer = 0  # Number of structured layer in the encoder
     n_decoder_structure_layer = 0  # Number of structured layer in the decoder
     structure_type = 'B'  # 'B' for butterfly or BBT for product of 2 butterflies
+    nblocks = 0  # Number of (BB^T) blocks in structure
     structured_attention = False  # Whether attention layers are structured
     ntrials = 20  # Number of trials for hyperparameter tuning
     nmaxupdates = 50000  # Maximum number of updates
@@ -161,11 +167,12 @@ def default_config():
 
 
 @ex.capture
-def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_decoder_structure_layer, structure_type, structured_attention,
+def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_decoder_structure_layer, structure_type, nblocks, structured_attention,
                             nmaxupdates, ntrials, result_dir, cuda, smoke_test):
-    name=f'{model}_{model_args}_type_{structure_type}_encstruct_{n_encoder_structure_layer}_decstruct_{n_decoder_structure_layer}_attstruct_{structured_attention}'
+    name=f'{model}_{model_args}_type_{structure_type}_nblocks_{nblocks}_encstruct_{n_encoder_structure_layer}_decstruct_{n_decoder_structure_layer}_attstruct_{structured_attention}'
     config={
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
+        # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
+        'lr': grid_search([5e-4, 7e-4, 9e-4, 11e-4]),
         'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if model == 'DynamicConv' else 1e-4,
         # Transformer seems to need dropout 0.3
         'dropout': sample_from(lambda spec: random.uniform(0.1, 0.3)) if model == 'DynamicConv' else 0.3,
@@ -173,6 +180,7 @@ def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_deco
         'n_encoder_structure_layer': n_encoder_structure_layer,
         'n_decoder_structure_layer': n_decoder_structure_layer,
         'structure_type': structure_type,
+        'structure_nblocks': nblocks,
         'structured_attention': structured_attention,
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
