@@ -23,21 +23,24 @@ class ButterflyTest(unittest.TestCase):
                         for increasing_stride in [True, False]:
                             for ortho_init in [False, True]:
                                 for param in ['regular'] if complex else ['regular', 'ortho', 'svd']:
-                                    if param == 'svd' and tied_weight:
-                                        continue
-                                    b = Butterfly(in_size, out_size, True, complex, tied_weight, increasing_stride, ortho_init, param).to(device)
-                                    input = torch.randn((batch_size, in_size) + (() if not complex else (2,)), device=device)
-                                    output = b(input)
-                                    self.assertTrue(output.shape == (batch_size, out_size) + (() if not complex else (2,)),
-                                                    (output.shape, device, (in_size, out_size), complex, tied_weight, ortho_init))
-                                    if ortho_init and param == 'regular':
-                                        twiddle_np = b.twiddle.detach().to('cpu').numpy()
-                                        if complex:
-                                            twiddle_np = twiddle_np.view('complex64').squeeze(-1)
-                                        twiddle_np = twiddle_np.reshape(-1, 2, 2)
-                                        twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
-                                        self.assertTrue(np.allclose(twiddle_norm, 1),
-                                                        (twiddle_norm, device, (in_size, out_size), complex, tied_weight, ortho_init))
+                                    for nblocks in [0, 1, 2, 3]:
+                                        if param == 'svd' and tied_weight:
+                                            continue
+                                        if nblocks > 0 and (tied_weight or complex or param not in ['regular', 'ortho']):
+                                            continue
+                                        b = Butterfly(in_size, out_size, True, complex, tied_weight, increasing_stride, ortho_init, param, nblocks=nblocks).to(device)
+                                        input = torch.randn((batch_size, in_size) + (() if not complex else (2,)), device=device)
+                                        output = b(input)
+                                        self.assertTrue(output.shape == (batch_size, out_size) + (() if not complex else (2,)),
+                                                        (output.shape, device, (in_size, out_size), complex, tied_weight, ortho_init, nblocks))
+                                        if ortho_init and param == 'regular':
+                                            twiddle_np = b.twiddle.detach().to('cpu').numpy()
+                                            if complex:
+                                                twiddle_np = twiddle_np.view('complex64').squeeze(-1)
+                                            twiddle_np = twiddle_np.reshape(-1, 2, 2)
+                                            twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
+                                            self.assertTrue(np.allclose(twiddle_norm, 1),
+                                                            (twiddle_norm, device, (in_size, out_size), complex, tied_weight, ortho_init))
 
     def test_butterfly_bmm(self):
         batch_size = 10
@@ -49,32 +52,35 @@ class ButterflyTest(unittest.TestCase):
                         for increasing_stride in [True, False]:
                             for ortho_init in [False, True]:
                                 for param in ['regular'] if complex else ['regular', 'ortho', 'svd']:
-                                    if param == 'svd' and tied_weight:
-                                        continue
-                                    b_bmm = ButterflyBmm(in_size, out_size, matrix_batch, True, complex, tied_weight, increasing_stride, ortho_init, param).to(device)
-                                    input = torch.randn((batch_size, matrix_batch, in_size) + (() if not complex else (2,)), device=device)
-                                    output = b_bmm(input)
-                                    self.assertTrue(output.shape == (batch_size, matrix_batch, out_size) + (() if not complex else (2,)),
-                                                    (output.shape, device, (in_size, out_size), complex, tied_weight, ortho_init))
-                                    # Check that the result is the same as looping over butterflies
-                                    if param == 'regular':
-                                        output_loop = []
-                                        for i in range(matrix_batch):
-                                            b = Butterfly(in_size, out_size, True, complex, tied_weight, increasing_stride, ortho_init)
-                                            b.twiddle = torch.nn.Parameter(b_bmm.twiddle[i * b_bmm.nstack:(i + 1) * b_bmm.nstack])
-                                            b.bias = torch.nn.Parameter(b_bmm.bias[i])
-                                            output_loop.append(b(input[:, i]))
-                                        output_loop = torch.stack(output_loop, dim=1)
-                                        self.assertTrue(torch.allclose(output, output_loop),
-                                                        ((output - output_loop).abs().max().item(), output.shape, device, (in_size, out_size), complex, tied_weight, ortho_init))
-                                    if ortho_init and param == 'regular':
-                                        twiddle_np = b_bmm.twiddle.detach().to('cpu').numpy()
-                                        if complex:
-                                            twiddle_np = twiddle_np.view('complex64').squeeze(-1)
-                                        twiddle_np = twiddle_np.reshape(-1, 2, 2)
-                                        twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
-                                        self.assertTrue(np.allclose(twiddle_norm, 1),
-                                                        (twiddle_norm, device, (in_size, out_size), complex, tied_weight, ortho_init))
+                                    for nblocks in [0, 1, 2, 3]:
+                                        if param == 'svd' and tied_weight:
+                                            continue
+                                        if nblocks > 0 and (tied_weight or complex or param not in ['regular', 'ortho']):
+                                            continue
+                                        b_bmm = ButterflyBmm(in_size, out_size, matrix_batch, True, complex, tied_weight, increasing_stride, ortho_init, param).to(device)
+                                        input = torch.randn((batch_size, matrix_batch, in_size) + (() if not complex else (2,)), device=device)
+                                        output = b_bmm(input)
+                                        self.assertTrue(output.shape == (batch_size, matrix_batch, out_size) + (() if not complex else (2,)),
+                                                        (output.shape, device, (in_size, out_size), complex, tied_weight, ortho_init))
+                                        # Check that the result is the same as looping over butterflies
+                                        if param == 'regular':
+                                            output_loop = []
+                                            for i in range(matrix_batch):
+                                                b = Butterfly(in_size, out_size, True, complex, tied_weight, increasing_stride, ortho_init)
+                                                b.twiddle = torch.nn.Parameter(b_bmm.twiddle[i * b_bmm.nstack:(i + 1) * b_bmm.nstack])
+                                                b.bias = torch.nn.Parameter(b_bmm.bias[i])
+                                                output_loop.append(b(input[:, i]))
+                                            output_loop = torch.stack(output_loop, dim=1)
+                                            self.assertTrue(torch.allclose(output, output_loop),
+                                                            ((output - output_loop).abs().max().item(), output.shape, device, (in_size, out_size), complex, tied_weight, ortho_init))
+                                        if ortho_init and param == 'regular':
+                                            twiddle_np = b_bmm.twiddle.detach().to('cpu').numpy()
+                                            if complex:
+                                                twiddle_np = twiddle_np.view('complex64').squeeze(-1)
+                                            twiddle_np = twiddle_np.reshape(-1, 2, 2)
+                                            twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
+                                            self.assertTrue(np.allclose(twiddle_norm, 1),
+                                                            (twiddle_norm, device, (in_size, out_size), complex, tied_weight, ortho_init))
 
 if __name__ == "__main__":
     unittest.main()
