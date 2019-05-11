@@ -546,17 +546,29 @@ class ButterflyPermutation(Permutation):
 
     def sample_soft_perm(self, sample_shape=()):
         sample_shape = (self.samples,)
-        _twiddle = self.map_twiddle(self.twiddle)
 
-        if self.sample_method == 'gumbel':
-            logits = torch.stack((torch.log(_twiddle), torch.log(1.-_twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
-            logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
+        if self.param == 'logit':
+            # TODO use pytorch's gumbel distribution...
+            assert torch.all(self.twiddle == self.twiddle), "NANS FOUND"
+            logits = torch.stack((self.twiddle, torch.zeros_like(self.twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
+            assert torch.all(logits == logits), "NANS FOUND"
+            logits_noise = add_gumbel_noise(logits, sample_shape)
+            assert torch.all(logits_noise == logits_noise), "NANS FOUND"
             sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
-        elif self.sample_method == 'uniform':
-            r = torch.rand(_twiddle.size())
-            _twiddle = _twiddle - r
-            sample_twiddle = 1.0 / (1.0 + torch.exp(-_twiddle / self.sample_temp))
-        else: assert False, "sample_method {self.sample_method} not supported"
+            assert torch.all(sample_twiddle == sample_twiddle), "NANS FOUND"
+        else:
+            _twiddle = self.map_twiddle(self.twiddle)
+
+            if self.sample_method == 'gumbel':
+                # TODO: Can't take log!! multiply by exponential instead
+                logits = torch.stack((torch.log(_twiddle), torch.log(1.-_twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
+                logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
+                sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
+            elif self.sample_method == 'uniform':
+                r = torch.rand(_twiddle.size())
+                _twiddle = _twiddle - r
+                sample_twiddle = 1.0 / (1.0 + torch.exp(-_twiddle / self.sample_temp))
+            else: assert False, "sample_method {self.sample_method} not supported"
 
         perms = torch.stack([self.compute_perm(twiddle, self.strides) for twiddle in sample_twiddle], dim=0) # (s, n, n)
         return perms

@@ -90,8 +90,16 @@ class TrainableModel(Trainable):
                 target = target.repeat(output.size(0) // target.size(0))
                 # print(output.shape, target.shape)
                 loss = F.cross_entropy(output, target)
+            tw0 = list(self.model.permute)[0].twiddle
+            tw1 = list(self.model.permute)[1].twiddle
+            assert torch.all(tw0 == tw0)
+            assert torch.all(tw1 == tw1)
             loss.backward()
             self.optimizer.step()
+            tw0 = list(self.model.permute)[0].twiddle
+            tw1 = list(self.model.permute)[1].twiddle
+            assert torch.all(tw0 == tw0)
+            assert torch.all(tw1 == tw1)
 
     def _test(self):
         self.model.eval()
