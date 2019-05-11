@@ -64,10 +64,12 @@ class TrainableModel(Trainable):
         self.unsupervised = config['unsupervised']
         self.tv = config['tv']
         self.anneal_entropy_factor = config['anneal_entropy']
+        self.anneal_sqrt = config['anneal_sqrt']
 
     def _train_iteration(self):
         self.model.train()
-        inv_temp = self.anneal_entropy_factor * self._iteration
+        inv_temp = math.sqrt(self._iteration) if self.anneal_sqrt else self._iteration
+        inv_temp *= self.anneal_entropy_factor
         print(f"ITERATION {self._iteration} INV TEMP {inv_temp}")
         for data, target in self.train_loader:
             data, target = data.to(self.device), target.to(self.device)
@@ -242,6 +244,7 @@ def default_config():
     tv_sym = False
     anneal_ent_min = 0.5
     anneal_ent_max = 4.0
+    anneal_sqrt = False
     restore_perm = None
     temp_min = 1.0
     temp_max = 1.0
@@ -256,7 +259,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, restore_perm, temp_min, temp_max, anneal_ent_min, anneal_ent_max): # TODO clean up and set min,max to pairs/dicts
+def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, restore_perm, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt): # TODO clean up and set min,max to pairs/dicts
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     if restore_perm is not None: restore_perm = 'saved_perms/' + restore_perm
     args_rand = args.copy()
@@ -281,7 +284,8 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         'unsupervised':    unsupervised,
         'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
         # 'anneal_entropy':  anneal_entropy,
-        'anneal_entropy':  sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
+        'anneal_entropy':  sample_from(lambda _: random.uniform(anneal_ent_min, anneal_ent_max)),
+        'anneal_sqrt':  anneal_sqrt,
         'restore_perm':    restore_perm,
      }
     timestamp = datetime.datetime.now().replace(microsecond=0).isoformat()
