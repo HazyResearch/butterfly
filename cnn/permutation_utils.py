@@ -93,12 +93,12 @@ def dist(perm1, perm2, fn='nll'):
         if fn == 'was': # temporary casework
             l1, l2 = loss_fn(p1, p2)
             l1_, l2_ = loss_fn(p1, n-1-p2) # reversed permutation also good
-            if l2_ > l2:
+            if l2_ < l2:
                 loss1 += l1_
                 loss2 += l2_
             else:
                 loss1 += l1
-                loss2 += l2_
+                loss2 += l2
         else:
             loss = loss + loss_fn(p1, p2)
     # print(loss, loss.type())
