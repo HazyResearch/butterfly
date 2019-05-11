@@ -474,7 +474,7 @@ class ButterflyPermutation(Permutation):
 
     def entropy(self, p=None):
         """ TODO: How does this compare to the matrix entropy of the expanded mean matrix? """
-        if p == 'logits':
+        if p == 'logit':
             def binary_ent(p):
                 eps = 1e-10
                 return -(p * torch.log(eps+p) + (1-p)*torch.log(1-p+eps))

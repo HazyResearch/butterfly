@@ -65,6 +65,7 @@ class TrainableModel(Trainable):
         self.tv = config['tv']
         self.anneal_entropy_factor = config['anneal_entropy']
         self.anneal_sqrt = config['anneal_sqrt']
+        self.entropy_p = config['entropy_p']
 
     def _train_iteration(self):
         self.model.train()
@@ -80,7 +81,7 @@ class TrainableModel(Trainable):
                 # assert p.requires_grad
                 # print("train_iteration REQUIRES GRAD: ", p.requires_grad)
                 # H = perm.entropy(p, reduction='mean')
-                H = self.model.entropy(p=None)
+                H = self.model.entropy(p=self.entropy_p)
                 assert H.requires_grad
                 loss = perm.tv(output, norm=self.tv['norm'], p=self.tv['p'], symmetric=self.tv['sym']) + inv_temp * H
                 # loss = perm.tv(output, norm=self.tv['norm'], p=self.tv['p'], symmetric=self.tv['sym']) # + inv_temp * H
@@ -144,6 +145,7 @@ class TrainableModel(Trainable):
                 sample_was1, sample_was2 = perm.dist(p, self.test_loader.true_permutation, fn='was')
 
                 mean = self.model.get_permutations(perm='mean') # (rank, n, n)
+                print("MEAN PERMUTATION", mean)
                 mean_ent = perm.entropy(mean, reduction='mean')
                 mean_nll = perm.dist(mean, self.test_loader.true_permutation, fn='nll')
                 # mean_was = perm.dist(mean, self.test_loader.true_permutation, fn='was')
@@ -158,6 +160,8 @@ class TrainableModel(Trainable):
                 # mle_nll = perm.dist(mle, self.test_loader.true_permutation, fn='nll')
                 # mle_was = perm.dist(mle, self.test_loader.true_permutation, fn='was')
                 mle_was1, mle_was2 = perm.dist(mle, self.test_loader.true_permutation, fn='was')
+
+                H = self.model.entropy(p=self.entropy_p)
 
                 # TODO calculate average case wasserstein automatically in terms of rank/dims and power p
                 return {
@@ -182,6 +186,7 @@ class TrainableModel(Trainable):
                     "mean_unif_dist": mean_unif_dist.item(),
                     "mean_was1_abs": mean_was1_abs.item(),
                     "mean_was2_abs": mean_was2_abs.item(),
+                    "model_entropy": H.item(),
                 }
 
         # test_loss = test_loss / len(self.test_loader.dataset)
@@ -247,6 +252,7 @@ def default_config():
     anneal_ent_min = 0.5
     anneal_ent_max = 4.0
     anneal_sqrt = False
+    entropy_p = None
     restore_perm = None
     temp_min = 1.0
     temp_max = 1.0
@@ -261,7 +267,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, restore_perm, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt): # TODO clean up and set min,max to pairs/dicts
+def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, restore_perm, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt, entropy_p): # TODO clean up and set min,max to pairs/dicts
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     if restore_perm is not None: restore_perm = 'saved_perms/' + restore_perm
     args_rand = args.copy()
@@ -288,6 +294,7 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         # 'anneal_entropy':  anneal_entropy,
         'anneal_entropy':  sample_from(lambda _: random.uniform(anneal_ent_min, anneal_ent_max)),
         'anneal_sqrt':  anneal_sqrt,
+        'entropy_p': entropy_p,
         'restore_perm':    restore_perm,
      }
     timestamp = datetime.datetime.now().replace(microsecond=0).isoformat()
