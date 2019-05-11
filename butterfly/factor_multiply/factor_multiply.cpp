@@ -1053,7 +1053,7 @@ at::Tensor bbt_multiply_untied(const at::Tensor& twiddle, const at::Tensor& inpu
      Do both the forward and the backward pass. //
      Hopefully this is the fastest implementation.
      Parameters:
-         twiddle: (nstack, 2 * log n, n/2, 2, 2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2.
+         twiddle: (nstack, nblocks * 2 * log n, n/2, 2, 2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2, ....
          input: (batch_size, nstack, n)
      Returns:
          output: (batch_size, nstack, n)
@@ -1062,12 +1062,13 @@ at::Tensor bbt_multiply_untied(const at::Tensor& twiddle, const at::Tensor& inpu
   const auto n = input.size(2);
   AT_CHECK(n <= 1024, "bbt_multiply_untied: only supports n <= 1024");
   const int log_n = int(log2((double) n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
   AT_CHECK(twiddle.dim() == 5 && input.dim() == 3,
            "bbt_multiply_untied: twiddle, and input, must have dimension 5,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_untied: twiddle must have shape (nstack, 2 * log n, n/2, 2, 2)");
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == nblocks * 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_untied: twiddle must have shape (nstack, nblocks * 2 * log n, n/2, 2, 2)");
   auto output = torch::empty_like(input);
   AT_CHECK(input.is_cuda(), "bbt_multiply_untied: only supports CUDA");
   bbt_multiply_untied_cuda(twiddle, input, output);
@@ -1080,11 +1081,11 @@ std::vector<at::Tensor> bbt_multiply_untied_forward_backward(const at::Tensor& t
      Do both the forward and the backward pass. //
      Hopefully this is the fastest implementation.
      Parameters:
-         twiddle: (nstack, 2 * log n, n/2, 2, 2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2.
+         twiddle: (nstack, nblocks * 2 * log n, n/2, 2, 2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2, ....
          input: (batch_size, nstack, n)
          grad: (batch_size, nstack, n)
      Returns:
-         d_twiddle: (nstack, 2 * log n, n / 2, 2, 2)
+         d_twiddle: (nstack, nblocks * 2 * log n, n / 2, 2, 2)
          d_input: (batch_size, nstack, n)
   */
   const auto batch_size = input.size(0);
@@ -1092,13 +1093,14 @@ std::vector<at::Tensor> bbt_multiply_untied_forward_backward(const at::Tensor& t
   const auto n = input.size(2);
   AT_CHECK(n <= 1024, "bbt_multiply_untied_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
   AT_CHECK(twiddle.dim() == 5 && input.dim() == 3 && grad.dim() == 3,
            "bbt_multiply_untied_forward_backward: twiddle, input, and grad must have dimension 5,3,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
   AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_untied_forward_backward: twiddle must have shape (nstack, 2 * log n, n/2, 2, 2)");
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == nblocks * 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_untied_forward_backward: twiddle must have shape (nstack, nblocks * 2 * log n, n/2, 2, 2)");
   AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "bbt_multiply_untied_forward_backward: grad must have shape (batch_size, nstack, n)");
   auto d_input = torch::empty_like(input);
   auto d_twiddle = torch::zeros_like(twiddle);

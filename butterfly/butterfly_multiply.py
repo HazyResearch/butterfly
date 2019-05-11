@@ -202,7 +202,7 @@ class BbtMultUntied(torch.autograd.Function):
     def forward(ctx, twiddle, input):
         """
         Parameters:
-            twiddle: (nstack, 2 * log n, n / 2, 2, 2)
+            twiddle: (nstack, nblocks * 2 * log n, n / 2, 2, 2)
             input: (batch_size, nstack, n)
         Returns:
             output: (batch_size, nstack, n)
@@ -217,10 +217,9 @@ class BbtMultUntied(torch.autograd.Function):
         Parameters:
             grad: (batch_size, nstack, n)
         Return:
-            d_twiddle: (nstack, 2 * log n, n / 2, 2, 2)
+            d_twiddle: (nstack, nblocks * 2 * log n, n / 2, 2, 2)
             d_input: (batch_size, nstack, n)
         """
-        # twiddle, output_and_intermediate = ctx.saved_tensors
         twiddle, input = ctx.saved_tensors
         d_coefficients, d_input = bbt_multiply_untied_forward_backward(twiddle, input, grad)
         return d_coefficients, d_input
@@ -229,19 +228,31 @@ class BbtMultUntied(torch.autograd.Function):
 def bbt_mult_untied(twiddle, input):
     n = input.shape[2]
     m = int(math.log2(n))
-    if n <= 1024 and input.is_cuda:
+    reverse_idx = torch.arange(m - 1, -1, -1, device=twiddle.device)
+    nblocks = twiddle.shape[1] // (2 * m)
+    assert nblocks * 2 * m == twiddle.shape[1], 'twiddle must have shape (nstack, nblocks * 2 * log n, n / 2, 2, 2)'
+    # if n <= 1024 and input.is_cuda:
+    if False:
         return BbtMultUntied.apply(twiddle, input)
     else:
-        output = butterfly_mult_untied(twiddle[:, :m].flip(1), input, False)
-        output = butterfly_mult_untied(twiddle[:, m:], output, True)
+        output = input
+        for t in twiddle.chunk(nblocks, dim=1):
+            # output = butterfly_mult_untied(t[:, :m].flip(1), output, False)
+            # flip is crazy slow, advanced indexing is slightly faster
+            output = butterfly_mult_untied(t[:, reverse_idx], output, False)
+            output = butterfly_mult_untied(t[:, m:], output, True)
         return output
 
 
 def bbt_mult_untied_torch(twiddle, input):
     n = input.shape[2]
     m = int(math.log2(n))
-    output = butterfly_mult_untied_torch(twiddle[:, :m].flip(1), input, increasing_stride=False)
-    output = butterfly_mult_untied_torch(twiddle[:, m:], output, increasing_stride=True)
+    nblocks = twiddle.shape[1] // (2 * m)
+    assert nblocks * 2 * m == twiddle.shape[1], 'twiddle must have shape (nstack, nblocks * 2 * log n, n / 2, 2, 2)'
+    output = input
+    for t in twiddle.chunk(nblocks, dim=1):
+        output = butterfly_mult_untied_torch(t[:, :m].flip(1), output, False)
+        output = butterfly_mult_untied_torch(t[:, m:], output, True)
     return output
 
 
