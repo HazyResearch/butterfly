@@ -114,7 +114,8 @@ def entropy(p, reduction='mean'):
     Note: Max entropy of n x n matrix is n\log(n)
     """
     n = p.size(-1)
-    entropy = -(p * torch.log2(p)).sum(dim=-1).sum(dim=-1) # can dim be list?
+    eps = 1e-10
+    entropy = -(p * torch.log2(eps+p)).sum(dim=[-2,-1])
     if reduction is None:
         return entropy
     elif reduction == 'sum':

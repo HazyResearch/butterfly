@@ -476,9 +476,13 @@ class ButterflyPermutation(Permutation):
         """ TODO: How does this compare to the matrix entropy of the expanded mean matrix? """
         if p == 'logits':
             def binary_ent(p):
-                return -(p * torch.log(p) + (1-p)*torch.log(1-p))
+                eps = 1e-10
+                return -(p * torch.log(eps+p) + (1-p)*torch.log(1-p+eps))
             _twiddle = self.map_twiddle(self.twiddle)
             return torch.sum(binary_ent(_twiddle))
+            # could be better to not map at all
+            x = torch.exp(-self.twiddle)
+            return torch.log(1 + x) + self.twiddle * (x/(1+x))
 
         if p is None:
             perms = self.generate_perm()
@@ -526,6 +530,7 @@ class ButterflyPermutation(Permutation):
         return P.view(self.size, self.size)
 
     def mean_perm(self):
+        # TODO isn't scaling mean by temperature
         # print("mean_perm twiddle REQUIRES GRAD: ", self.twiddle.requires_grad)
         _twiddle = self.map_twiddle(self.twiddle)
         p = self.compute_perm(_twiddle, self.strides)

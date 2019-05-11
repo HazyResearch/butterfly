@@ -83,6 +83,7 @@ class TrainableModel(Trainable):
                 H = self.model.entropy(p=None)
                 assert H.requires_grad
                 loss = perm.tv(output, norm=self.tv['norm'], p=self.tv['p'], symmetric=self.tv['sym']) + inv_temp * H
+                # loss = perm.tv(output, norm=self.tv['norm'], p=self.tv['p'], symmetric=self.tv['sym']) # + inv_temp * H
                 # print("LOSS ", loss.item())
             else:
                 # target = target.expand(output.size()[:-1]).flatten()
@@ -97,6 +98,7 @@ class TrainableModel(Trainable):
             assert torch.all(tw0 == tw0)
             assert torch.all(tw1 == tw1)
             loss.backward()
+            # breakpoint()
             self.optimizer.step()
             tw0 = list(self.model.permute)[0].twiddle
             tw1 = list(self.model.permute)[1].twiddle
