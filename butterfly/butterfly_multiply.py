@@ -231,8 +231,7 @@ def bbt_mult_untied(twiddle, input):
     reverse_idx = torch.arange(m - 1, -1, -1, device=twiddle.device)
     nblocks = twiddle.shape[1] // (2 * m)
     assert nblocks * 2 * m == twiddle.shape[1], 'twiddle must have shape (nstack, nblocks * 2 * log n, n / 2, 2, 2)'
-    # if n <= 1024 and input.is_cuda:
-    if False:
+    if n <= 1024 and input.is_cuda:
         return BbtMultUntied.apply(twiddle, input)
     else:
         output = input
