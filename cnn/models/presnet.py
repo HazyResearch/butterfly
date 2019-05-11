@@ -465,7 +465,9 @@ class ButterflyPermutation(Permutation):
         if self.param == 'ds':
             self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape))
         elif self.param == 'logit':
-            self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape)*2-1)
+            # self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape)*2-1)
+            init = sample_gumbel(self.twiddle_core_shape) - sample_gumbel(self.twiddle_core_shape)
+            self.twiddle = nn.Parameter(init / temp)
         elif param == 'ortho2':
             self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape) * 2*math.pi)
         else:
