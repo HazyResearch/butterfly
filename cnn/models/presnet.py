@@ -462,14 +462,20 @@ class ButterflyPermutation(Permutation):
             assert False, f"ButterflyPermutation: signature {sig} not supported."
         # self.twiddle has shape (depth, 1, log n, n/2)
 
+        margin = 1e-3
+        # sample from [margin, 1-margin]
+        init = (1-2*margin)*(torch.rand(self.twiddle_core_shape)) + margin
         if self.param == 'ds':
-            self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape))
+            self.twiddle = nn.Parameter(init)
         elif self.param == 'logit':
             # self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape)*2-1)
-            init = sample_gumbel(self.twiddle_core_shape) - sample_gumbel(self.twiddle_core_shape)
-            self.twiddle = nn.Parameter(init / temp)
+            # init = sample_gumbel(self.twiddle_core_shape) - sample_gumbel(self.twiddle_core_shape)
+            # self.twiddle = nn.Parameter(init / temp)
+            self.twiddle = nn.Parameter(torch.log(init / (1.-init)))
         elif param == 'ortho2':
-            self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape) * 2*math.pi)
+        # TODO change initialization for this type
+            # self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape) * 2*math.pi)
+            self.twiddle = nn.Parameter(torch.acos(torch.sqrt(init)))
         else:
             assert False, f"ButterflyPermutation: Parameter type {self.param} not supported."
 
