@@ -203,7 +203,7 @@ def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_deco
 
 
 @ex.automain
-def run(model, result_dir, nmaxupdates):
+def run(model, structure_type, nblocks, result_dir, nmaxupdates):
     experiment = dynamic_conv_experiment()
     try:
         with open('../config/redis_address', 'r') as f:
@@ -222,4 +222,4 @@ def run(model, result_dir, nmaxupdates):
         pickle.dump(trials, f)
 
     ex.add_artifact(str(checkpoint_path))
-    return max(bleu)
+    return model, structure_type, nblocks, max(bleu)
