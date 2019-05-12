@@ -105,11 +105,8 @@ class ButterflyMultTest(unittest.TestCase):
                 for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
                     if batch_size > 1024 and device == 'cpu':
                         continue
-                    # Need orthogonal twiddle, otherwise it may blow up
-                    bs = [Butterfly(n, nstack * n, bias=False, tied_weight=False, ortho_init=True) for _ in range(2 * nblocks)]
-                    twiddle = torch.cat([b.twiddle for b in bs], dim=1)
-                    # scaling = 1 / 2
-                    # twiddle = torch.randn((nstack, nblocks * 2 * m, n // 2, 2, 2), requires_grad=True, device=device) * scaling
+                    scaling = 1 / 2
+                    twiddle = torch.randn((nstack, nblocks * 2 * m, n // 2, 2, 2), requires_grad=True, device=device) * scaling
                     input = torch.randn((batch_size, nstack, n), requires_grad=True, device=twiddle.device)
                     output = bbt_mult_untied(twiddle, input)
                     output_torch = bbt_mult_untied_torch(twiddle, input)

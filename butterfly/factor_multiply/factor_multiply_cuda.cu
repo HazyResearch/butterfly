@@ -2251,8 +2251,7 @@ __global__ void bbt_multiply_untied_forward_backward_cuda_kernel(const CudaAcsr<
   scalar_t* s_grad = &s_input[0]; // Reusing the same storage as s_input
   __shared__ accscalar_t s_d_twiddle[ELEMENTARY_SIZE][2][2];
   load_grad(s_grad);
-  #pragma unroll
-  for (int block = 0; block < nblocks; ++block) {
+  for (int block = nblocks - 1; block >= 0; --block) {
     for (int idx = 2 * (log_max_stride + 1) - 1; idx >= 0; --idx) {
       int log_stride = idx <= log_max_stride ? log_max_stride - idx : idx - log_max_stride - 1;
       int stride = 1 << log_stride;
