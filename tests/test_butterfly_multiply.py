@@ -13,6 +13,7 @@ from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, b
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
 from butterfly.butterfly_multiply import butterfly_ortho_mult_untied_torch, butterfly_ortho_mult_untied
 from butterfly.butterfly_multiply import bbt_mult_untied_torch, bbt_mult_untied
+from butterfly.butterfly_multiply import bbt_ortho_mult_untied_torch, bbt_ortho_mult_untied
 from butterfly.butterfly_multiply import butterfly_mult_conv2d_torch, butterfly_mult_conv2d
 from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
 from butterfly.butterfly_multiply import butterfly_mult_conv2d_svd_torch, butterfly_mult_conv2d_svd
@@ -153,6 +154,29 @@ class ButterflyMultTest(unittest.TestCase):
                                     (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(),
                                      (batch_size, n), nblocks, device))
 
+    def test_bbt_ortho_untied(self):
+        for batch_size, n in [(10, 4096), (8192, 256)]:
+            for nblocks in range(1, 4):
+                m = int(math.log2(n))
+                nstack = 2
+                for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+                    if batch_size > 1024 and device == 'cpu':
+                        continue
+                    twiddle = torch.rand((nstack, nblocks * 2 * m, n // 2), requires_grad=True, device=device) * 2 * math.pi
+                    input = torch.randn((batch_size, nstack, n), requires_grad=True, device=twiddle.device)
+                    output = bbt_ortho_mult_untied(twiddle, input)
+                    output_torch = bbt_ortho_mult_untied_torch(twiddle, input)
+                    self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
+                                    ((output - output_torch).abs().max().item(), (batch_size, n), nblocks, device))
+                    grad = torch.randn_like(output_torch)
+                    d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input), grad, retain_graph=True)
+                    d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
+                    self.assertTrue(torch.allclose(d_input, d_input_torch, rtol=self.rtol, atol=self.atol),
+                                    ((d_input - d_input_torch).abs().max().item(), (batch_size, n), nblocks, device))
+                    self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol * (10 if batch_size > 1024 else 1),
+                                                atol=self.atol * (10 if batch_size > 1024 else 1)),
+                                    (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(),
+                                     (batch_size, n), nblocks, device))
 
     def test_butterfly_untied_svd(self):
         for batch_size, n in [(10, 4096), (99, 128)]:  # Test size smaller than 1024

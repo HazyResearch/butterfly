@@ -13,6 +13,7 @@ try:
     from factor_multiply import butterfly_multiply_untied_forward_backward
     from factor_multiply import butterfly_ortho_multiply_untied, butterfly_ortho_multiply_untied_forward_backward
     from factor_multiply import bbt_multiply_untied, bbt_multiply_untied_forward_backward
+    from factor_multiply import bbt_ortho_multiply_untied, bbt_ortho_multiply_untied_forward_backward
     from factor_multiply import butterfly_multiply_untied_svd, butterfly_multiply_untied_svd_backward
     from factor_multiply import butterfly_multiply_untied_svd_forward_backward
     from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
@@ -279,13 +280,13 @@ class BbtMultUntied(torch.autograd.Function):
 def bbt_mult_untied(twiddle, input):
     n = input.shape[2]
     m = int(math.log2(n))
-    reverse_idx = torch.arange(m - 1, -1, -1, device=twiddle.device)
     nblocks = twiddle.shape[1] // (2 * m)
     assert nblocks * 2 * m == twiddle.shape[1], 'twiddle must have shape (nstack, nblocks * 2 * log n, n / 2, 2, 2)'
     if n <= 1024 and input.is_cuda:
         return BbtMultUntied.apply(twiddle, input)
     else:
         output = input
+        reverse_idx = torch.arange(m - 1, -1, -1, device=twiddle.device)
         for t in twiddle.chunk(nblocks, dim=1):
             # output = butterfly_mult_untied(t[:, :m].flip(1), output, False)
             # flip is crazy slow, advanced indexing is slightly faster
@@ -304,6 +305,55 @@ def bbt_mult_untied_torch(twiddle, input):
         output = butterfly_mult_untied_torch(t[:, :m].flip(1), output, False)
         output = butterfly_mult_untied_torch(t[:, m:], output, True)
     return output
+
+
+class BbtOrthoMultUntied(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, twiddle, input):
+        """
+        Parameters:
+            twiddle: (nstack, nblocks * 2 * log n, n / 2)
+            input: (batch_size, nstack, n)
+        Returns:
+            output: (batch_size, nstack, n)
+        """
+        twiddle_cos, twiddle_sin = torch.cos(twiddle), torch.sin(twiddle)
+        output = bbt_ortho_multiply_untied(twiddle_cos, twiddle_sin, input)
+        ctx.save_for_backward(twiddle_cos, twiddle_sin, input)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad):
+        """
+        Parameters:
+            grad: (batch_size, nstack, n)
+        Return:
+            d_twiddle: (nstack, nblocks * 2 * log n, n / 2)
+            d_input: (batch_size, nstack, n)
+        """
+        twiddle_cos, twiddle_sin, input = ctx.saved_tensors
+        d_coefficients, d_input = bbt_ortho_multiply_untied_forward_backward(twiddle_cos, twiddle_sin, input, grad)
+        return d_coefficients, d_input
+
+
+def bbt_ortho_mult_untied(twiddle, input):
+    n = input.shape[2]
+    if n <= 1024 and input.is_cuda:
+        return BbtOrthoMultUntied.apply(twiddle, input)
+    else:
+        c, s = torch.cos(twiddle), torch.sin(twiddle)
+        twiddle = torch.stack((torch.stack((c, -s), dim=-1),
+                               torch.stack((s, c), dim=-1)), dim=-2)
+        return bbt_mult_untied(twiddle, input)
+
+
+def bbt_ortho_mult_untied_torch(twiddle, input):
+    n = input.shape[2]
+    c, s = torch.cos(twiddle), torch.sin(twiddle)
+    twiddle = torch.stack((torch.stack((c, -s), dim=-1),
+                            torch.stack((s, c), dim=-1)), dim=-2)
+    return bbt_mult_untied_torch(twiddle, input)
 
 
 def twiddle_svd2regular(twiddle):

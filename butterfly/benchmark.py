@@ -5,7 +5,7 @@ sys.path.insert(0, project_root)
 import torch
 
 from butterfly import Butterfly
-from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_untied_svd, butterfly_mult_factors, butterfly_mult_inplace, bbt_mult_untied
+from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_untied_svd, butterfly_mult_factors, butterfly_mult_inplace, bbt_mult_untied, bbt_ortho_mult_untied
 
 batch_size = 2048
 n = 512
@@ -15,6 +15,7 @@ x = torch.randn(batch_size, n, requires_grad=True).to('cuda')
 twiddle = B.twiddle
 B_untied = Butterfly(n, n, bias=False, tied_weight=False).to('cuda')
 twiddle_untied = B_untied.twiddle
+B_ortho = Butterfly(n, n, bias=False, tied_weight=False, param='ortho').to('cuda')
 # twiddle = torch.randn(2, 2, n - 1, device=x.device, requires_grad=True).permute(2, 0, 1)
 
 
@@ -93,53 +94,55 @@ torch.cuda.synchronize()
 end = time.perf_counter()
 print(f'Butterfly mult intermediate together: {end - start}s')
 
-torch.cuda.synchronize()
-start = time.perf_counter()
-for _ in range(nsteps):
-    output = butterfly_mult_untied(twiddle_untied, x.unsqueeze(1))
-torch.cuda.synchronize()
-end = time.perf_counter()
-print(f'Butterfly mult untied forward: {end - start}s')
-torch.cuda.synchronize()
-start = time.perf_counter()
-for _ in range(nsteps):
-    torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1), retain_graph=True)
-torch.cuda.synchronize()
-end = time.perf_counter()
-print(f'Butterfly mult untied backward: {end - start}s')
-torch.cuda.synchronize()
-start = time.perf_counter()
-for _ in range(nsteps):
-    output = butterfly_mult_untied(twiddle_untied, x.unsqueeze(1))
-    torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1))
-torch.cuda.synchronize()
-end = time.perf_counter()
-print(f'Butterfly mult untied together: {end - start}s')
+for nblocks in range(4):
+    B_regular = Butterfly(n, n, bias=False, tied_weight=False, param='regular', nblocks=nblocks).to('cuda')
+    torch.cuda.synchronize()
+    start = time.perf_counter()
+    for _ in range(nsteps):
+        output = B_regular(x)
+    torch.cuda.synchronize()
+    end = time.perf_counter()
+    print(f'Butterfly mult {nblocks} nblocks forward: {end - start}s')
+    torch.cuda.synchronize()
+    start = time.perf_counter()
+    for _ in range(nsteps):
+        torch.autograd.grad(output, (B_regular.twiddle, x), grad, retain_graph=True)
+    torch.cuda.synchronize()
+    end = time.perf_counter()
+    print(f'Butterfly mult {nblocks} nblocks backward: {end - start}s')
+    torch.cuda.synchronize()
+    start = time.perf_counter()
+    for _ in range(nsteps):
+        output = B_regular(x)
+        torch.autograd.grad(output, (B_regular.twiddle, x), grad)
+    torch.cuda.synchronize()
+    end = time.perf_counter()
+    print(f'Butterfly mult {nblocks} nblocks together: {end - start}s')
 
-for nblocks in range(1, 4):
-    twiddle_untied_bbt = twiddle_untied.repeat(1, 2 * nblocks, 1, 1, 1)
+for nblocks in range(4):
+    B_ortho = Butterfly(n, n, bias=False, tied_weight=False, param='ortho', nblocks=nblocks).to('cuda')
     torch.cuda.synchronize()
     start = time.perf_counter()
     for _ in range(nsteps):
-        output = bbt_mult_untied(twiddle_untied_bbt, x.unsqueeze(1))
+        output = B_ortho(x)
     torch.cuda.synchronize()
     end = time.perf_counter()
-    print(f'Bbt mult untied {nblocks} blocks forward: {end - start}s')
+    print(f'Butterfly mult ortho {nblocks} nblocks forward: {end - start}s')
     torch.cuda.synchronize()
     start = time.perf_counter()
     for _ in range(nsteps):
-        torch.autograd.grad(output, (twiddle_untied_bbt, x), grad.unsqueeze(1), retain_graph=True)
+        torch.autograd.grad(output, (B_ortho.twiddle, x), grad, retain_graph=True)
     torch.cuda.synchronize()
     end = time.perf_counter()
-    print(f'Bbt mult untied {nblocks} blocks backward: {end - start}s')
+    print(f'Butterfly mult ortho {nblocks} nblocks backward: {end - start}s')
     torch.cuda.synchronize()
     start = time.perf_counter()
     for _ in range(nsteps):
-        output = bbt_mult_untied(twiddle_untied_bbt, x.unsqueeze(1))
-        torch.autograd.grad(output, (twiddle_untied_bbt, x), grad.unsqueeze(1))
+        output = B_ortho(x)
+        torch.autograd.grad(output, (B_ortho.twiddle, x), grad)
     torch.cuda.synchronize()
     end = time.perf_counter()
-    print(f'Bbt mult untied {nblocks} blocks together: {end - start}s')
+    print(f'Butterfly mult ortho {nblocks} nblocks together: {end - start}s')
 
 torch.cuda.synchronize()
 start = time.perf_counter()

@@ -23,7 +23,7 @@ class ButterflyTest(unittest.TestCase):
                         for increasing_stride in [True, False]:
                             for ortho_init in [False, True]:
                                 for param in ['regular'] if complex else ['regular', 'ortho', 'svd']:
-                                    for nblocks in [0, 1, 2, 3] if param == 'regular' else [0]:  # TODO
+                                    for nblocks in [0, 1, 2, 3] if param in ['regular', 'ortho'] else [0]:
                                         if param in ['ortho', 'svd'] and tied_weight:
                                             continue
                                         if nblocks > 0 and (tied_weight or complex or param not in ['regular', 'ortho']):

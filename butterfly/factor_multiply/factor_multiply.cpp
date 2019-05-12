@@ -25,6 +25,10 @@ void butterfly_ortho_multiply_untied_forward_backward_cuda(const at::Tensor& twi
 void bbt_multiply_untied_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output);
 void bbt_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input, const at::Tensor& grad,
                                                at::Tensor& d_twiddle, at::Tensor& d_input);
+void bbt_ortho_multiply_untied_cuda(const at::Tensor& twiddle_cos, const at::Tensor& twiddle_sin,
+                                    const at::Tensor& input, at::Tensor& output);
+void bbt_ortho_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle_cos, const at::Tensor& twiddle_sin, const at::Tensor& input,
+                                                     const at::Tensor& grad, at::Tensor& d_twiddle, at::Tensor& d_input);
 void butterfly_conv2d_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output,
                            const int kernel_size, const int padding, const int h_out,
                            const int w_out, bool increasing_stride, bool return_intermediates);
@@ -1175,6 +1179,69 @@ std::vector<at::Tensor> bbt_multiply_untied_forward_backward(const at::Tensor& t
   return {d_twiddle, d_input} ;
 }
 
+at::Tensor bbt_ortho_multiply_untied(const at::Tensor& twiddle_cos, const at::Tensor& twiddle_sin, const at::Tensor& input) {
+  /* Specialized implementation for n <= 1024, CUDA only, real only, probably float only (no double, not sure).
+     Do both the forward and the backward pass. //
+     Hopefully this is the fastest implementation.
+     Parameters:
+         twiddle_cos: (nstack, nblocks * 2 * log n, n/2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2, ....
+         twiddle_sin: (nstack, nblocks * 2 * log n, n/2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2, ....
+         input: (batch_size, nstack, n)
+     Returns:
+         output: (batch_size, nstack, n)
+  */
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
+  AT_CHECK(n <= 1024, "bbt_ortho_multiply_untied: only supports n <= 1024");
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle_cos.size(1) / (2 * log_n);
+  AT_CHECK(twiddle_cos.dim() == 3 && input.dim() == 3,
+           "bbt_ortho_multiply_untied: twiddle_cos, and input, must have dimension 3,3");
+  CHECK_DEVICE(twiddle_cos);
+  CHECK_DEVICE(input);
+  AT_CHECK(twiddle_cos.device() == input.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (", input.device(), ")");
+  AT_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == nblocks * 2 * log_n && twiddle_cos.size(2) == n / 2, "bbt_ortho_multiply_untied: twiddle_cos must have shape (nstack, nblocks * 2 * log n, n/2)");
+  auto output = torch::empty_like(input);
+  AT_CHECK(input.is_cuda(), "bbt_ortho_multiply_untied: only supports CUDA");
+  bbt_ortho_multiply_untied_cuda(twiddle_cos, twiddle_sin, input, output);
+  return output;
+}
+
+std::vector<at::Tensor> bbt_ortho_multiply_untied_forward_backward(const at::Tensor& twiddle_cos, const at::Tensor& twiddle_sin,
+                                                                   const at::Tensor& input, const at::Tensor& grad) {
+  /* Specialized implementation for n <= 1024, CUDA only, real only, probably float only (no double, not sure).
+     Do both the forward and the backward pass. //
+     Hopefully this is the fastest implementation.
+     Parameters:
+         twiddle_cos: (nstack, nblocks * 2 * log n, n/2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2, ....
+         twiddle_sin: (nstack, nblocks * 2 * log n, n/2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2, ....
+         input: (batch_size, nstack, n)
+         grad: (batch_size, nstack, n)
+     Returns:
+         d_twiddle: (nstack, nblocks * 2 * log n, n / 2)
+         d_input: (batch_size, nstack, n)
+  */
+  const auto batch_size = input.size(0);
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
+  AT_CHECK(n <= 1024, "bbt_ortho_multiply_untied_forward_backward: only supports n <= 1024");
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle_cos.size(1) / (2 * log_n);
+  AT_CHECK(twiddle_cos.dim() == 3 && input.dim() == 3 && grad.dim() == 3,
+           "bbt_ortho_multiply_untied_forward_backward: twiddle_cos, input, and grad must have dimension 3,3,3");
+  CHECK_DEVICE(twiddle_cos);
+  CHECK_DEVICE(input);
+  CHECK_DEVICE(grad);
+  AT_CHECK(twiddle_cos.device() == input.device() && twiddle_cos.device() == grad.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
+  AT_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == nblocks * 2 * log_n && twiddle_cos.size(2) == n / 2, "bbt_ortho_multiply_untied_forward_backward: twiddle_cos must have shape (nstack, nblocks * 2 * log n, n/2)");
+  AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "bbt_ortho_multiply_untied_forward_backward: grad must have shape (batch_size, nstack, n)");
+  auto d_input = torch::empty_like(input);
+  auto d_twiddle = torch::zeros_like(twiddle_cos);
+  AT_CHECK(input.is_cuda(), "bbt_ortho_multiply_untied_forward_backward: only supports CUDA");
+  bbt_ortho_multiply_untied_forward_backward_cuda(twiddle_cos, twiddle_sin, input, grad, d_twiddle, d_input);
+  return {d_twiddle, d_input} ;
+}
+
 at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   const size_t kernel_size, const size_t padding, bool increasing_stride,
   bool return_intermediates) {
@@ -2001,6 +2068,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_ortho_multiply_untied_forward_backward", &butterfly_ortho_multiply_untied_forward_backward, "Butterfly ortho multiply untied forward+backward");
   m.def("bbt_multiply_untied", &bbt_multiply_untied, "Bbt multiply untied forward");
   m.def("bbt_multiply_untied_forward_backward", &bbt_multiply_untied_forward_backward, "Bbt multiply untied forward+backward");
+  m.def("bbt_ortho_multiply_untied", &bbt_ortho_multiply_untied, "Bbt_Ortho multiply untied forward");
+  m.def("bbt_ortho_multiply_untied_forward_backward", &bbt_ortho_multiply_untied_forward_backward, "Bbt_Ortho multiply untied forward+backward");
   m.def("butterfly_conv2d", &butterfly_conv2d, "Butterfly conv2d forward");
   m.def("butterfly_conv2d_backward", &butterfly_conv2d_backward, "Butterfly conv2d backward");
   m.def("butterfly_conv2d_forward_backward", &butterfly_conv2d_forward_backward, "Butterfly conv2d forward backward");

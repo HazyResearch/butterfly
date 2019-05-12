@@ -2,7 +2,7 @@ import math
 import torch
 from torch import nn
 
-from .butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_ortho_mult_untied, butterfly_mult_untied_svd, bbt_mult_untied
+from .butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_ortho_mult_untied, butterfly_mult_untied_svd, bbt_mult_untied, bbt_ortho_mult_untied
 
 class Butterfly(nn.Module):
     """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
@@ -114,7 +114,7 @@ class Butterfly(nn.Module):
             else:
                 output = butterfly_mult_untied(self.twiddle, output, self.increasing_stride, self.training) if self.nblocks == 0 else bbt_mult_untied(self.twiddle, output)
         elif self.param == 'ortho':
-            output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride)
+            output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
         elif self.param == 'svd':
             with torch.no_grad():  # Projected SGD
                 self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
