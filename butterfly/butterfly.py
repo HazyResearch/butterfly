@@ -21,8 +21,9 @@ class Butterfly(nn.Module):
             Note that this only changes the order of multiplication, not how twiddle is stored.
             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
-        param: The parameterization of the 2x2 butterfly factors, either 'regular' or 'ortho' or 'svd'.
+        param: The parameterization of the 2x2 butterfly factors, either 'regular', 'ortho', 'odo', or 'svd'.
             'ortho' and 'svd' only support real, not complex.
+            'odo' means two orthogonal butterfly matrices and one diagonal matrix.
         max_gain: (only for svd parameterization) controls the maximum and minimum singular values
             of the whole matrix (not of each factor).
             For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
@@ -41,12 +42,12 @@ class Butterfly(nn.Module):
         self.tied_weight = tied_weight
         self.increasing_stride = increasing_stride
         self.ortho_init = ortho_init
-        assert param in ['regular', 'ortho', 'svd']
+        assert param in ['regular', 'ortho', 'odo', 'svd']
         self.param = param
         self.max_gain_per_factor = max_gain ** (1 / m)
         self.nblocks = nblocks
         if nblocks > 0:
-            assert not tied_weight and not complex and param in ['regular', 'ortho'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
+            assert not tied_weight and not complex and param in ['regular', 'ortho', 'odo'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
         if tied_weight:
             twiddle_core_shape = (self.nstack, size - 1)
         else:
@@ -80,6 +81,15 @@ class Butterfly(nn.Module):
             if param == 'ortho':
                 assert not tied_weight and not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
+            elif param == 'odo':
+                assert not tied_weight and not complex
+                self.twiddle0 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
+                self.twiddle1 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
+                self.diag = nn.Parameter(torch.ones(self.nstack, size))
+                self.twiddle0._is_structured = True
+                self.twiddle1._is_structured = True
+                self.diag._is_structured = True
+                self.twiddle = self.twiddle0  # For the line self.twiddle._is_structured = True below
             elif param == 'svd':
                 assert not tied_weight, 'svd parameterization is only implemented for non-tied weight'
                 theta_phi = torch.rand(twiddle_core_shape + (2, )) * math.pi * 2
@@ -107,7 +117,6 @@ class Butterfly(nn.Module):
             output: (batch, *, out_size) if real or (batch, *, out_size, 2) if complex
         """
         output = self.pre_process(input)
-        batch = output.shape[0]
         if self.param == 'regular':
             if self.tied_weight:
                 output = butterfly_mult(self.twiddle, output, self.increasing_stride)
@@ -115,11 +124,15 @@ class Butterfly(nn.Module):
                 output = butterfly_mult_untied(self.twiddle, output, self.increasing_stride, self.training) if self.nblocks == 0 else bbt_mult_untied(self.twiddle, output)
         elif self.param == 'ortho':
             output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
+        elif self.param == 'odo':
+            output = butterfly_ortho_mult_untied(self.twiddle0, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle0, output)
+            output = output * self.diag
+            output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
         elif self.param == 'svd':
             with torch.no_grad():  # Projected SGD
                 self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
             output = butterfly_mult_untied_svd(self.twiddle, output, self.increasing_stride)
-        return self.post_process(input, output, batch)
+        return self.post_process(input, output)
 
     def pre_process(self, input):
         if self.complex:  # Reshape to (N, in_size, 2)
@@ -134,7 +147,8 @@ class Butterfly(nn.Module):
         output = output.unsqueeze(1).expand((batch, self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         return output
 
-    def post_process(self, input, output, batch):
+    def post_process(self, input, output):
+        batch = output.shape[0]
         output = output.view((batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
@@ -152,8 +166,8 @@ class Butterfly(nn.Module):
             return output.view(*input.size()[:-1], self.out_size)
 
     def extra_repr(self):
-        return 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, nblocks={}'.format(
-            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.nblocks
+        return 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}'.format(
+            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks
         )
 
 
@@ -210,7 +224,8 @@ class ButterflyBmm(Butterfly):
         output = output.reshape((batch, self.matrix_batch * self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         return output
 
-    def post_process(self, input, output, batch):
+    def post_process(self, input, output):
+        batch = output.shape[0]
         output = output.view((batch, self.matrix_batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
@@ -223,6 +238,6 @@ class ButterflyBmm(Butterfly):
         return output if self.bias is None else output + self.bias
 
     def extra_repr(self):
-        return 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, nblocks={}'.format(
-            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.nblocks
+        return 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}'.format(
+            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks
         )
