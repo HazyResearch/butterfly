@@ -55,7 +55,7 @@ class TrainableModel(Trainable):
                                          {'params': unstructured_params}],
                                         lr=config['lr'], weight_decay=config['weight_decay'])
         else:
-            self.optimizer = optim.SGD([{'params': structured_params, 'weight_decay': 0.0},
+            self.optimizer = optim.SGD([{'params': permutation_params, 'weight_decay': 0.0, 'lr': config['plr']},
                                         {'params': unstructured_params}],
                                        lr=config['lr'], momentum=0.9, weight_decay=config['weight_decay'])
         self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
@@ -187,6 +187,7 @@ class TrainableModel(Trainable):
                     "mean_was1_abs": mean_was1_abs.item(),
                     "mean_was2_abs": mean_was2_abs.item(),
                     "model_entropy": H.item(),
+                    "neg_ent_floor": -int(mean_ent.item()),
                 }
 
         # test_loss = test_loss / len(self.test_loader.dataset)
@@ -276,11 +277,12 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
     if restore_perm is not None: restore_perm = 'saved_perms/' + restore_perm
     args_rand = args.copy()
     args_rand['temp'] = sample_from(lambda spec: math.exp(random.uniform(math.log(temp_min), math.log(temp_max))))
+    args_rand['samples'] = sample_from(lambda _: np.random.choice((8,16)))
     # args_rand['sig'] = sample_from(lambda _: np.random.choice(('BT1', 'BT4')))
     config={
         'optimizer': optimizer,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-2)) if optimizer == 'Adam'
-        'lr': 2e-4 if optimizer == 'Adam' else random.uniform(math.log(2e-3), math.log(1e-0)),
+        'lr': 2e-4 if optimizer == 'Adam' else math.exp(random.uniform(math.log(2e-3), math.log(1e-0))),
         'plr': sample_from(lambda spec: math.exp(random.uniform(math.log(plr_min), math.log(plr_max)))),
         # 'lr_decay_factor': sample_from(lambda spec: random.choice([0.1, 0.2])) if lr_decay else 1.0,
         'lr_decay_factor': 0.12 if lr_decay else 1.0,
@@ -296,7 +298,8 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         'unsupervised':    unsupervised,
         'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
         # 'anneal_entropy':  anneal_entropy,
-        'anneal_entropy':  sample_from(lambda _: random.uniform(anneal_ent_min, anneal_ent_max)),
+        # 'anneal_entropy':  sample_from(lambda _: random.uniform(anneal_ent_min, anneal_ent_max)),
+        'anneal_entropy':  sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
         'anneal_sqrt':  anneal_sqrt,
         'entropy_p': entropy_p,
         'restore_perm':    restore_perm,
@@ -314,7 +317,8 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
         resources_per_trial={'cpu': 4, 'gpu': 0.5 if cuda else 0},
-        stop={"training_iteration": 1 if smoke_test else nmaxepochs},
+        stop={"training_iteration": 1 if smoke_test else nmaxepochs, 'neg_ent_floor': 0},
+        # stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         config=config,
     )
     return experiment
@@ -331,7 +335,7 @@ def run(model, result_dir, nmaxepochs, unsupervised):
     except:
         ray.init()
     if unsupervised:
-        ahb = AsyncHyperBandScheduler(reward_attr='mean_was2_abs', max_t=nmaxepochs, grace_period=100, reduction_factor=2, brackets=3)
+        ahb = AsyncHyperBandScheduler(reward_attr='mean_was2_abs', max_t=nmaxepochs, grace_period=400, reduction_factor=2, brackets=3)
     else:
         ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
     trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)

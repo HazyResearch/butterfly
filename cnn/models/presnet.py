@@ -1,5 +1,6 @@
 import os, sys
 import math
+import random
 
 import torch
 import torch.nn as nn
@@ -473,7 +474,8 @@ class ButterflyPermutation(Permutation):
         elif self.param == 'logit':
             # self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape)*2-1)
             init = sample_gumbel(self.twiddle_core_shape) - sample_gumbel(self.twiddle_core_shape)
-            self.twiddle = nn.Parameter(init / 0.2)
+            init_temp = random.uniform(0.2, 0.4)
+            self.twiddle = nn.Parameter(init / init_temp)
             # self.twiddle = nn.Parameter(init)
             # self.twiddle = nn.Parameter(torch.log(init / (1.-init)))
             # logits = torch.log(init / (1.-init))
