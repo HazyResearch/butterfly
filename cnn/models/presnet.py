@@ -530,15 +530,17 @@ class ButterflyPermutation(Permutation):
         else:
             assert False, f"Unreachable"
 
-    def compute_perm(self, twiddle, strides):
+    def compute_perm(self, twiddle, strides, squeeze=True):
         """
-        twiddle: (depth, 1, log n, n/2)
+        # twiddle: (depth, 1, log n, n/2)
+        twiddle: (depth, samples, log n, n/2)
         strides: (depth,) bool
 
-        Returns: (n, n)
+        Returns: (samples, n, n)
         """
+        samples = twiddle.size(1)
         # print("compute_perm twiddle REQUIRES GRAD: ", twiddle.requires_grad)
-        P = torch.eye(self.size, device=twiddle.device).unsqueeze(1) # (n, 1, n) for the 'nstack' parameter of butterfly_mult
+        P = torch.eye(self.size, device=twiddle.device).unsqueeze(1).repeat((1,samples,1)) # (n, s, n) : put samples in the 'nstack' parameter of butterfly_mult
         # print("compute_perm REQUIRES GRAD: ", P.requires_grad)
         for t, stride in zip(twiddle, strides):
             twiddle_factor_mat = torch.stack((torch.stack((t, 1-t), dim=-1),
@@ -546,7 +548,9 @@ class ButterflyPermutation(Permutation):
             P = butterfly_mult_untied(twiddle_factor_mat, P, stride, self.training)
             # print("REQUIRES GRAD: ", P.requires_grad)
 
-        return P.view(self.size, self.size)
+        P = P.transpose(0, 1) # (s, n, n)
+        return P.squeeze() if squeeze else P
+        # return P.view(self.size, self.size) # (n, n)
 
     def mean_perm(self):
         # TODO isn't scaling mean by temperature
@@ -572,15 +576,22 @@ class ButterflyPermutation(Permutation):
         sample_shape = (self.samples,)
 
         if self.param == 'logit':
-            # TODO use pytorch's gumbel distribution...
-            assert torch.all(self.twiddle == self.twiddle), "NANS FOUND"
+            # # TODO use pytorch's gumbel distribution...
+            # assert torch.all(self.twiddle == self.twiddle), "NANS FOUND"
+            # logits = torch.stack((self.twiddle, torch.zeros_like(self.twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
+            # assert torch.all(logits == logits), "NANS FOUND"
+            # logits_noise = add_gumbel_noise(logits, sample_shape)
+            # assert torch.all(logits_noise == logits_noise), "NANS FOUND"
+            # sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
+            # assert torch.all(sample_twiddle == sample_twiddle), "NANS FOUND"
             logits = torch.stack((self.twiddle, torch.zeros_like(self.twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
-            assert torch.all(logits == logits), "NANS FOUND"
-            logits_noise = add_gumbel_noise(logits, sample_shape)
-            assert torch.all(logits_noise == logits_noise), "NANS FOUND"
-            sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
-            assert torch.all(sample_twiddle == sample_twiddle), "NANS FOUND"
-        else:
+            shape = logits.size()
+            noise = sample_gumbel((logits.size(0), self.samples)+logits.size()[2:])
+            logits_noise = logits + noise.to(logits.device) # (d, s, log n, n/2, 2)
+            sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # (depth, s, log n, n/2)
+            perms = self.compute_perm(sample_twiddle, self.strides, squeeze=False)
+            return perms
+        else: # TODO make this case batched over samples too
             _twiddle = self.map_twiddle(self.twiddle)
 
             if self.sample_method == 'gumbel':
