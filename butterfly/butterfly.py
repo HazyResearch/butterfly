@@ -28,10 +28,13 @@ class Butterfly(nn.Module):
             of the whole matrix (not of each factor).
             For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
         nblocks: number of (BB^T) blocks. If 0, it's just a butterfly. If > 0, ignore @increasing_stride.
+        diag_constraint: whether to constrain the diagonal in ODO parameterization.
+            None (no constraint), 'positive' (>= 0), 'bounded' (between [1/max_gain, max_gain]),
+                'square' (use sigma^2 parameterization instead)
     """
 
     def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
-                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0, nblocks=0):
+                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0, nblocks=0, diag_constraint=None):
         super().__init__()
         self.in_size = in_size
         m = int(math.ceil(math.log2(in_size)))
@@ -46,6 +49,9 @@ class Butterfly(nn.Module):
         self.param = param
         self.max_gain_per_factor = max_gain ** (1 / m)
         self.nblocks = nblocks
+        assert diag_constraint in [None, 'positive', 'bounded', 'square']
+        self.diag_constraint = diag_constraint
+        self.max_gain = max_gain
         if nblocks > 0:
             assert not tied_weight and not complex and param in ['regular', 'ortho', 'odo'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
         if tied_weight:
@@ -125,8 +131,17 @@ class Butterfly(nn.Module):
         elif self.param == 'ortho':
             output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
         elif self.param == 'odo':
+            diag = self.diag
+            if self.diag_constraint == 'positive':
+                with torch.no_grad():  # Projected SGD
+                    diag.clamp_(min=0)
+            elif self.diag_constraint == 'bounded':
+                with torch.no_grad():  # Projected SGD
+                    diag.clamp_(min=1 / self.max_gain, max=self.max_gain)
+            elif self.diag_constraint == 'square':
+                diag = diag * diag
             output = butterfly_ortho_mult_untied(self.twiddle0, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle0, output)
-            output = output * self.diag
+            output = output * diag
             output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
         elif self.param == 'svd':
             with torch.no_grad():  # Projected SGD
