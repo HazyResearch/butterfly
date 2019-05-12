@@ -120,12 +120,12 @@ class TrainableModel(Trainable):
                 output = self.model(data)
                 total_samples += output.size(0)
                 if self.unsupervised:
-                    test_loss  += perm.tv(output).item()
+                    test_loss  += perm.tv(output, reduction='sum').item()
 
                     mean_output = self.model(data, perm ='mean')
-                    mean_loss  += perm.tv(mean_output).item()
+                    mean_loss  += perm.tv(mean_output, reduction='sum').item()
                     mle_output  = self.model(data, perm ='mle')
-                    mle_loss   += perm.tv(mle_output).item()
+                    mle_loss   += perm.tv(mle_output, reduction='sum').item()
                 else:
                     target = target.repeat(output.size(0)//target.size(0))
                     test_loss += F.cross_entropy(output, target, reduction='sum').item()
