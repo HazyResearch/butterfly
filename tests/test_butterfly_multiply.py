@@ -11,6 +11,7 @@ from cnn.models.butterfly_conv import ButterflyConv2d
 
 from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
+from butterfly.butterfly_multiply import butterfly_ortho_mult_untied_torch, butterfly_ortho_mult_untied
 from butterfly.butterfly_multiply import bbt_mult_untied_torch, bbt_mult_untied
 from butterfly.butterfly_multiply import butterfly_mult_conv2d_torch, butterfly_mult_conv2d
 from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
@@ -80,7 +81,6 @@ class ButterflyMultTest(unittest.TestCase):
                                         (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(),
                                          (batch_size, n), device, complex, increasing_stride))
 
-
     def test_butterfly_untied_eval(self):
         for batch_size, n in [(1, 256), (2, 512), (8, 512), (10, 512)]:
             m = int(math.log2(n))
@@ -96,6 +96,29 @@ class ButterflyMultTest(unittest.TestCase):
                         self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
                                         ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
 
+    def test_butterfly_ortho_untied(self):
+        for batch_size, n in [(10, 4096), (8192, 256)]:  # Test size smaller than 1024 and large batch size for race conditions
+            m = int(math.log2(n))
+            nstack = 2
+            for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+                for increasing_stride in [True, False]:
+                    if batch_size > 1024 and (device == 'cpu'):
+                        continue
+                    twiddle = torch.rand((nstack, m, n // 2), requires_grad=True, device=device) * 2 * math.pi
+                    input = torch.randn((batch_size, nstack, n), requires_grad=True, device=twiddle.device)
+                    output = butterfly_ortho_mult_untied(twiddle, input, increasing_stride)
+                    output_torch = butterfly_ortho_mult_untied_torch(twiddle, input, increasing_stride)
+                    self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
+                                    ((output - output_torch).abs().max().item(), device, increasing_stride))
+                    grad = torch.randn_like(output_torch)
+                    d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input), grad, retain_graph=True)
+                    d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
+                    self.assertTrue(torch.allclose(d_input, d_input_torch, rtol=self.rtol, atol=self.atol),
+                                    ((d_input - d_input_torch).abs().max().item(), device, increasing_stride))
+                    self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol * (10 if batch_size > 1024 else 1),
+                                                    atol=self.atol * (10 if batch_size > 1024 else 1)),
+                                    (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(),
+                                        (batch_size, n), device, increasing_stride))
 
     def test_bbt_untied(self):
         for batch_size, n in [(10, 4096), (8192, 256)]:

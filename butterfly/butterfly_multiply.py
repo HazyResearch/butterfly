@@ -11,6 +11,7 @@ try:
     from factor_multiply import butterfly_multiply_intermediate, butterfly_multiply_intermediate_backward
     from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_backward
     from factor_multiply import butterfly_multiply_untied_forward_backward
+    from factor_multiply import butterfly_ortho_multiply_untied, butterfly_ortho_multiply_untied_forward_backward
     from factor_multiply import bbt_multiply_untied, bbt_multiply_untied_forward_backward
     from factor_multiply import butterfly_multiply_untied_svd, butterfly_multiply_untied_svd_backward
     from factor_multiply import butterfly_multiply_untied_svd_forward_backward
@@ -194,6 +195,56 @@ class ButterflyMultUntied(torch.autograd.Function):
         return d_coefficients, d_input, None, None  # Autograd requires 3 gradients
 
 butterfly_mult_untied = ButterflyMultUntied.apply if use_extension else butterfly_mult_untied_torch
+
+
+class ButterflyOrthoMultUntied(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, twiddle, input, increasing_stride=True):
+        """
+        Parameters:
+            twiddle: (nstack, log n, n / 2)
+            input: (batch_size, nstack, n)
+        Returns:
+            output: (batch_size, nstack, n)
+        """
+        twiddle_cos, twiddle_sin = torch.cos(twiddle), torch.sin(twiddle)
+        output = butterfly_ortho_multiply_untied(twiddle_cos, twiddle_sin, input, increasing_stride)
+        ctx.save_for_backward(twiddle_cos, twiddle_sin, input)
+        ctx._increasing_stride = increasing_stride
+        return output
+
+    @staticmethod
+    def backward(ctx, grad):
+        """
+        Parameters:
+            grad: (batch_size, nstack, n)
+        Return:
+            d_twiddle: (nstack, log n, n / 2, 2, 2)
+            d_input: (batch_size, nstack, n)
+        """
+        twiddle_cos, twiddle_sin, input = ctx.saved_tensors
+        increasing_stride = ctx._increasing_stride
+        d_coefficients, d_input = butterfly_ortho_multiply_untied_forward_backward(twiddle_cos, twiddle_sin, input, grad, increasing_stride)
+        return d_coefficients, d_input, None
+
+
+def butterfly_ortho_mult_untied(twiddle, input, increasing_stride):
+    n = input.shape[2]
+    if input.dim() == 3 and n <= 1024 and input.is_cuda:
+        return ButterflyOrthoMultUntied.apply(twiddle, input, increasing_stride)
+    else:
+        c, s = torch.cos(twiddle), torch.sin(twiddle)
+        twiddle = torch.stack((torch.stack((c, -s), dim=-1),
+                               torch.stack((s, c), dim=-1)), dim=-2)
+        return butterfly_mult_untied(twiddle, input, increasing_stride)
+
+
+def butterfly_ortho_mult_untied_torch(twiddle, input, increasing_stride):
+    c, s = torch.cos(twiddle), torch.sin(twiddle)
+    twiddle = torch.stack((torch.stack((c, -s), dim=-1),
+                           torch.stack((s, c), dim=-1)), dim=-2)
+    return butterfly_mult_untied_torch(twiddle, input, increasing_stride)
 
 
 class BbtMultUntied(torch.autograd.Function):
