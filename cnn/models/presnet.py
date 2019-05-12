@@ -421,7 +421,7 @@ def add_gumbel_noise(log_alpha, sample_shape=()):
 
 
 class ButterflyPermutation(Permutation):
-    def __init__(self, size, sig='BT1', param='ortho2', stochastic=False, temp=1.0, samples=1, sample_method='gumbel'):
+    def __init__(self, size, sig='BT1', param='ortho2', stochastic=False, temp=1.0, samples=1, sample_method='gumbel', hard=False):
         super().__init__()
         self.size = size
         self.stochastic = stochastic # TODO align this block
@@ -435,7 +435,10 @@ class ButterflyPermutation(Permutation):
         if self.stochastic:
             self.mean_temp = 1.0
             self.sample_temp = temp
-            self.generate_fn = self.sample_soft_perm # add this attr for efficiency (avoid casing in every call to generate())
+            if hard:
+                self.generate_fn = self.sample_hard_perm
+            else:
+                self.generate_fn = self.sample_soft_perm # add this attr for efficiency (avoid casing in every call to generate())
             # self.sample_method = 'gumbel'
         else:
             self.mean_temp = temp
@@ -594,11 +597,29 @@ class ButterflyPermutation(Permutation):
         sample_shape = (self.samples,)
         _twiddle = self.map_twiddle(self.twiddle)
 
-        logits = torch.stack((torch.log(tw), torch.zeros_like(tw)), dim=-1) # (depth, 1, log n, n/2, 2)
-        logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
-        logits_noise = logits_noise[..., 0] - logits_noise[..., 1]
-        sample_twiddle = torch.where(logits_noise>0, torch.tensor(1.0, device=_twiddle.device), torch.tensor(0.0, device=_twiddle.device)) # shape (s, depth, 1, log n, n/2)
-        return sample_twiddle
+        r = torch.rand(_twiddle.size(), device=_twiddle.device)
+        _twiddle = _twiddle - r
+        # sample_twiddle = 1.0 / (1.0 + torch.exp(-_twiddle / self.sample_temp))
+        # hard_twiddle = torch.where(_twiddle>0, torch.tensor(1.0, device=_twiddle.device), torch.tensor(0.0, device=_twiddle.device)) # shape (s, depth, 1, log n, n/2)
+        sample_twiddle = _twiddle.repeat(*sample_shape, *([1]*_twiddle.dim())) # TODO try expand
+        hard_twiddle = torch.where(sample_twiddle>0,
+                                   torch.ones_like(sample_twiddle),
+                                   torch.zeros_like(sample_twiddle)
+                                   ) # shape (s, depth, 1, log n, n/2)
+        # print("HARD_TWIDDLE SHAPE", hard_twiddle.shape)
+        # sample_twiddle = _twiddle.expand(sample_shape+_twiddle.shape)
+        sample_twiddle.data = hard_twiddle # straight through estimator
+        if self.training: assert sample_twiddle.requires_grad
+        # TODO can make this a lot faster
+
+        perms = torch.stack([self.compute_perm(twiddle, self.strides) for twiddle in sample_twiddle], dim=0) # (s, n, n)
+        return perms
+
+        # logits = torch.stack((torch.log(tw), torch.zeros_like(tw)), dim=-1) # (depth, 1, log n, n/2, 2)
+        # logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
+        # logits_noise = logits_noise[..., 0] - logits_noise[..., 1]
+        # sample_twiddle = torch.where(logits_noise>0, torch.tensor(1.0, device=_twiddle.device), torch.tensor(0.0, device=_twiddle.device)) # shape (s, depth, 1, log n, n/2)
+        # return sample_twiddle
 
 
 
