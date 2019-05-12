@@ -210,15 +210,18 @@ class ButterflyBmm(Butterfly):
             of the whole matrix (not of each factor).
             For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
         nblocks: number of (BB^T) blocks. If 0, it's just a butterfly. If > 0, ignore @increasing_stride.
+        diag_constraint: whether to constrain the diagonal in ODO parameterization.
+            None (no constraint), 'positive' (>= 0), 'bounded' (between [1/max_gain, max_gain]),
+                'square' (use sigma^2 parameterization instead)
     """
 
     def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False, tied_weight=True,
-                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0, nblocks=0):
+                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0, nblocks=0, diag_constraint=None):
         m = int(math.ceil(math.log2(in_size)))
         in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
         nstack = int(math.ceil(out_size / in_size_extended))
         super().__init__(in_size_extended, in_size_extended * nstack * matrix_batch, bias, complex,
-                         tied_weight, increasing_stride, ortho_init, param, max_gain, nblocks)
+                         tied_weight, increasing_stride, ortho_init, param, max_gain, nblocks, diag_constraint)
         self.in_size = in_size
         self.out_size = out_size
         self.nstack = nstack
