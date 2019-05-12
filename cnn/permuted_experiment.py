@@ -66,6 +66,7 @@ class TrainableModel(Trainable):
         self.anneal_entropy_factor = config['anneal_entropy']
         self.anneal_sqrt = config['anneal_sqrt']
         self.entropy_p = config['entropy_p']
+        self.model_args = config['model']
 
     def _train_iteration(self):
         self.model.train()
@@ -212,8 +213,14 @@ class TrainableModel(Trainable):
                  'scheduler': self.scheduler.state_dict()}
         torch.save(state, checkpoint_path)
 
-        model_path = os.path.join(checkpoint_dir, "saved_model")
-        torch.save(self.model.state_dict(), model_path)
+        full_model = {
+            'state': self.model.state_dict(),
+            'args': self.model_args,
+        }
+        model_path = os.path.join(checkpoint_dir, "saved_model.pth")
+        torch.save(full_model, model_path)
+        # model_args = os.path.join(checkpoint_dir, "saved_model.args")
+        # torch.save(self.model_args, model_args)
         return checkpoint_path
 
     def _restore(self, checkpoint_path):

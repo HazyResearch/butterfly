@@ -69,8 +69,26 @@ def get_dataset(config_dataset):
             normalize
         ] + permutation_transforms)
 
-        trainset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=True, transform=transform_train)
-        validset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=False, transform=transform_test)
+        if 'transform' in config_dataset and config_dataset['transform'] == 'original':
+            trainset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=True, transform=transforms.ToTensor())
+            validset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=False, transform=transforms.ToTensor())
+        elif 'transform' in config_dataset and config_dataset['transform'] == 'permute':
+            transforms_ = transforms.Compose([transforms.ToTensor()] + permutation_transforms)
+            trainset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=True, transform=transforms_)
+            validset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=False, transform=transforms_)
+        elif 'transform' in config_dataset and config_dataset['transform'] == 'normalize':
+            transform_train = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+                normalize
+            ])
+            trainset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=True, transform=transform_train)
+            validset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=False, transform=transform_train)
+        else:
+            trainset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=True, transform=transform_train)
+            validset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=False, transform=transform_test)
         np_random_state = np.random.get_state()  # To get exactly the same training and validation sets
         np.random.seed(0)
         indices = np.random.permutation(range(len(trainset)))

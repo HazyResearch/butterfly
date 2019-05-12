@@ -425,11 +425,13 @@ class ButterflyPermutation(Permutation):
     def __init__(self, size, sig='BT1', param='ortho2', stochastic=False, temp=1.0, samples=1, sample_method='gumbel', hard=False):
         super().__init__()
         self.size = size
+        self.sig = sig
+        self.param = param
         self.stochastic = stochastic # TODO align this block
         self.temp = temp
         self.samples = samples
         self.sample_method = sample_method
-        self.param = param
+        self.hard = hard
         self.m = int(math.ceil(math.log2(size)))
         assert size == (1<<self.m), "ButterflyPermutation: Only power of 2 supported."
 
