@@ -97,7 +97,7 @@ class TrainableModel(Trainable):
             '--inputs=' + self._save_dir, '--num-epoch-checkpoints=10',
             '--output=' + self._save_dir + '/model.pt'
         ]
-        gen_args = [project_root + '/fairseq/data-bin/iwslt14.tokenized.de-en', '--batch-size=128', '--remove-bpe',
+        gen_args = [project_root + '/fairseq/data-bin/iwslt14.tokenized.de-en', '--batch-size=64', '--remove-bpe',
                     '--beam=4', '--quiet',
                    ]
         self._train_args = train_args
@@ -173,7 +173,7 @@ def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_deco
     config={
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
         # 'lr': grid_search([5e-4, 7e-4, 9e-4, 11e-4]),
-        'lr': grid_search([9e-4, 11e-4]),
+        'lr': grid_search([7.5e-4, 10e-4]),
         'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if model == 'DynamicConv' else 1e-4,
         # Transformer seems to need dropout 0.3
         'dropout': sample_from(lambda spec: random.uniform(0.1, 0.3)) if model == 'DynamicConv' else 0.3,
