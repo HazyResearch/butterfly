@@ -57,13 +57,13 @@ class TrainableModel(Trainable):
         # create butterfly for specific layer and train
         if model_args['structure_type'] == 'B':
             butterfly = ButterflyConv2d(in_channels, out_channels,
-                kernel_size=kernel_size, stride=stride, padding=1,
+                kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, tied_weight=False, ortho_init=True,
                 param='regular')
         elif model_args['structure_type'] == 'BBT' or model_args['nblocks'] > 1:
             butterfly = ButterflyConv2dBBT(in_channels, out_channels,
-                kernel_size=kernel_size, stride=stride, padding=1,
-                bias=False, nblocks=args.nblocks, tied_weight=False,
+                kernel_size=kernel_size, stride=stride, padding=padding,
+                bias=False, nblocks=model_args['nblocks'], tied_weight=False,
                 ortho_init=True, param='regular')
         self.model = butterfly.to(device)
 
@@ -99,7 +99,7 @@ class TrainableModel(Trainable):
                 data, target = data.to(self.device), target.to(self.device)
                 output = self.model(data)
                 loss += F.mse_loss(output, target).item()
-        training_loss = loss / len(self.train_loader.dataset)
+        training_loss = loss / len(self.train_loader)
         return {"mean_loss": training_loss, "inverse_loss": 1/training_loss}
 
     def _train(self):
@@ -133,11 +133,13 @@ if slack_config_path.exists():
 @ex.config
 def default_config():
     model = 'resnet18'  # Name of model, see model_utils.py
-    model_args = {}  # Arguments to be passed to the model, as a dictionary
+    model_args = {'structure_type': 'B',
+                  'nblocks': 1,
+                  'param': 'regular'}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'SGD'  # Which optimizer to use, either Adam or SGD
     ntrials = 8  # Number of trials for hyperparameter tuning
-    nmaxepochs = 1  # Maximum number of epochs
-    result_dir = project_root + '/cnn/distillation_results'  # Directory to store results
+    nmaxepochs = 10  # Maximum number of epochs
+    result_dir = project_root + '/cnn/ray_results'  # Directory to store results
     train_dir = '/distillation/resnet18'
     cuda = torch.cuda.is_available()  # Whether to use GPU
     smoke_test = False  # Finish quickly for testing
@@ -150,7 +152,8 @@ def imagenet_distillation_experiment(model, model_args, optimizer,
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
-        'lr': sample_from(lambda spec: random.uniform(0, 40)),
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1)) if optimizer == 'Adam'
+                                           else random.uniform(math.log(2e-3), math.log(1e-0)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
@@ -168,7 +171,7 @@ def imagenet_distillation_experiment(model, model_args, optimizer,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
-        stop={"training_iteration": 1 if smoke_test else 9999},
+        stop={"training_iteration": 1},
         config=config,
     )
     return experiment
@@ -183,8 +186,8 @@ def run(model, result_dir, nmaxepochs):
             ray.init(redis_address=address)
     except:
         ray.init()
-    ahb = AsyncHyperBandScheduler(reward_attr='inverse_loss', max_t=nmaxepochs)
-    trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
+    # ahb = AsyncHyperBandScheduler(reward_attr='inverse_loss', max_t=nmaxepochs)
+    trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     loss = [trial.last_result.get('mean_loss', float('inf')) for trial in trials]
 
@@ -195,4 +198,4 @@ def run(model, result_dir, nmaxepochs):
         pickle.dump(trials, f)
 
     ex.add_artifact(str(checkpoint_path))
-    return min(loss
+    return min(loss)
