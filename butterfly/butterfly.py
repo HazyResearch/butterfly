@@ -89,13 +89,11 @@ class Butterfly(nn.Module):
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
             elif param == 'odo':
                 assert not tied_weight and not complex
-                self.twiddle0 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
+                self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 self.twiddle1 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 self.diag = nn.Parameter(torch.ones(self.nstack, size))
-                self.twiddle0._is_structured = True
                 self.twiddle1._is_structured = True
                 self.diag._is_structured = True
-                self.twiddle = self.twiddle0  # For the line self.twiddle._is_structured = True below
             elif param == 'svd':
                 assert not tied_weight, 'svd parameterization is only implemented for non-tied weight'
                 theta_phi = torch.rand(twiddle_core_shape + (2, )) * math.pi * 2
@@ -140,7 +138,7 @@ class Butterfly(nn.Module):
                     diag.clamp_(min=1 / self.max_gain, max=self.max_gain)
             elif self.diag_constraint == 'square':
                 diag = diag * diag
-            output = butterfly_ortho_mult_untied(self.twiddle0, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle0, output)
+            output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
             output = output * diag
             output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
         elif self.param == 'svd':
