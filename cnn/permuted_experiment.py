@@ -177,18 +177,20 @@ class TrainableModel(Trainable):
                     "mean_nll": mean_nll.item(),
                     "mean_was1": mean_was1.item(),
                     "mean_was2": mean_was2.item(),
+                    "neg_was2": 682.0-mean_was2.item(),
                     "mle_loss": mle_loss / total_samples,
                     # "mle_ent": mle_ent.item(),
                     # "mle_nll": mle_nll.item(),
                     "mle_was1": mle_was1.item(),
                     "mle_was2": mle_was2.item(),
                     # "mean_accuracy": 682.0-mean_was2.item(),
-                    "neg_sample_loss": -test_loss / total_samples,
+                    # "neg_sample_loss": -test_loss / total_samples,
                     "mean_unif_dist": mean_unif_dist.item(),
-                    "mean_was1_abs": mean_was1_abs.item(),
-                    "mean_was2_abs": mean_was2_abs.item(),
-                    "model_entropy": H.item(),
-                    "neg_ent_floor": -int(mean_ent.item()),
+                    # "mean_was1_abs": mean_was1_abs.item(),
+                    # "mean_was2_abs": mean_was2_abs.item(),
+                    "model_ent": H.item(),
+                    # "neg_ent_floor": -int(mean_ent.item()),
+                    "neg_ent": -H.item(),
                 }
 
         # test_loss = test_loss / len(self.test_loader.dataset)
@@ -331,6 +333,7 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         max_failures=-1,
         # resources_per_trial={'cpu': 4, 'gpu': 0.5 if cuda else 0},
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
+        stop={"training_iteration": 1 if smoke_test else nmaxepochs, 'model_ent': 200, 'neg_ent': 5},
         # stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         config=config,
     )
@@ -348,7 +351,7 @@ def run(model, result_dir, nmaxepochs, unsupervised):
     except:
         ray.init()
     if unsupervised:
-        ahb = AsyncHyperBandScheduler(reward_attr='mean_was2_abs', max_t=nmaxepochs, grace_period=400, reduction_factor=2, brackets=3)
+        ahb = AsyncHyperBandScheduler(reward_attr='neg_was2', max_t=nmaxepochs, grace_period=nmaxepochs, reduction_factor=2, brackets=1)
     else:
         ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
     trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
