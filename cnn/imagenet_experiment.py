@@ -85,6 +85,7 @@ def get_parser():
 
 cudnn.benchmark = True
 args = get_parser().parse_args()
+os.makedirs(args.save_dir, exist_ok=True)
 logging.basicConfig(
 level=logging.INFO,
 handlers=[
@@ -174,7 +175,10 @@ def main():
             args.start_epoch = checkpoint['epoch']
             best_acc1 = checkpoint['best_acc1']
             model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
+            try:
+                optimizer.load_state_dict(checkpoint['optimizer'])
+            except:
+                pass
         else: logger.info("=> no checkpoint found at '{}'".format(args.resume))
 
     if args.small:

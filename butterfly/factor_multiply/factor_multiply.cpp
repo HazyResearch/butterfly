@@ -16,7 +16,7 @@ void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, co
 void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& input, bool increasing_stride, bool return_intermediates);
 void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at::Tensor& output,
                                              at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
-void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input,
+void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const at::Tensor& input, const at::Tensor& grad,
                                                      at::Tensor& d_twiddle, at::Tensor& d_input, bool increasing_stride);
 void butterfly_conv2d_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output,
                            const int kernel_size, const int padding, const int h_out,
@@ -1038,10 +1038,10 @@ std::vector<at::Tensor> butterfly_multiply_untied_forward_backward(const at::Ten
   AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
   AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_forward_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
   AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "butterfly_multiply_untied_forward_backward: grad must have shape (batch_size, nstack, n)");
-  auto d_input = grad.clone();
+  auto d_input = torch::empty_like(input);
   auto d_twiddle = torch::zeros_like(twiddle);
   AT_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_backward: only supports CUDA");
-  butterfly_multiply_untied_forward_backward_cuda(twiddle, input, d_twiddle, d_input, increasing_stride);
+  butterfly_multiply_untied_forward_backward_cuda(twiddle, input, grad, d_twiddle, d_input, increasing_stride);
   return {d_twiddle, d_input} ;
 }
 

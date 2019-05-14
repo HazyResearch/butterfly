@@ -1,5 +1,5 @@
 import math
-
+import numpy as np
 import torch
 from torch import nn
 
@@ -95,12 +95,15 @@ class Butterfly(nn.Module):
     def forward(self, input):
         """
         Parameters:
-            input: (batch, in_size) if real or (batch, in_size, 2) if complex
+            input: (batch, *, in_size) if real or (batch, *, in_size, 2) if complex
         Return:
-            output: (batch, out_size) if real or (batch, out_size, 2) if complex
+            output: (batch, *, out_size) if real or (batch, *, out_size, 2) if complex
         """
-        batch = input.shape[0]
-        output = input
+        if self.complex:  # Reshape to (N, in_size, 2)
+            output = input.view(np.prod(input.size()[:-2]), *input.size()[-2:])
+        else:  # Reshape to (N, in_size)
+            output = input.view(np.prod(input.size()[:-1]), input.size(-1))
+        batch = output.shape[0]
         if self.in_size != self.in_size_extended:  # Zero-pad
             padded_shape = (batch, self.in_size_extended - self.in_size) + (() if not self.complex else (2, ))
             output = torch.cat((output, torch.zeros(padded_shape, dtype=output.dtype, device=output.device)),
@@ -128,7 +131,12 @@ class Butterfly(nn.Module):
                 output = output.view(batch, self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=1)
         if self.out_size != out_size_extended:  # Take top rows
             output = output[:, :self.out_size]
-        return output if self.bias is None else output + self.bias
+        if self.bias is not None:
+            output = output + self.bias
+        if self.complex:
+            return output.view(*input.size()[:-2], self.out_size, 2)
+        else:
+            return output.view(*input.size()[:-1], self.out_size)
 
     def extra_repr(self):
         return 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}'.format(

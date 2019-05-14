@@ -75,7 +75,8 @@ class TrainableModel(Trainable):
                 correct += (pred == target.data.view_as(pred)).long().cpu().sum()
         test_loss = test_loss / len(self.test_loader.dataset)
         accuracy = correct.item() / len(self.test_loader.dataset)
-        return {"mean_loss": test_loss, "mean_accuracy": accuracy}
+        return {"mean_loss": test_loss,
+                "mean_accuracy": accuracy}
 
     def _train(self):
         self.scheduler.step()

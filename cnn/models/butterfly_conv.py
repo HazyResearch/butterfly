@@ -75,7 +75,7 @@ class ButterflyConv2d(ButterflyBmm):
         # TODO: Only doing real for now
         batch, c, h, w = input.shape
         h_out = (h + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) // self.stride[0] + 1
-        w_out = (h + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
+        w_out = (w + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
         if not (self.fused_unfold and self.stride == (1, 1) and self.kernel_size[0] == self.kernel_size[1]
                 and self.padding[0] == self.padding[1] and self.dilation == (1, 1) and c <= 1024 and input.is_cuda):
             # unfold input into patches and call batch matrix multiply

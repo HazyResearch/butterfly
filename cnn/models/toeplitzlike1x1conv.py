@@ -1,4 +1,5 @@
 import math
+import numpy as np
 import torch
 from torch import nn
 
@@ -126,16 +127,16 @@ class ToeplitzlikeLinear(nn.Module):
     def forward(self, input):
         """
         Parameters:
-            input: (batch, in_size)
+            input: (batch, *, in_size)
         Return:
-            output: (batch, out_size)
+            output: (batch, *, out_size)
         """
-        batch = input.shape[0]
+        u = input.view(np.prod(input.size()[:-1]), input.size(-1))
+        batch = u.shape[0]
         # output = toeplitz_mult(self.G, self.H, input, self.corner)
         # return output.reshape(batch, self.nstack * self.size)
         n = self.in_size
         v = self.H
-        u = input
         # u_f = torch.rfft(torch.cat((u.flip(1), torch.zeros_like(u)), dim=-1), 1)
         u_f = torch.rfft(torch.cat((u[:, self.reverse_idx], torch.zeros_like(u)), dim=-1), 1)
         v_f = torch.rfft(torch.cat((v, torch.zeros_like(v)), dim=-1), 1)
@@ -149,7 +150,14 @@ class ToeplitzlikeLinear(nn.Module):
         wv_sum_f = complex_mul(w_f, v_f).sum(dim=2)
         output = torch.irfft(wv_sum_f, 1, signal_sizes=(2 * n, ))[..., :n]
         output = output.reshape(batch, self.nstack * self.in_size)[:, :self.out_size]
-        return output if self.bias is None else output + self.bias
+        if self.bias is not None:
+            output = output + self.bias
+        return output.view(*input.size()[:-1], self.out_size)
+
+    def extra_repr(self):
+        return 'in_size={}, out_size={}, bias={}, rank={}, corner={}'.format(
+            self.in_size, self.out_size, self.bias is not None, self.rank, self.corner
+        )
 
 
 class Toeplitzlike1x1Conv(ToeplitzlikeLinear):
