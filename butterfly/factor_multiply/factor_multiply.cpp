@@ -1133,6 +1133,7 @@ at::Tensor bbt_multiply_untied(const at::Tensor& twiddle, const at::Tensor& inpu
   AT_CHECK(n <= 1024, "bbt_multiply_untied: only supports n <= 1024");
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle.size(1) / (2 * log_n);
+  AT_CHECK(nblocks <= 14, "bbt_multiply_untied: nblocks must be <= 14");
   AT_CHECK(twiddle.dim() == 5 && input.dim() == 3,
            "bbt_multiply_untied: twiddle, and input, must have dimension 5,3");
   CHECK_DEVICE(twiddle);
@@ -1164,6 +1165,7 @@ std::vector<at::Tensor> bbt_multiply_untied_forward_backward(const at::Tensor& t
   AT_CHECK(n <= 1024, "bbt_multiply_untied_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle.size(1) / (2 * log_n);
+  AT_CHECK(nblocks <= 14, "bbt_multiply_untied_forward_backward: nblocks must be <= 14");
   AT_CHECK(twiddle.dim() == 5 && input.dim() == 3 && grad.dim() == 3,
            "bbt_multiply_untied_forward_backward: twiddle, input, and grad must have dimension 5,3,3");
   CHECK_DEVICE(twiddle);
@@ -1195,6 +1197,7 @@ at::Tensor bbt_ortho_multiply_untied(const at::Tensor& twiddle_cos, const at::Te
   AT_CHECK(n <= 1024, "bbt_ortho_multiply_untied: only supports n <= 1024");
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
+  AT_CHECK(nblocks <= 14, "bbt_ortho_multiply_untied: nblocks must be <= 14");
   AT_CHECK(twiddle_cos.dim() == 3 && input.dim() == 3,
            "bbt_ortho_multiply_untied: twiddle_cos, and input, must have dimension 3,3");
   CHECK_DEVICE(twiddle_cos);
@@ -1227,6 +1230,7 @@ std::vector<at::Tensor> bbt_ortho_multiply_untied_forward_backward(const at::Ten
   AT_CHECK(n <= 1024, "bbt_ortho_multiply_untied_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
+  AT_CHECK(nblocks <= 14, "bbt_ortho_multiply_untied_forward_backward: nblocks must be <= 14");
   AT_CHECK(twiddle_cos.dim() == 3 && input.dim() == 3 && grad.dim() == 3,
            "bbt_ortho_multiply_untied_forward_backward: twiddle_cos, input, and grad must have dimension 3,3,3");
   CHECK_DEVICE(twiddle_cos);

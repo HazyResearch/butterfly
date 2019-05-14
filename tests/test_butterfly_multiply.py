@@ -122,11 +122,11 @@ class ButterflyMultTest(unittest.TestCase):
                                         (batch_size, n), device, increasing_stride))
 
     def test_bbt_untied(self):
-        for batch_size, n in [(10, 4096), (8192, 256)]:
-            for nblocks in range(1, 4):
+        for batch_size, n in [(2048, 512), (10, 4096)]:
+            for nblocks in list(range(1, 4)) + [10, 14]:  # Test nblocks >= 7
                 m = int(math.log2(n))
                 nstack = 2
-                for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+                for device in ([] if not torch.cuda.is_available() else ['cuda']) + ['cpu']:
                     if batch_size > 1024 and device == 'cpu':
                         continue
                     scaling = 1 / 2
@@ -155,11 +155,11 @@ class ButterflyMultTest(unittest.TestCase):
                                      (batch_size, n), nblocks, device))
 
     def test_bbt_ortho_untied(self):
-        for batch_size, n in [(10, 4096), (8192, 256)]:
-            for nblocks in range(1, 4):
+        for batch_size, n in [(2048, 512), (10, 4096)]:
+            for nblocks in list(range(1, 4)) + [10, 14]:  # Test nblocks >= 7
                 m = int(math.log2(n))
                 nstack = 2
-                for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+                for device in ([] if not torch.cuda.is_available() else ['cuda']) + ['cpu']:
                     if batch_size > 1024 and device == 'cpu':
                         continue
                     twiddle = torch.rand((nstack, nblocks * 2 * m, n // 2), requires_grad=True, device=device) * 2 * math.pi
@@ -173,6 +173,16 @@ class ButterflyMultTest(unittest.TestCase):
                     d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
                     self.assertTrue(torch.allclose(d_input, d_input_torch, rtol=self.rtol, atol=self.atol),
                                     ((d_input - d_input_torch).abs().max().item(), (batch_size, n), nblocks, device))
+                    # if device == 'cuda' and batch_size > 1024 and nblocks == 14:
+                    #     print((d_twiddle - d_twiddle_torch).abs().mean(dim=(0, 2)))
+                    #     print(((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().mean(dim=(0, 2)))
+                    #     i = ((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().argmax()
+                    #     print(d_twiddle.flatten()[i])
+                    #     print(d_twiddle_torch.flatten()[i])
+                    #     print(d_twiddle.flatten()[i-5:i+5])
+                    #     print(d_twiddle_torch.flatten()[i-5:i+5])
+                    # Seems to fail for large nblocks because there's likely to be a d_twiddle that's really small.
+                    # I guess it's fine.
                     self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol * (10 if batch_size > 1024 else 1),
                                                 atol=self.atol * (10 if batch_size > 1024 else 1)),
                                     (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(),

@@ -2471,7 +2471,7 @@ void bbt_multiply_untied_cuda(const at::Tensor& twiddle, const at::Tensor& input
      cudaGetLastError());
 }
 
-template <typename scalar_t, typename accscalar_t,
+template <typename scalar_t, typename accscalar_t, int nblocks,
           typename Function0, typename Function1, typename Function2>
 __global__ void bbt_multiply_untied_forward_backward_cuda_kernel(const CudaAcsr<scalar_t, 5> twiddle_a,
                                                                  Function0 load_input,
@@ -2479,15 +2479,14 @@ __global__ void bbt_multiply_untied_forward_backward_cuda_kernel(const CudaAcsr<
                                                                  CudaAcsr<scalar_t, 5> d_twiddle_a,
                                                                  Function2 save_d_input,
                                                                  int log_max_stride,
-                                                                 int batch_size,
-                                                                 int nblocks) {
+                                                                 int batch_size) {
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d bbt as well
   const int max_stride = 1 << log_max_stride;
   const int input_base_idx = 0;
   __shared__ scalar_t s_input[ELEMENTARY_SIZE * 2];
   __shared__ scalar_t s_twiddle[ELEMENTARY_SIZE][2][2];
   // Forward pass to compute the intermediate values
-  scalar_t input_val_storage[MAX_N_FACTORS][2];  // Storing inputs for backward pass
+  scalar_t input_val_storage[nblocks * 2 * MAX_N_FACTORS][2];  // Storing inputs for backward pass
   load_input(s_input);
   int b = blockIdx.x * blockDim.y + threadIdx.y;
   int tid_x = threadIdx.x;
@@ -2619,8 +2618,51 @@ void bbt_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const 
         }
       }
     };
-    bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t>
-      <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size, nblocks);
+    switch (nblocks)
+      {
+      case 1:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 1>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 2:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 2>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 3:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 3>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 4:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 4>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 5:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 5>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 6:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 6>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 7:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 7>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 8:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 8>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 9:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 9>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 10:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 10>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 11:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 11>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 12:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 12>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 13:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 13>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 14:
+        bbt_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 14>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      }
   });
   AT_CHECK(cudaGetLastError() == cudaSuccess,
      "bbt_multiply_untied_forward_backward_cuda failed with error code ",
@@ -2714,7 +2756,7 @@ void bbt_ortho_multiply_untied_cuda(const at::Tensor& twiddle_cos, const at::Ten
      cudaGetLastError());
 }
 
-template <typename scalar_t, typename accscalar_t,
+template <typename scalar_t, typename accscalar_t, int nblocks,
           typename Function0, typename Function1, typename Function2>
 __global__ void bbt_ortho_multiply_untied_forward_backward_cuda_kernel(const CudaAcsr<scalar_t, 3> twiddle_cos_a,
                                                                        const CudaAcsr<scalar_t, 3> twiddle_sin_a,
@@ -2723,15 +2765,14 @@ __global__ void bbt_ortho_multiply_untied_forward_backward_cuda_kernel(const Cud
                                                                        CudaAcsr<scalar_t, 3> d_twiddle_a,
                                                                        Function2 save_d_input,
                                                                        int log_max_stride,
-                                                                       int batch_size,
-                                                                       int nblocks) {
+                                                                       int batch_size) {
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d bbt_ortho as well
   const int max_stride = 1 << log_max_stride;
   const int input_base_idx = 0;
   __shared__ scalar_t s_input[ELEMENTARY_SIZE * 2];
   __shared__ scalar_t s_twiddle[ELEMENTARY_SIZE][2];
   // Forward pass to compute the intermediate values
-  scalar_t input_val_storage[MAX_N_FACTORS][2];  // Storing inputs for backward pass
+  scalar_t input_val_storage[nblocks * 2 * MAX_N_FACTORS][2];  // Storing inputs for backward pass
   load_input(s_input);
   int b = blockIdx.x * blockDim.y + threadIdx.y;
   int tid_x = threadIdx.x;
@@ -2851,9 +2892,51 @@ void bbt_ortho_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle_c
         }
       }
     };
-    bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t>
-      <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad,
-                                                             d_twiddle_a, save_d_input, log_stride, batch_size, nblocks);
+    switch (nblocks)
+      {
+      case 1:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 1>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 2:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 2>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 3:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 3>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 4:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 4>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 5:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 5>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 6:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 6>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 7:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 7>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 8:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 8>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 9:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 9>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 10:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 10>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 11:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 11>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 12:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 12>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 13:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 13>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      case 14:
+        bbt_ortho_multiply_untied_forward_backward_cuda_kernel<scalar_t, accscalar_t, 14>
+          <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
+      }
   });
   AT_CHECK(cudaGetLastError() == cudaSuccess,
      "bbt_ortho_multiply_untied_forward_backward_cuda failed with error code ",

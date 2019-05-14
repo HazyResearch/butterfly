@@ -282,7 +282,7 @@ def bbt_mult_untied(twiddle, input):
     m = int(math.log2(n))
     nblocks = twiddle.shape[1] // (2 * m)
     assert nblocks * 2 * m == twiddle.shape[1], 'twiddle must have shape (nstack, nblocks * 2 * log n, n / 2, 2, 2)'
-    if n <= 1024 and input.is_cuda:
+    if n <= 1024 and input.is_cuda and nblocks <= 14:  # CUDA only supports nblocks <= 14
         return BbtMultUntied.apply(twiddle, input)
     else:
         output = input
@@ -339,7 +339,9 @@ class BbtOrthoMultUntied(torch.autograd.Function):
 
 def bbt_ortho_mult_untied(twiddle, input):
     n = input.shape[2]
-    if n <= 1024 and input.is_cuda:
+    m = int(math.log2(n))
+    nblocks = twiddle.shape[1] // (2 * m)
+    if n <= 1024 and input.is_cuda and nblocks <= 14:  # CUDA only supports nblocks <= 14
         return BbtOrthoMultUntied.apply(twiddle, input)
     else:
         c, s = torch.cos(twiddle), torch.sin(twiddle)
