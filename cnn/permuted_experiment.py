@@ -146,7 +146,7 @@ class TrainableModel(Trainable):
                 sample_was1, sample_was2 = perm.dist(p, self.test_loader.true_permutation, fn='was')
 
                 mean = self.model.get_permutations(perm='mean') # (rank, n, n)
-                print("MEAN PERMUTATION", mean)
+                # print("MEAN PERMUTATION", mean)
                 mean_ent = perm.entropy(mean, reduction='mean')
                 mean_nll = perm.dist(mean, self.test_loader.true_permutation, fn='nll')
                 # mean_was = perm.dist(mean, self.test_loader.true_permutation, fn='was')
@@ -250,7 +250,7 @@ def default_config():
     lr_decay_period = 18  # Period of learning rate decay
     plr_min = 1e-4
     plr_max = 1e-2
-    weight_decay = True  # Whether to use weight decay
+    weight_decay = False  # Whether to use weight decay
     ntrials = 20  # Number of trials for hyperparameter tuning
     nmaxepochs = 72  # Maximum number of epochs
     result_dir = project_root + '/cnn/results'  # Directory to store results
@@ -261,8 +261,8 @@ def default_config():
     tv_norm = 2
     tv_p = 1
     tv_sym = False
-    anneal_ent_min = 0.5
-    anneal_ent_max = 4.0
+    anneal_ent_min = 0.0
+    anneal_ent_max = 0.0
     anneal_sqrt = False
     entropy_p = None
     restore_perm = None
@@ -284,8 +284,13 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
     if restore_perm is not None: restore_perm = 'saved_perms/' + restore_perm
     args_rand = args.copy()
     args_rand['temp'] = sample_from(lambda spec: math.exp(random.uniform(math.log(temp_min), math.log(temp_max))))
-    args_rand['samples'] = sample_from(lambda _: np.random.choice((8,16)))
+    # args_rand['samples'] = sample_from(lambda _: np.random.choice((8,16)))
     # args_rand['sig'] = sample_from(lambda _: np.random.choice(('BT1', 'BT4')))
+
+    if anneal_ent_max == 0.0:
+        anneal_entropy = 0.0
+    else:
+        anneal_entropy = sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
     config={
         'optimizer': optimizer,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-2)) if optimizer == 'Adam'
@@ -303,10 +308,11 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
 
         'dataset':         {'name': dataset, 'batch': batch},
         'unsupervised':    unsupervised,
-        'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
-        # 'anneal_entropy':  anneal_entropy,
+        # 'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
+        'tv':              {'norm': 2, 'p': 1, 'sym': sample_from(lambda _: np.random.choice((True,False)))},
+        'anneal_entropy':  anneal_entropy,
         # 'anneal_entropy':  sample_from(lambda _: random.uniform(anneal_ent_min, anneal_ent_max)),
-        'anneal_entropy':  sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
+        # 'anneal_entropy':  sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
         'anneal_sqrt':  anneal_sqrt,
         'entropy_p': entropy_p,
         'restore_perm':    restore_perm,
@@ -323,8 +329,8 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         checkpoint_at_end=True,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
-        resources_per_trial={'cpu': 4, 'gpu': 0.5 if cuda else 0},
-        stop={"training_iteration": 1 if smoke_test else nmaxepochs, 'neg_ent_floor': 0},
+        # resources_per_trial={'cpu': 4, 'gpu': 0.5 if cuda else 0},
+        resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
         # stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         config=config,
     )

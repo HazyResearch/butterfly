@@ -159,7 +159,7 @@ def transport(ds, p, reduction='mean'):
     # dist = torch.tensor(dist, dtype=torch.float, device=ds.device)
     t1 = torch.sum(ds * dist, dim=[-2,-1])
     t2 = torch.sum(ds.transpose(-1,-2) * dist, dim=[-2,-1])
-    print("TRANSPORT: ", t1.cpu(), t2.cpu())
+    # print("TRANSPORT: ", t1.cpu(), t2.cpu())
     t = t1+t2
 
     if reduction is None:
@@ -206,6 +206,56 @@ def tv(x, norm=2, p=1, symmetric=False, reduction='mean'):
         v = torch.sum(torch.abs(delta) ** norm, dim=-1)
     else:
         v = torch.norm(torch.abs(delta), dim=-1, p=norm)
+        if p != 1:
+            v = v ** p
+
+    if reduction is None:
+        return v
+    elif reduction == 'sum':
+        return torch.sum(v)
+    elif reduction == 'mean':
+        return torch.sum(v) / v.size(0)
+    else: assert False, f"perm.tv: reduction {reduction} not supported."
+
+def tv_kernel(x, norm=2, p=1, reduction='mean'):
+    """ Image total variation
+    x: (b, c, w, h)
+
+    If D = (dx, dy) is the vector of differences at a given pixel,
+    sum up ||D||_norm^p over image
+
+    Note that reduction='mean' only averages over the batch dimension
+    """
+    # each pixel wants all channels as part of its delta vector
+    x = x.transpose(-3, -2).transpose(-2, -1) # (b, w, h, c)
+    if not symmetric:
+        delta = x.new_zeros(*x.size(), 2)
+        dx = x[:, 1:, :, :] - x[:, :-1, :, :]
+        dy = x[:, :, 1:, :] - x[:, :, :-1, :]
+        delta[:, :-1, :, :, 0] = dx
+        delta[:, :, :-1, :, 1] = dy
+    else:
+        # dx = x[:, 2:, :, :] - x[:, :-2, :, :]
+        # dy = x[:, :, 2:, :] - x[:, :, :-2, :]
+        # delta[:, 1:-1, :, :, 0] = dx / 2.0
+        # delta[:, :, 1:-1, :, 1] = dy / 2.0
+            # old symmetric version (4-sided)
+        delta = x.new_zeros(*x.size(), 4)
+        dx = x[:, 1:, :, :] - x[:, :-1, :, :]
+        dy = x[:, :, 1:, :] - x[:, :, :-1, :]
+        delta[:, :-1, :, :, 0] = dx
+        delta[:, :, :-1, :, 1] = dy
+
+        # dx_ =  x[:, :-1, :, :] - x[:, 1:, :, :]
+        # dy_ =  x[:, :, :-1, :] - x[:, :, 1:, :]
+        delta[:, 1:, :, :, 0] = -dx
+        delta[:, :, 1:, :, 1] = -dy
+
+    delta = delta.flatten(-2, -1) # (b, w, h, 2*c [or 4*c])
+    if norm == p:
+        v = torch.sum(torch.abs(delta) ** norm, dim=-1)
+    else:
+        v = torch.norm(delta, dim=-1, p=norm)
         if p != 1:
             v = v ** p
 

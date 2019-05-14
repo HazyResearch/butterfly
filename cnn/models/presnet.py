@@ -463,13 +463,14 @@ class ButterflyPermutation(Permutation):
             depth = int(sig[1:])
             self.twiddle_core_shape = (depth, 1, self.m, self.size//2)
             self.strides = [1] * depth # 1 for increasing, 0 for decreasing
-        elif sig[1] == 'T' and (sig[1:]).isdigit():
+        elif sig[0] == 'T' and (sig[1:]).isdigit():
             depth = int(sig[1:])
             self.twiddle_core_shape = (depth, 1, self.m, self.size//2)
             self.strides = [0] * depth # 1 for increasing, 0 for decreasing
         else:
             assert False, f"ButterflyPermutation: signature {sig} not supported."
         # self.twiddle has shape (depth, 1, log n, n/2)
+        self.depth = self.twiddle_core_shape[0]
 
         margin = 1e-3
         # sample from [margin, 1-margin]
@@ -479,7 +480,11 @@ class ButterflyPermutation(Permutation):
         elif self.param == 'logit':
             # self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape)*2-1)
             init = sample_gumbel(self.twiddle_core_shape) - sample_gumbel(self.twiddle_core_shape)
-            init_temp = random.uniform(0.2, 0.4)
+            # init_temp = random.uniform(0.2, 0.4)
+            # init_temp = random.uniform(0.5, )
+            init_temp = 1.0 / self.depth
+            # init_temp = random.uniform(0.1, 0.2)
+            # init_temp = 0.2
             self.twiddle = nn.Parameter(init / init_temp)
             # self.twiddle = nn.Parameter(init)
             # self.twiddle = nn.Parameter(torch.log(init / (1.-init)))
