@@ -38,9 +38,9 @@ def get_parser():
                         help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet18)')
-    parser.add_argument('-j', '--workers', default=16, type=int, metavar='N',
-                        help='number of data loading workers (default: 16)')
-    parser.add_argument('--epochs', default=90, type=int, metavar='N',
+    parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
+                        help='number of data loading workers (default: 4)')
+    parser.add_argument('--epochs', default=10, type=int, metavar='N',
                         help='number of total epochs to run')
     parser.add_argument('-b', '--batch-size', default=256, type=int,
                         metavar='N', help='mini-batch size (default: 256)')
@@ -117,9 +117,9 @@ def get_mmap_files(traindir):
     logging.info(f'Input size: {input_size}')
     logging.info(f'Output size: {output_size}')
     teacher_input = torch.from_file(f'{traindir}/{args.layer}_input.pt',
-        size=int(np.prod(input_size))).view(input_size)
+        size=int(np.prod(input_size))).view(input_size).pin_memory()
     teacher_output = torch.from_file(f'{traindir}/{args.layer}_output.pt',
-        size=int(np.prod(output_size))).view(output_size)
+        size=int(np.prod(output_size))).view(output_size).pin_memory()
     return teacher_input, teacher_output
 
 def load_teacher(traindir):
@@ -171,7 +171,8 @@ def main():
 
     # define loss function (criterion) and optimizer
     criterion = nn.MSELoss().cuda()
-    optimizer = torch.optim.SGD(butterfly.parameters(), lr=args.lr, momentum=args.momentum)
+    # optimizer = torch.optim.SGD(butterfly.parameters(), lr=args.lr, momentum=args.momentum)
+    optimizer = torch.optim.Adam(butterfly.parameters(), lr=args.lr)
     logger.info('Created optimizer')
 
     ckpt_file = f'{args.output_dir}/butterfly_{args.layer}_{args.structure_type}_{args.nblocks}_{args.param}.pt'
