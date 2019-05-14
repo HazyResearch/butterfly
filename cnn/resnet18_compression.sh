@@ -53,7 +53,7 @@
 # raiders2,4,5
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=0 model_args.structure_type=B optimizer=SGD nmaxepochs=200
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=1 model_args.structure_type=B optimizer=SGD nmaxepochs=200
-# p100-template-3
-python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q
 # p100-template-4
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-3
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=BBT optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q

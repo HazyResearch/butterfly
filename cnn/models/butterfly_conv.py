@@ -99,7 +99,7 @@ class ButterflyConv2d(ButterflyBmm):
                     self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
                 output = butterfly_mult_conv2d_svd(self.twiddle, input, self.kernel_size[0],
                     self.padding[0], self.increasing_stride)
-            output = super().post_process(output, batch_out)
+            output = super().post_process(input, output)
         # combine matrix batches
         output = output.mean(dim=1)
         return output.view(batch, h_out * w_out, self.out_channels).transpose(1, 2).view(batch, self.out_channels, h_out, w_out)
