@@ -400,8 +400,9 @@ def sinkhorn(log_alpha, temp=1.0, n_iters=20):
         log_alpha = log_alpha - torch.logsumexp(log_alpha, dim=-1, keepdim=True)
     return torch.exp(log_alpha)
 
-def sample_gumbel(shape, eps=1e-10):
-    U = torch.rand(shape, dtype=torch.float)
+def sample_gumbel(shape, device=torch.device('cpu')):
+    eps = 1e-10
+    U = torch.rand(shape, dtype=torch.float, device=device)
     return -torch.log(eps - torch.log(U + eps))
 
 def add_gumbel_noise(log_alpha, sample_shape=()):
@@ -416,8 +417,10 @@ def add_gumbel_noise(log_alpha, sample_shape=()):
     """
     # batch = log_alpha.size(0)
     n = log_alpha.size(-1)
-    noise = sample_gumbel(sample_shape + log_alpha.shape)
-    log_alpha_noise = log_alpha + noise.to(log_alpha.device)
+    # noise = sample_gumbel(sample_shape + log_alpha.shape)
+    # log_alpha_noise = log_alpha + noise.to(log_alpha.device)
+    noise = sample_gumbel(sample_shape + log_alpha.shape, device=log_alpha.device)
+    log_alpha_noise = log_alpha + noise
     return log_alpha_noise
 
 
@@ -586,8 +589,10 @@ class ButterflyPermutation(Permutation):
             # assert torch.all(sample_twiddle == sample_twiddle), "NANS FOUND"
             logits = torch.stack((self.twiddle, torch.zeros_like(self.twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
             shape = logits.size()
-            noise = sample_gumbel((logits.size(0), self.samples)+logits.size()[2:])
-            logits_noise = logits + noise.to(logits.device) # (d, s, log n, n/2, 2)
+            # noise = sample_gumbel((logits.size(0), self.samples)+logits.size()[2:])
+            # logits_noise = logits + noise.to(logits.device) # (d, s, log n, n/2, 2)
+            noise = sample_gumbel((logits.size(0), self.samples)+logits.size()[2:], device=logits.device)
+            logits_noise = logits + noise # (d, s, log n, n/2, 2)
             sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # (depth, s, log n, n/2)
             perms = self.compute_perm(sample_twiddle, self.strides, squeeze=False)
             return perms

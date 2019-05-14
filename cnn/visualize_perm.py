@@ -22,7 +22,7 @@ import model_utils
 # perm_path = 'sinkhorn.was237'
 # method = 'sinkhorn'
 # perm_path = 'butterfly-samples16-anneal.63-temp.06-lr.0008'
-perm_path = 'butterfly.3'
+perm_path = 'T5.2'
 method = 'butterfly'
 
 if __name__ == '__main__':
@@ -64,14 +64,14 @@ if __name__ == '__main__':
 
     perm_path = 'saved_perms/' + perm_path
 
-    model = model_utils.get_model({'name': 'Permutation', 'args': {'method': method, 'stochastic':True, 'param': 'logit', 'temp': 0.1}})
-    # model = model_utils.get_model({'name': 'Permutation', 'args': {'method': method}})
-    model.load_state_dict(torch.load(perm_path))
+    # model = model_utils.get_model({'name': 'Permutation', 'args': {'method': method, 'stochastic':True, 'param': 'logit', 'temp': 0.1}})
+    # # model = model_utils.get_model({'name': 'Permutation', 'args': {'method': method}})
+    # model.load_state_dict(torch.load(perm_path))
 
     # New version:
-    # saved_model = torch.load(perm_path)
-    # model = model_utils.get_model(saved_model['args'])
-    # model.load_state_dict(saved_model['state'])
+    saved_model = torch.load(perm_path)
+    model = model_utils.get_model(saved_model['args'])
+    model.load_state_dict(saved_model['state'])
 
 
     # TODO: nsamples should be able to be passed into forward pass
