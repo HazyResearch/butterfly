@@ -161,7 +161,7 @@ def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, 
         'dataset': {'name': 'CIFAR10'}
      }
     experiment = RayExperiment(
-        name=f'cifar10_{model}_{model_args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
+        name=f'cifar10_{model}_{model_args}_{optimizer}',
         run=TrainableModel,
         local_dir=result_dir,
         num_samples=ntrials,
