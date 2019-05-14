@@ -85,6 +85,7 @@ def get_parser():
 
 cudnn.benchmark = True
 args = get_parser().parse_args()
+os.makedirs(args.save_dir, exist_ok=True)
 logging.basicConfig(
 level=logging.INFO,
 handlers=[
