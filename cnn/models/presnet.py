@@ -227,6 +227,7 @@ class TensorPermutation(nn.Module):
             # self.permute2 = self.perm_type(h, **kwargs)
         else:
             assert False, "prank must be 1 or 2"
+        # TODO: maybe it makes sense to set ._is_perm_param here
 
         # if stochastic:
         #     self.perm_fn = self.perm_type.sample_soft_perm
@@ -497,6 +498,7 @@ class ButterflyPermutation(Permutation):
             self.twiddle = nn.Parameter(torch.acos(torch.sqrt(init)))
         else:
             assert False, f"ButterflyPermutation: Parameter type {self.param} not supported."
+        # self.twiddle._is_perm_param = True
 
 
     def entropy(self, p=None):
