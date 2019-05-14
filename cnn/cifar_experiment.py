@@ -143,7 +143,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test):
+def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, nmaxepochs, result_dir, cuda, smoke_test):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -169,7 +169,7 @@ def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, 
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
-        stop={"training_iteration": 1 if smoke_test else 9999},
+        stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         config=config,
     )
     return experiment
