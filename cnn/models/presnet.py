@@ -502,14 +502,19 @@ class ButterflyPermutation(Permutation):
     def entropy(self, p=None):
         """ TODO: How does this compare to the matrix entropy of the expanded mean matrix? """
         if p == 'logit':
+            assert self.param=='logit'
             def binary_ent(p):
                 eps = 1e-10
-                return -(p * torch.log(eps+p) + (1-p)*torch.log(1-p+eps))
+                return -(p * torch.log2(eps+p) + (1-p)*torch.log2(1-p+eps))
             _twiddle = self.map_twiddle(self.twiddle)
-            return torch.sum(binary_ent(_twiddle))
+            ent1 = torch.sum(binary_ent(_twiddle))
+            return ent1
             # could be better to not map at all
             x = torch.exp(-self.twiddle)
-            return torch.log(1 + x) + self.twiddle * (x/(1+x))
+            ent2 = torch.log2(1. + x) + self.twiddle * (x/(1.+x))
+            ent2 = torch.sum(ent2)
+            print(ent1-ent2)
+            return ent2
 
         if p is None:
             perms = self.generate_perm()
