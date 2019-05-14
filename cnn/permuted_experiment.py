@@ -43,8 +43,8 @@ class TrainableModel(Trainable):
 
         self.model = model_utils.get_model(config['model'])
         # restore permutation
-        if config['restore_perm'] is not None:
-            self.model.permute.load_state_dict(torch.load(config['restore_perm']))
+        # if config['restore_perm'] is not None:
+        #     self.model.permute.load_state_dict(torch.load(config['restore_perm']))
         self.model.to(device)
 
         self.train_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
@@ -63,7 +63,7 @@ class TrainableModel(Trainable):
         #
         self.unsupervised = config['unsupervised']
         self.tv = config['tv']
-        self.anneal_entropy_factor = config['anneal_entropy']
+        self.anneal_entropy_factor = config['anneal_entropy'] # NOTE: restoring a model does not call the sample_from function
         self.anneal_sqrt = config['anneal_sqrt']
         self.entropy_p = config['entropy_p']
         self.model_args = config['model']
@@ -71,6 +71,7 @@ class TrainableModel(Trainable):
     def _train_iteration(self):
         self.model.train()
         inv_temp = math.sqrt(self._iteration) if self.anneal_sqrt else self._iteration
+        # print(f"ITERATION {self._iteration} INV TEMP {inv_temp} ANNEAL ENTROPY {self.anneal_entropy_factor}")
         inv_temp *= self.anneal_entropy_factor
         print(f"ITERATION {self._iteration} INV TEMP {inv_temp}")
         for data, target in self.train_loader:
@@ -210,17 +211,17 @@ class TrainableModel(Trainable):
 
     def _save(self, checkpoint_dir):
         checkpoint_path = os.path.join(checkpoint_dir, "model_optimizer.pth")
-        state = {'model': self.model.state_dict(),
-                 'optimizer': self.optimizer.state_dict(),
-                 'scheduler': self.scheduler.state_dict()}
-        torch.save(state, checkpoint_path)
-
         full_model = {
             'state': self.model.state_dict(),
             'args': self.model_args,
         }
-        model_path = os.path.join(checkpoint_dir, "saved_model.pth")
-        torch.save(full_model, model_path)
+        state = {'model': full_model,
+                 'optimizer': self.optimizer.state_dict(),
+                 'scheduler': self.scheduler.state_dict()}
+        torch.save(state, checkpoint_path)
+
+        # model_path = os.path.join(checkpoint_dir, "saved_model.pth")
+        # torch.save(full_model, model_path)
         # model_args = os.path.join(checkpoint_dir, "saved_model.args")
         # torch.save(self.model_args, model_args)
         return checkpoint_path
@@ -230,9 +231,26 @@ class TrainableModel(Trainable):
             checkpoint = torch.load(checkpoint_path, self.device)
         else:
             checkpoint = torch.load(checkpoint_path)
-        self.model.load_state_dict(checkpoint['model'])
+        # saved_model = torch.load(checkpoint_path + '.args')
+        # self.model = model_utils.get_model(saved_model['args'])
+        self.model = model_utils.get_model(checkpoint['model']['args'])
+        self.model.to(self.device)
+        self.model.load_state_dict(checkpoint['model']['state'])
+
+        permutation_params = filter(lambda p: hasattr(p, '_is_perm_param') and p._is_perm_param, self.model.parameters())
+        unstructured_params = filter(lambda p: not (hasattr(p, '_is_perm_param') and p._is_perm_param), self.model.parameters())
+        self.optimizer = optim.Adam([{'params': permutation_params},
+                                     {'params': unstructured_params}],)
+        # self.optimizer = optim.Adam([{'params': permutation_params, 'weight_decay': 0.0, 'lr': config['plr']},
+        #                              {'params': unstructured_params}],
+        #                             lr=config['lr'], weight_decay=config['weight_decay'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
+        # self.optimizer.param_groups[0].update({'params': permutation_params})
+        # self.optimizer.param_groups[1].update({'params': unstructured_params})
+
+        # self.scheduler = optim.lr_scheduler.StepLR(self.optimizer)
         self.scheduler.load_state_dict(checkpoint['scheduler'])
+        self.scheduler.optimizer = self.optimizer
 
 
 ex = Experiment('Cifar10_experiment')
@@ -283,7 +301,10 @@ def sgd():
 @ex.capture
 def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, restore_perm, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt, entropy_p): # TODO clean up and set min,max to pairs/dicts
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
-    if restore_perm is not None: restore_perm = 'saved_perms/' + restore_perm
+    if restore_perm is not None:
+        # restore_perm = 'saved_perms/' + restore_perm
+        print("RESTORING FROM", restore_perm)
+
     args_rand = args.copy()
     args_rand['temp'] = sample_from(lambda spec: math.exp(random.uniform(math.log(temp_min), math.log(temp_max))))
     # args_rand['samples'] = sample_from(lambda _: np.random.choice((8,16)))
@@ -317,7 +338,7 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         # 'anneal_entropy':  sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
         'anneal_sqrt':  anneal_sqrt,
         'entropy_p': entropy_p,
-        'restore_perm':    restore_perm,
+        'restore_perm': restore_perm,
      }
     timestamp = datetime.datetime.now().replace(microsecond=0).isoformat()
     commit_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip().decode('utf-8')
@@ -330,11 +351,12 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         num_samples=ntrials,
         checkpoint_at_end=True,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
-        max_failures=-1,
+        max_failures=0,
         # resources_per_trial={'cpu': 4, 'gpu': 0.5 if cuda else 0},
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
         stop={"training_iteration": 1 if smoke_test else nmaxepochs, 'model_ent': 200, 'neg_ent': 5},
         # stop={"training_iteration": 1 if smoke_test else nmaxepochs},
+        restore=restore_perm,
         config=config,
     )
     return experiment
@@ -354,7 +376,11 @@ def run(model, result_dir, nmaxepochs, unsupervised):
         ahb = AsyncHyperBandScheduler(reward_attr='neg_was2', max_t=nmaxepochs, grace_period=nmaxepochs, reduction_factor=2, brackets=1)
     else:
         ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
-    trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
+    trials = ray.tune.run(
+        experiment, scheduler=ahb,
+        raise_on_failed_trial=False, queue_trials=True,
+        with_server=True, server_port=4322,
+    )
     trials = [trial for trial in trials if trial.last_result is not None]
     accuracy = [trial.last_result.get('mean_accuracy', float('-inf')) for trial in trials]
 
