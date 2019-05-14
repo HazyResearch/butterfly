@@ -58,13 +58,12 @@ def get_parser():
 args = get_parser().parse_args()
 os.makedirs(args.output_dir, exist_ok=True)
 logging.basicConfig(
-filemode='a',
 level=logging.INFO,
 handlers=[
     logging.StreamHandler(),
     logging.FileHandler(f'{args.output_dir}/'
                         f'butterfly_{args.layer}_{args.structure_type}'
-                        f'_{args.nblocks}_{args.param}.log')
+                        f'_{args.nblocks}_{args.param}.log', 'a')
 ])
 logger = logging.getLogger()
 logger.info(args)
