@@ -11,9 +11,9 @@ try:
     from factor_multiply import butterfly_multiply_intermediate, butterfly_multiply_intermediate_backward
     from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_backward
     from factor_multiply import butterfly_multiply_untied_forward_backward
-    from factor_multiply import butterfly_ortho_multiply_untied, butterfly_ortho_multiply_untied_forward_backward
+    from factor_multiply import butterfly_ortho_multiply_untied, butterfly_ortho_multiply_untied_backward
     from factor_multiply import bbt_multiply_untied, bbt_multiply_untied_forward_backward
-    from factor_multiply import bbt_ortho_multiply_untied, bbt_ortho_multiply_untied_forward_backward
+    from factor_multiply import bbt_ortho_multiply_untied, bbt_ortho_multiply_untied_backward
     from factor_multiply import butterfly_multiply_untied_svd, butterfly_multiply_untied_svd_backward
     from factor_multiply import butterfly_multiply_untied_svd_forward_backward
     from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
@@ -211,7 +211,7 @@ class ButterflyOrthoMultUntied(torch.autograd.Function):
         """
         twiddle_cos, twiddle_sin = torch.cos(twiddle), torch.sin(twiddle)
         output = butterfly_ortho_multiply_untied(twiddle_cos, twiddle_sin, input, increasing_stride)
-        ctx.save_for_backward(twiddle_cos, twiddle_sin, input)
+        ctx.save_for_backward(twiddle_cos, twiddle_sin, output)
         ctx._increasing_stride = increasing_stride
         return output
 
@@ -224,9 +224,9 @@ class ButterflyOrthoMultUntied(torch.autograd.Function):
             d_twiddle: (nstack, log n, n / 2, 2, 2)
             d_input: (batch_size, nstack, n)
         """
-        twiddle_cos, twiddle_sin, input = ctx.saved_tensors
+        twiddle_cos, twiddle_sin, output = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
-        d_coefficients, d_input = butterfly_ortho_multiply_untied_forward_backward(twiddle_cos, twiddle_sin, input, grad, increasing_stride)
+        d_coefficients, d_input = butterfly_ortho_multiply_untied_backward(twiddle_cos, twiddle_sin, output, grad, increasing_stride)
         return d_coefficients, d_input, None
 
 
@@ -320,7 +320,7 @@ class BbtOrthoMultUntied(torch.autograd.Function):
         """
         twiddle_cos, twiddle_sin = torch.cos(twiddle), torch.sin(twiddle)
         output = bbt_ortho_multiply_untied(twiddle_cos, twiddle_sin, input)
-        ctx.save_for_backward(twiddle_cos, twiddle_sin, input)
+        ctx.save_for_backward(twiddle_cos, twiddle_sin, output)
         return output
 
     @staticmethod
@@ -332,8 +332,8 @@ class BbtOrthoMultUntied(torch.autograd.Function):
             d_twiddle: (nstack, nblocks * 2 * log n, n / 2)
             d_input: (batch_size, nstack, n)
         """
-        twiddle_cos, twiddle_sin, input = ctx.saved_tensors
-        d_coefficients, d_input = bbt_ortho_multiply_untied_forward_backward(twiddle_cos, twiddle_sin, input, grad)
+        twiddle_cos, twiddle_sin, output = ctx.saved_tensors
+        d_coefficients, d_input = bbt_ortho_multiply_untied_backward(twiddle_cos, twiddle_sin, output, grad)
         return d_coefficients, d_input
 
 
@@ -341,7 +341,7 @@ def bbt_ortho_mult_untied(twiddle, input):
     n = input.shape[2]
     m = int(math.log2(n))
     nblocks = twiddle.shape[1] // (2 * m)
-    if n <= 1024 and input.is_cuda and nblocks <= 14:  # CUDA only supports nblocks <= 14
+    if n <= 1024 and input.is_cuda:
         return BbtOrthoMultUntied.apply(twiddle, input)
     else:
         c, s = torch.cos(twiddle), torch.sin(twiddle)
