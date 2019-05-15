@@ -59,12 +59,12 @@ class TrainableModel(Trainable):
             butterfly = ButterflyConv2d(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, tied_weight=False, ortho_init=True,
-                param='regular')
+                param=model_args['param'])
         elif model_args['structure_type'] == 'BBT' or model_args['nblocks'] > 1:
             butterfly = ButterflyConv2dBBT(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, nblocks=model_args['nblocks'], tied_weight=False,
-                ortho_init=True, param='regular')
+                ortho_init=True, param=model_args['param'])
         self.model = butterfly.to(device)
 
         def load_teacher(traindir):
@@ -140,7 +140,7 @@ def default_config():
     ntrials = 8  # Number of trials for hyperparameter tuning
     nmaxepochs = 10  # Maximum number of epochs
     result_dir = project_root + '/cnn/ray_results'  # Directory to store results
-    train_dir = '/distillation/resnet18'
+    train_dir = '/distillation/resnet18/activations'
     cuda = torch.cuda.is_available()  # Whether to use GPU
     smoke_test = False  # Finish quickly for testing
     workers = 4

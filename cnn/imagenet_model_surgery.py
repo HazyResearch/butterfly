@@ -102,6 +102,25 @@ if not args.random:
             loaded_state_dict[f'features.7.1.conv1.layers.{i}.twiddle'] = features_7_1_conv1.layers[i].twiddle
             loaded_state_dict[f'features.7.1.conv2.layers.{i}.twiddle'] = features_7_1_conv2.layers[i].twiddle
 
+        if args.num_structured_layers == 2:
+            features_6_0_conv1 = torch.load(
+                f"{args.input_dir}/butterfly_features.6.0.conv1_BBT_{args.nblocks}_regular.pt")
+            features_6_0_conv2 = torch.load(
+                f"{args.input_dir}/butterfly_features.6.0.conv2_BBT_{args.nblocks}_regular.pt")
+            features_6_0_downsample_0 = torch.load(
+                f"{args.input_dir}/butterfly_features.6.0.downsample.0_BBT_{args.nblocks}_regular.pt")
+            features_6_1_conv1 = torch.load(
+                f"{args.input_dir}/butterfly_features.6.1.conv1_BBT_{args.nblocks}_regular.pt")
+            features_6_1_conv2 = torch.load(
+                f"{args.input_dir}/butterfly_features.6.1.conv2_BBT_{args.nblocks}_regular.pt")
+            # nblocks doubled since BBT
+            for i in range(args.nblocks*2):
+                loaded_state_dict[f'features.6.0.conv1.layers.{i}.twiddle'] = features_6_0_conv1.layers[i].twiddle
+                loaded_state_dict[f'features.6.0.conv2.layers.{i}.twiddle'] = features_6_0_conv2.layers[i].twiddle
+                loaded_state_dict[f'features.6.0.downsample.0.layers.{i}.twiddle'] = features_6_0_downsample_0.layers[i].twiddle
+                loaded_state_dict[f'features.6.1.conv1.layers.{i}.twiddle'] = features_6_1_conv1.layers[i].twiddle
+                loaded_state_dict[f'features.6.1.conv2.layers.{i}.twiddle'] = features_6_1_conv2.layers[i].twiddle
+
     else:
         raise ValueError("Invalid structure type")
 
@@ -133,6 +152,6 @@ state = {'state_dict': student_model_dict,
 
 # save model state for loading into code for fine-tuning
 if args.random:
-    torch.save(state, f"{args.output_dir}/resnet18_butterfly_random_{args.structure_type}_{args.nblocks}_{args.param}.pth.tar")
+    torch.save(state, f"{args.output_dir}/resnet18_butterfly_random_{args.num_structured_layers}_{args.structure_type}_{args.nblocks}_{args.param}.pth.tar")
 else:
-    torch.save(state, f"{args.output_dir}/resnet18_butterfly_distilled_{args.structure_type}_{args.nblocks}_{args.param}.pth.tar")
+    torch.save(state, f"{args.output_dir}/resnet18_butterfly_distilled_{args.num_structured_layers}_{args.structure_type}_{args.nblocks}_{args.param}.pth.tar")
