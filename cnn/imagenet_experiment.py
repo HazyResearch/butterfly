@@ -173,9 +173,13 @@ def main():
         if os.path.isfile(args.resume):
             checkpoint = torch.load(args.resume, map_location = lambda storage, loc: storage.cuda(args.gpu))
             args.start_epoch = checkpoint['epoch']
-            best_acc1 = checkpoint['best_acc1']
+            try:
+                best_acc1 = checkpoint['best_acc1']
+            except:
+                best_acc1 = checkpoint['best_prec1']
             model.load_state_dict(checkpoint['state_dict'])
             try:
+
                 optimizer.load_state_dict(checkpoint['optimizer'])
             except:
                 pass
@@ -192,7 +196,6 @@ def main():
 
     train_loader,val_loader,train_sampler,val_sampler = get_loaders(traindir, valdir, use_val_sampler=True)
     logger.info('Loaded data')
-    if args.evaluate: return validate(val_loader, model, criterion, epoch, start_time)
 
     logger.info(model)
     logger.info('| model {}, criterion {}'.format(args.arch, criterion.__class__.__name__))
@@ -200,6 +203,10 @@ def main():
         sum(p.numel() for p in model.parameters()),
         sum(p.numel() for p in model.parameters() if p.requires_grad),
     ))
+
+    if args.evaluate:
+        return validate(val_loader, model, criterion, args.start_epoch, start_time)
+
     for epoch in range(args.start_epoch, args.epochs):
         logger.info(f'Epoch {epoch}')
         adjust_learning_rate(optimizer, epoch)
