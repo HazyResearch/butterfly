@@ -179,9 +179,12 @@ class Butterfly(nn.Module):
             return output.view(*input.size()[:-1], self.out_size)
 
     def extra_repr(self):
-        return 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}'.format(
+        s = 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}'.format(
             self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks
         )
+        if self.param == 'odo':
+            s += ', diag_constraint={}'.format('none' if self.diag_constraint is None else self.diag_constraint)
+        return s
 
 
 class ButterflyBmm(Butterfly):
@@ -254,6 +257,9 @@ class ButterflyBmm(Butterfly):
         return output if self.bias is None else output + self.bias
 
     def extra_repr(self):
-        return 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}'.format(
+        s = 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}'.format(
             self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks
         )
+        if self.param == 'odo':
+            s += ', diag_constraint={}'.format('none' if self.diag_constraint is None else self.diag_constraint)
+        return s
