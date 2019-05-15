@@ -498,7 +498,7 @@ class ButterflyPermutation(Permutation):
             self.twiddle = nn.Parameter(torch.acos(torch.sqrt(init)))
         else:
             assert False, f"ButterflyPermutation: Parameter type {self.param} not supported."
-        # self.twiddle._is_perm_param = True
+        self.twiddle._is_perm_param = True
 
 
     def entropy(self, p=None):

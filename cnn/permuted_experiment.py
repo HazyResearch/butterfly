@@ -245,6 +245,7 @@ class TrainableModel(Trainable):
         #                              {'params': unstructured_params}],
         #                             lr=config['lr'], weight_decay=config['weight_decay'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
+        # self.optimizer.param_groups[1].update({'weight_decay': 0.0})
         # self.optimizer.param_groups[0].update({'params': permutation_params})
         # self.optimizer.param_groups[1].update({'params': unstructured_params})
 
@@ -302,7 +303,7 @@ def sgd():
 def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, restore_perm, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt, entropy_p): # TODO clean up and set min,max to pairs/dicts
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     if restore_perm is not None:
-        # restore_perm = 'saved_perms/' + restore_perm
+        restore_perm = '/dfs/scratch1/albertgu/learning-circuits/cnn/saved_perms/' + restore_perm
         print("RESTORING FROM", restore_perm)
 
     args_rand = args.copy()
@@ -350,11 +351,11 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         local_dir=result_dir,
         num_samples=ntrials,
         checkpoint_at_end=True,
-        checkpoint_freq=1000,  # Just to enable recovery with @max_failures
+        checkpoint_freq=500,  # Just to enable recovery with @max_failures
         max_failures=0,
         # resources_per_trial={'cpu': 4, 'gpu': 0.5 if cuda else 0},
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
-        stop={"training_iteration": 1 if smoke_test else nmaxepochs, 'model_ent': 200, 'neg_ent': 5},
+        stop={"training_iteration": 1 if smoke_test else nmaxepochs, 'model_ent': 200, 'neg_ent': -5.0},
         # stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         restore=restore_perm,
         config=config,
@@ -379,7 +380,7 @@ def run(model, result_dir, nmaxepochs, unsupervised):
     trials = ray.tune.run(
         experiment, scheduler=ahb,
         raise_on_failed_trial=False, queue_trials=True,
-        with_server=True, server_port=4322,
+        with_server=True, server_port=4321,
     )
     trials = [trial for trial in trials if trial.last_result is not None]
     accuracy = [trial.last_result.get('mean_accuracy', float('-inf')) for trial in trials]
