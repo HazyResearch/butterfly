@@ -14,6 +14,7 @@ try:
     from factor_multiply import butterfly_ortho_multiply_untied, butterfly_ortho_multiply_untied_forward_backward
     from factor_multiply import bbt_multiply_untied, bbt_multiply_untied_forward_backward
     from factor_multiply import bbt_ortho_multiply_untied, bbt_ortho_multiply_untied_forward_backward
+    from factor_multiply import bbt_conv2d, bbt_conv2d_forward_backward
     from factor_multiply import butterfly_multiply_untied_svd, butterfly_multiply_untied_svd_backward
     from factor_multiply import butterfly_multiply_untied_svd_forward_backward
     from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
@@ -545,12 +546,6 @@ class ButterflyMultConv2d(torch.autograd.Function):
             d_input: (b_in, c_in, h_in, w_in)
         """
         twiddle, input = ctx.saved_tensors
-        # Save intermediates for backward pass
-        # output_and_intermediate = butterfly_conv2d(twiddle, input,
-            # ctx._kernel_size, ctx._padding, ctx._increasing_stride, True)
-        # d_coefficients, d_input = butterfly_conv2d_backward(grad, twiddle,
-            # output_and_intermediate, ctx._kernel_size, ctx._padding,
-            # ctx._increasing_stride, ctx._b_in, ctx._c_in, ctx._h_in, ctx._w_in)
         d_coefficients, d_input = butterfly_conv2d_forward_backward(twiddle,
             input, grad, ctx._kernel_size, ctx._padding, ctx._increasing_stride)
         return d_coefficients, d_input, None, None, None
@@ -558,6 +553,83 @@ class ButterflyMultConv2d(torch.autograd.Function):
 
 butterfly_mult_conv2d = ButterflyMultConv2d.apply if use_extension else butterfly_mult_conv2d_torch
 
+def bbt_mult_conv2d_torch(twiddle, input, kernel_size, padding):
+    """
+    Parameters:
+        twiddle: (nstack, nblocks * 2 * log n, n / 2, 2, 2) where n = c_in
+        input: (b_in, c_in, h_in, w_in)
+        kernel_size: int, size of convolution kernel, currently only supports square kernels
+        padding: amount of zero-padding around border of input
+    Returns:
+        output: (b_in * h_out * w_out, nstack, c_in)
+    """
+    n = input.size(1)
+    m = int(math.log2(n))
+    nblocks = twiddle.shape[1] // (2 * m)
+    assert nblocks * 2 * m == twiddle.shape[1], 'twiddle must have shape (nstack, nblocks * 2 * log n, n / 2, 2, 2)'
+
+    # unfold input to form the patches
+    b_in, c_in, h_in, w_in = input.shape
+    c_out = twiddle.size(0) // (kernel_size * kernel_size) * c_in
+    assert c_in == 1 << int(math.log2(c_in)), "currently requires c_in to be a power of 2"
+    assert c_out == 1 << int(math.log2(c_out)), "currently requires c_out to be a power of 2"
+    h_out = h_in + 2 * padding - (kernel_size - 1)
+    w_out = w_in + 2 * padding - (kernel_size - 1)
+    matrix_batch = kernel_size * kernel_size
+    c_out_ratio = c_out // c_in
+    assert c_out_ratio >= 1, "only tested for c_out >= c_in"
+    input_patches = F.unfold(input, kernel_size=kernel_size, dilation=1, padding=padding, stride=1).view(
+        b_in, c_in, kernel_size * kernel_size, h_out * w_out)
+    input_reshape = input_patches.permute(0, 3, 2, 1).reshape(b_in * h_out * w_out, matrix_batch, c_in)
+    input_reshape = input_reshape.unsqueeze(2).expand(b_in * h_out * w_out, matrix_batch, c_out_ratio, c_in)
+    input_reshape = input_reshape.reshape(b_in * h_out * w_out, matrix_batch * c_out_ratio, c_in)
+    output = input_reshape
+    # perform matrix multiply
+    for t in twiddle.chunk(nblocks, dim=1):
+        output = butterfly_mult_untied_torch(t[:, :m].flip(1), output, False)
+        output = butterfly_mult_untied_torch(t[:, m:], output, True)
+    return output
+
+class BbtMultConv2d(torch.autograd.Function):
+    # For fused unfolding, n <= 1024, CUDA only, real only
+    # Assumes dilation=1, stride=1, and square kernels
+
+    @staticmethod
+    def forward(ctx, twiddle, input, kernel_size, padding):
+        """
+        Parameters:
+            twiddle: (nstack, nblocks * 2 * log n, n / 2, 2, 2) where n = c_in
+            input: (b_in, c_in, h_in, w_in)
+            kernel_size: int, size of convolution kernel, currently only supports square kernels
+            padding: amount of zero-padding around border of input
+        Returns:
+            output: (b_in * h_out * w_out, nstack, c_in)
+        """
+        output = bbt_conv2d(twiddle, input, kernel_size, padding)
+        ctx.save_for_backward(twiddle, input)
+        ctx._kernel_size = kernel_size
+        ctx._padding = padding
+        return output
+
+    @staticmethod
+    def backward(ctx, grad):
+        """
+        Parameters:
+            grad: (b_in * h_out * w_out, cin/cout * nstack, c_out)
+            twiddle: (nstack, nblocks * 2 * log n, n / 2, 2, 2) where n = c_in
+            output + intermediate values for backward: (log n + 1, b_in * h_out * w_out,
+                                                cin/cout * nstack, c_out)
+        Return:
+            d_twiddle: (nstack, nblocks * 2 * log n, n / 2, 2, 2)
+            d_input: (b_in, c_in, h_in, w_in)
+        """
+        twiddle, input = ctx.saved_tensors
+        d_coefficients, d_input = bbt_conv2d_forward_backward(twiddle,
+            input, grad, ctx._kernel_size, ctx._padding)
+        return d_coefficients, d_input, None, None, None
+        # Autograd requires 5 gradients
+
+bbt_mult_conv2d = BbtMultConv2d.apply if use_extension else bbt_mult_conv2d_torch
 
 def butterfly_mult_conv2d_svd_torch(twiddle, input, kernel_size, padding, increasing_stride=True, return_intermediates=False):
     """

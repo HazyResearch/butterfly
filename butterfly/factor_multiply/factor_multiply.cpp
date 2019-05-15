@@ -29,6 +29,13 @@ void bbt_ortho_multiply_untied_cuda(const at::Tensor& twiddle_cos, const at::Ten
                                     const at::Tensor& input, at::Tensor& output);
 void bbt_ortho_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle_cos, const at::Tensor& twiddle_sin, const at::Tensor& input,
                                                      const at::Tensor& grad, at::Tensor& d_twiddle, at::Tensor& d_input);
+void bbt_conv2d_cuda(const at::Tensor& twiddle, const at::Tensor& input,          at::Tensor& output, const int kernel_size, const int padding,
+  const int h_out, const int w_out);
+void bbt_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
+  const at::Tensor& input, const at::Tensor& grad,
+  at::Tensor& d_twiddle, at::Tensor& d_input,
+  const int kernel_size, const int padding,
+  const int h_out, const int w_out);
 void butterfly_conv2d_cuda(const at::Tensor& twiddle, const at::Tensor& input, at::Tensor& output,
                            const int kernel_size, const int padding, const int h_out,
                            const int w_out, bool increasing_stride, bool return_intermediates);
@@ -1246,6 +1253,85 @@ std::vector<at::Tensor> bbt_ortho_multiply_untied_forward_backward(const at::Ten
   return {d_twiddle, d_input} ;
 }
 
+at::Tensor bbt_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
+  const size_t kernel_size, const size_t padding) {
+  /* Specialized implementation for n <= 1024, CUDA only, real only, probably float only (no double, not sure).
+     Do both the forward and the backward pass. //
+     Hopefully this is the fastest implementation.
+     Parameters:
+         twiddle: (nstack, nblocks * 2 * log n, n/2, 2, 2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2, ....
+         input: (b_in, c_in, h_in, w_in)
+     Returns:
+        output: (batch_size, nstack, n) where b_in * h_out * w_out, n = c_in
+  */
+  const auto nstack = twiddle.size(0);
+  const auto n = input.size(1); // c_in
+  const auto b_in = input.size(0);
+  const auto h = input.size(2);
+  const auto w = input.size(3);
+  AT_CHECK(n <= 1024, "bbt_conv2d: only supports n <= 1024");
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
+  int64_t h_out = h + 2 * padding - (kernel_size - 1);
+  int64_t w_out = w + 2 * padding - (kernel_size - 1);
+  AT_CHECK(nblocks <= 14, "bbt_conv2d: nblocks must be <= 14");
+  AT_CHECK(twiddle.dim() == 5 && input.dim() == 4,
+           "bbt_conv2d: twiddle, and input, must have dimension 5,4");
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(input);
+  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  AT_CHECK(twiddle.size(2) == n / 2, "bbt_conv2d: twiddle must have shape (nstack, nblocks * 2 * log n, n/2)");
+  auto output = torch::zeros({b_in*h_out*w_out, nstack, n},
+    torch::dtype(input.dtype()).device(input.device()));
+  AT_CHECK(input.is_cuda(), "bbt_conv2d: only supports CUDA");
+  bbt_conv2d_cuda(twiddle, input, output, kernel_size, padding, h_out, w_out);
+  return output;
+}
+
+std::vector<at::Tensor> bbt_conv2d_forward_backward(const at::Tensor& twiddle,    const at::Tensor& input, const at::Tensor& grad, const size_t kernel_size,      const size_t padding) {
+   /* Specialized implementation for n <= 1024, CUDA only, real only, probably float only (no double, not sure).
+     Do both the forward and the backward pass. //
+     Hopefully this is the fastest implementation.
+     Parameters:
+         twiddle: (nstack, nblocks * 2 * log n, n/2, 2, 2), arrange with stride n/2, n/4, ..., 2, 1, 1, 2, ..., n/4, n/2, ....
+         input: (b_in, c_in, h_in, w_in)
+         grad: (batch_size, nstack, n) where b_in * h_out * w_out, n = c_in
+         kernel_size: int, size of convolution kernel, currently only supports square kernels
+         padding: amount of zero-padding around border of input
+     Returns:
+         d_twiddle: (nstack, nblocks * 2 * log n, n / 2, 2, 2)
+         d_input: (b_in, c_in, h_in, w_in)
+  */
+  const int64_t b_in = input.size(0);
+  const int64_t c_in = input.size(1);
+  const int64_t n = c_in; // rename to be consistent with dimension of butterfly
+  const int64_t h_in = input.size(2);
+  const int64_t w_in = input.size(3);
+  const int64_t h_out = h_in + 2 * padding - (kernel_size - 1);
+  const int64_t w_out = w_in + 2 * padding - (kernel_size - 1);
+  const int64_t nstack = grad.size(1);
+  const int log_n = int(log2((double) n));
+  const int64_t nblocks = twiddle.size(1) / (2 * log_n);
+  AT_CHECK(n <= 1024, "bbt_conv2d_forward_backward: only supports n <= 1024");
+  AT_CHECK(twiddle.dim() == 5 && input.dim() == 4 && grad.dim() == 3,
+           "bbt_conv2d_forward_backward: twiddle, input, and grad must have dimension 5,4,3");
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(input);
+  CHECK_DEVICE(grad);
+  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
+  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == nblocks * 2 * log_n
+    && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
+     "bbt_conv2d_forward_backward: twiddle must have shape (nstack, nblocks * 2 * log n, n/2, 2, 2)");
+  auto d_twiddle = torch::zeros_like(twiddle);
+  auto d_input = torch::zeros({b_in, c_in, h_in, w_in},
+    torch::dtype(grad.dtype()).device(grad.device()));
+  AT_CHECK(input.is_cuda(), "bbt_conv2d_forward_backward: only supports CUDA");
+  bbt_conv2d_forward_backward_cuda(twiddle, input, grad, d_twiddle,
+                                         d_input, kernel_size,
+                                         padding, h_out, w_out);
+  return {d_twiddle, d_input} ;
+}
+
 at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   const size_t kernel_size, const size_t padding, bool increasing_stride,
   bool return_intermediates) {
@@ -1287,7 +1373,7 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   if (!return_intermediates) {
     output = output.expand({log_n + 1, b_in*h_out*w_out, bstack, c_in});
   }
-  butterfly_conv2d_cuda(twiddle, input, output, kernel_size, padding, h_out, w_out, increasing_stride, return_intermediates);
+  butterfly_conv2d_cuda(twiddle, input, output, kernel_size, padding, h_out,    w_out, increasing_stride, return_intermediates);
   return return_intermediates ? output : output[-1];
 }
 
@@ -2034,13 +2120,13 @@ void complex_to_real_strides(at::Tensor& x) {
   }
 }
 
-// #define COMPLEX_ACCESSOR(x, dim, name)           \
-//   real_to_complex_strides(x); \
-//   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(x.scalar_type(), name [&] { \
-//     auto ptr = reinterpret_cast<std::complex<scalar_t>*>(x.data<scalar_t>()); \
-//     return at::TensorAccessor<std::complex<scalar_t>, dim>(ptr, x.sizes().data(), x.strides().data()); \
-//   })
-
+/* #define COMPLEX_ACCESSOR(x, dim, name)           \
+  real_to_complex_strides(x); \
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(x.scalar_type(), name [&] { \
+    auto ptr = reinterpret_cast<std::complex<scalar_t>*>(x.data<scalar_t>()); \
+    return at::TensorAccessor<std::complex<scalar_t>, dim>(ptr, x.sizes().data(), x.strides().data()); \
+  })
+*/
 void complex_test(at::Tensor& input) {
   auto ptr = reinterpret_cast<std::complex<float>*>(input.data<float>());
   ptr[0] = std::complex<float>(0.0, 0.0);
@@ -2049,10 +2135,11 @@ void complex_test(at::Tensor& input) {
   // int64_t strides[1] = {input.stride(0)};
   // auto input_a = at::TensorAccessor<std::complex<float>, 1>(ptr, input.sizes().data(), input.strides().data());
   real_to_complex_strides(input);
-  // auto input_a = AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), name [&] {
-  //   auto ptr = reinterpret_cast<std::complex<scalar_t>*>(input.data<scalar_t>()); \
-  //   return at::TensorAccessor<std::complex<scalar_t>, 1>(ptr, input.sizes().data(), input.strides().data());
-  // });
+  /*
+  auto input_a = AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), name [&] {
+    auto ptr = reinterpret_cast<std::complex<scalar_t>*>(input.data<scalar_t>()); \
+    return at::TensorAccessor<std::complex<scalar_t>, 1>(ptr, input.sizes().data(), input.strides().data());
+  });*/
   complex_to_real_strides(input);
 }
 
@@ -2074,6 +2161,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("bbt_multiply_untied_forward_backward", &bbt_multiply_untied_forward_backward, "Bbt multiply untied forward+backward");
   m.def("bbt_ortho_multiply_untied", &bbt_ortho_multiply_untied, "Bbt_Ortho multiply untied forward");
   m.def("bbt_ortho_multiply_untied_forward_backward", &bbt_ortho_multiply_untied_forward_backward, "Bbt_Ortho multiply untied forward+backward");
+  m.def("bbt_conv2d", &bbt_conv2d, "Bbt conv2d forward");
+  m.def("bbt_conv2d_forward_backward", &bbt_conv2d_forward_backward, "Bbt conv2d forward+backward");
   m.def("butterfly_conv2d", &butterfly_conv2d, "Butterfly conv2d forward");
   m.def("butterfly_conv2d_backward", &butterfly_conv2d_backward, "Butterfly conv2d backward");
   m.def("butterfly_conv2d_forward_backward", &butterfly_conv2d_forward_backward, "Butterfly conv2d forward backward");
