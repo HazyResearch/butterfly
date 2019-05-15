@@ -64,4 +64,4 @@ python cifar_experiment.py with ntrials=3 model=ShuffleNet optimizer=SGD nmaxepo
 
 # Low-rank Conv2d
 # p100-template-3
-python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=1 model_args.structure_type=LR optimizer=SGD nmaxepochs=200; python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=1 model_args.structure_type=LR optimizer=SGD nmaxepochs=200 && python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q

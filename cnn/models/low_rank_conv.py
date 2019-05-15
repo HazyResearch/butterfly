@@ -35,6 +35,7 @@ class LowRankConv2d(nn.Module):
 
     def forward(self, x):
         batch, c, h, w = x.shape
+        c_out = self.out_channels
         h_out = (h + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) // self.stride[0] + 1
         w_out = (h + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
         # unfold x into patches and call batch matrix multiply
@@ -44,7 +45,7 @@ class LowRankConv2d(nn.Module):
         output = x @ self.G.transpose(1, 2)
         output = output @ self.H.transpose(1, 2)
         # combine matrix batches
-        output = output.mean(dim=0).view(batch, h_out * w_out, c).transpose(1, 2).view(batch, c, h_out, w_out)
+        output = output.mean(dim=0).view(batch, h_out * w_out, c_out).transpose(1, 2).view(batch, c_out, h_out, w_out)
         if self.bias is not None:
             output = output + self.bias.unsqueeze(-1).unsqueeze(-1)
         return output
