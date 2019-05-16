@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 from butterfly import Butterfly
 from butterfly.butterfly import ButterflyBmm
-from butterfly.butterfly_multiply import butterfly_mult_conv2d, butterfly_mult_conv2d_svd
+from butterfly.butterfly_multiply import butterfly_mult_conv2d, butterfly_mult_conv2d_svd, bbt_mult_conv2d
 
 import math
 
@@ -50,10 +50,12 @@ class ButterflyConv2d(ButterflyBmm):
         max_gain: (only for svd parameterization) controls the maximum and minimum singular values
             of the whole matrix (not of each factor).
             For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
+        nblocks: number of (BB^T) blocks. If 0, it's just a butterfly. If > 0, ignore @increasing_stride.
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True,
                  tied_weight=True, increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
+                 nblocks=0,
                  fused_unfold=True):
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -63,7 +65,7 @@ class ButterflyConv2d(ButterflyBmm):
         self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
         self.fused_unfold = fused_unfold
         super().__init__(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False,
-                         tied_weight, increasing_stride, ortho_init, param, max_gain)
+                         tied_weight, increasing_stride, ortho_init, param, max_gain, nblocks=nblocks)
 
     def forward(self, input):
         """
@@ -86,8 +88,11 @@ class ButterflyConv2d(ButterflyBmm):
         else:
             batch_out = batch * h_out * w_out
             if self.param == 'regular':
-                output = butterfly_mult_conv2d(self.twiddle, input, self.kernel_size[0],
-                    self.padding[0], self.increasing_stride)
+                if self.nblocks = 0:
+                    output = butterfly_mult_conv2d(self.twiddle, input, self.kernel_size[0],
+                        self.padding[0], self.increasing_stride)
+                else:
+                    output = bbt_mult_conv2d(self.twiddle, input, self.kernel_size[0], self.padding[0])
             elif self.param == 'ortho':
                 c, s = torch.cos(self.twiddle), torch.sin(self.twiddle)
                 twiddle = torch.stack((torch.stack((c, -s), dim=-1),

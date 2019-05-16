@@ -19,27 +19,23 @@ from .low_rank_conv import LowRankConv2d
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1, is_structured=False, structure_type='B', nblocks=1, param='regular'):
+    def __init__(self, in_planes, planes, stride=1, is_structured=False, structure_type='B', nblocks=0, param='regular'):
         super(BasicBlock, self).__init__()
         if is_structured:
             if structure_type == 'B':
-                self.conv1 = ButterflyConv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False, tied_weight=False, ortho_init=True, param=param)
-            elif structure_type == 'BBT':
-                self.conv1 = ButterflyConv2dBBT(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False, nblocks=nblocks, tied_weight=False, ortho_init=True, param=param)
+                self.conv1 = ButterflyConv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False, tied_weight=False, ortho_init=True, param=param, nblocks=nblocks)
             elif structure_type == 'LR':
                 # Low rank should match the number of parameters of butterfly
-                rank = int(math.log2(planes))
+                rank = int(math.log2(planes)) if nblocks == 0 else nblocks * 2 * int(math.log2(planes))
                 self.conv1 = LowRankConv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False, rank=rank)
         else:
             self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
         if is_structured:
             if structure_type == 'B':
-                self.conv2 = ButterflyConv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False, tied_weight=False, ortho_init=True, param=param)
-            elif structure_type == 'BBT':
-                self.conv2 = ButterflyConv2dBBT(planes, planes, kernel_size=3, stride=1, padding=1, bias=False, nblocks=nblocks, tied_weight=False, ortho_init=True, param=param)
+                self.conv2 = ButterflyConv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False, tied_weight=False, ortho_init=True, param=param, nblocks=nblocks)
             elif structure_type == 'LR':
-                rank = int(math.log2(planes))
+                rank = int(math.log2(planes)) if nblocks == 0 else nblocks * 2 * int(math.log2(planes))
                 self.conv2 = LowRankConv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False, rank=rank)
         else:
             self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
@@ -49,11 +45,9 @@ class BasicBlock(nn.Module):
         if stride != 1 or in_planes != self.expansion*planes:
             if is_structured:
                 if structure_type == 'B':
-                    b = ButterflyConv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False, tied_weight=False, ortho_init=True, param=param)
-                elif structure_type == 'BBT':
-                    b = ButterflyConv2dBBT(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False, nblocks=nblocks, tied_weight=False, ortho_init=True, param=param)
+                    b = ButterflyConv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False, tied_weight=False, ortho_init=True, param=param, nblocks=nblocks)
                 elif structure_type == 'LR':
-                    rank = int(math.log2(self.expansion * planes))
+                    rank = int(math.log2(self.expansion * planes)) if nblocks == 0 else nblocks * 2 * int(math.log2(self.expansion * planes))
                     b = LowRankConv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False, rank=rank)
                 self.shortcut = nn.Sequential(
                     b,
@@ -102,9 +96,9 @@ class Bottleneck(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10, num_structured_layers=0, structure_type='B', nblocks=1, param='regular'):
+    def __init__(self, block, num_blocks, num_classes=10, num_structured_layers=0, structure_type='B', nblocks=0, param='regular'):
         assert num_structured_layers <= 4
-        assert structure_type in ['B', 'BBT', 'BBTBBT', 'LR']
+        assert structure_type in ['B', 'LR']
         super(ResNet, self).__init__()
         self.is_structured = [False] * (4 - num_structured_layers) + [True] * num_structured_layers
         self.in_planes = 64
@@ -117,10 +111,10 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2, is_structured=self.is_structured[2],
                                        structure_type=structure_type, nblocks=nblocks, param=param)
         self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2, is_structured=self.is_structured[3],
-                                       structure_type=structure_type if structure_type == 'LR' else 'B')
+                                       structure_type=structure_type)
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
-    def _make_layer(self, block, planes, num_blocks, stride, is_structured, structure_type='B', nblocks=1, param='regular'):
+    def _make_layer(self, block, planes, num_blocks, stride, is_structured, structure_type='B', nblocks=0, param='regular'):
         strides = [stride] + [1]*(num_blocks-1)
         layers = []
         for stride in strides:
@@ -141,7 +135,7 @@ class ResNet(nn.Module):
         return out
 
 
-def ResNet18(num_structured_layers=0, structure_type='B', nblocks=1, param='regular'):
+def ResNet18(num_structured_layers=0, structure_type='B', nblocks=0, param='regular'):
     return ResNet(BasicBlock, [2,2,2,2], num_structured_layers=num_structured_layers,
                   structure_type=structure_type, nblocks=nblocks, param=param)
 
