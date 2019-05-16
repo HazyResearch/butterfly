@@ -167,11 +167,11 @@ def default_config():
     workers = 4
     dataset = 'imagenet'
     teacher_model = 'resnet18'
-
+    iters = 1
 
 @ex.capture
 def distillation_experiment(model, model_args, optimizer,
-    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model, dataset):
+    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model, dataset, iters):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -195,7 +195,7 @@ def distillation_experiment(model, model_args, optimizer,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
-        stop={"training_iteration": 10},
+        stop={"training_iteration": iters},
         config=config,
     )
     return experiment
