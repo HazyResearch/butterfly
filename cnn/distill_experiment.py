@@ -26,8 +26,11 @@ from ray.tune.schedulers import AsyncHyperBandScheduler
 import model_utils
 import dataset_utils
 
-import models.resnet_imagenet as models # only use imagenet models
+import models.resnet_imagenet as imagenet_models # only use imagenet models
+import models
+
 from models.butterfly_conv import ButterflyConv2d, ButterflyConv2dBBT
+from models.low_rank_conv import LowRankConv2d
 
 class TrainableModel(Trainable):
     """Trainable object for a Pytorch model, to be used with Ray's Hyperband tuning.
@@ -42,7 +45,14 @@ class TrainableModel(Trainable):
             torch.cuda.manual_seed(config['seed'])
         self.layer = model_args['layer']
         # make butterfly
-        teacher_model = models.__dict__[config['teacher_model']]()
+        if config['dataset'] == 'cifar10':
+            teacher_model = models.__dict__[config['teacher_model']]()
+        elif config['dataset'] == 'imagenet':
+            teacher_model = imagenet_models.__dict__[config['teacher_model']]()
+
+        modules = set([name for name, _ in teacher_model.named_modules()])
+        assert model_args['layer'] in modules, f"{model_args['layer']} not in network"
+
         # get parameters from layer to replace to use in butterfly
         for name, module in teacher_model.named_modules():
             if name == model_args['layer']:
@@ -54,18 +64,29 @@ class TrainableModel(Trainable):
                     padding = module.padding
                 except:
                     raise ValueError("Only convolutional layers currently supported.")
+
         # create butterfly for specific layer and train
         if model_args['structure_type'] == 'B':
-            butterfly = ButterflyConv2d(in_channels, out_channels,
+            structured_layer = ButterflyConv2d(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, tied_weight=False, ortho_init=True,
                 param=model_args['param'])
         elif model_args['structure_type'] == 'BBT' or model_args['nblocks'] > 1:
-            butterfly = ButterflyConv2dBBT(in_channels, out_channels,
+            structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, nblocks=model_args['nblocks'], tied_weight=False,
                 ortho_init=True, param=model_args['param'])
-        self.model = butterfly.to(device)
+        elif model_args['structure_type'] == 'LR':
+            assert out_channels >= in_channels, "Out channels < in channels"
+            if model_args['nblocks'] == 0:
+                rank = int(math.log2(out_channels))
+            else:
+                rank = int(math.log2(out_channels)) * model_args['nblocks'] * 2
+            structured_layer =  LowRankConv2d(in_channels, out_channels,
+                kernel_size=kernel_size, stride=stride, padding=padding,
+                bias=False, rank=rank)
+
+        self.model = structured_layer.to(device)
 
         def load_teacher(traindir):
             teacher_input, teacher_output = dataset_utils.get_mmap_files(traindir, self.layer)
@@ -77,9 +98,9 @@ class TrainableModel(Trainable):
         # load activations
         self.train_loader = load_teacher(config['train_dir'])
         if config['optimizer'] == 'Adam':
-            self.optimizer = optim.Adam(butterfly.parameters(), lr=config['lr'])
+            self.optimizer = optim.Adam(structured_layer.parameters(), lr=config['lr'])
         else:
-            self.optimizer = optim.SGD(butterfly.parameters(), lr=config['lr'])
+            self.optimizer = optim.SGD(structured_layer.parameters(), lr=config['lr'])
 
     def _train_iteration(self):
         self.model.train()
@@ -123,7 +144,7 @@ class TrainableModel(Trainable):
         self.optimizer.load_state_dict(checkpoint['optimizer'])
 
 
-ex = Experiment('Imagenet_distillation_experiment')
+ex = Experiment('Distillation_experiment')
 ex.observers.append(FileStorageObserver.create('logs'))
 slack_config_path = Path('../config/slack.json')  # Add webhook_url there for Slack notification
 if slack_config_path.exists():
@@ -140,15 +161,17 @@ def default_config():
     ntrials = 8  # Number of trials for hyperparameter tuning
     nmaxepochs = 10  # Maximum number of epochs
     result_dir = project_root + '/cnn/ray_results'  # Directory to store results
-    train_dir = '/distillation/resnet18/activations'
+    train_dir = '/distillation/imagenet/activations'
     cuda = torch.cuda.is_available()  # Whether to use GPU
     smoke_test = False  # Finish quickly for testing
     workers = 4
+    dataset = 'imagenet'
+    teacher_model = 'resnet18'
 
 
 @ex.capture
-def imagenet_distillation_experiment(model, model_args, optimizer,
-    ntrials, result_dir, train_dir, workers, cuda, smoke_test):
+def distillation_experiment(model, model_args, optimizer,
+    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model, dataset):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -157,13 +180,14 @@ def imagenet_distillation_experiment(model, model_args, optimizer,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
-        'teacher_model': 'resnet18',
+        'teacher_model': teacher_model,
         'train_dir': train_dir,
-        'workers': workers
+        'workers': workers,
+        'dataset': dataset
      }
     model_args_print = '_'.join([f'{key}_{value}' for key,value in model_args.items()])
     experiment = RayExperiment(
-        name=f'imagenet_{model}_{model_args_print}_{optimizer}',
+        name=f'{model}_{model_args_print}_{optimizer}',
         run=TrainableModel,
         local_dir=result_dir,
         num_samples=ntrials,
@@ -171,7 +195,7 @@ def imagenet_distillation_experiment(model, model_args, optimizer,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
-        stop={"training_iteration": 1},
+        stop={"training_iteration": 10},
         config=config,
     )
     return experiment
@@ -179,15 +203,14 @@ def imagenet_distillation_experiment(model, model_args, optimizer,
 
 @ex.automain
 def run(model, result_dir, nmaxepochs):
-    experiment = imagenet_distillation_experiment()
+    experiment = distillation_experiment()
     try:
         with open('../config/redis_address', 'r') as f:
             address = f.read().strip()
             ray.init(redis_address=address)
     except:
         ray.init()
-    # ahb = AsyncHyperBandScheduler(reward_attr='inverse_loss', max_t=nmaxepochs)
-    trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
+    trials = ray.tune.run(experiment, raise_on_failed_trial=True, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     loss = [trial.last_result.get('mean_loss', float('inf')) for trial in trials]
 
