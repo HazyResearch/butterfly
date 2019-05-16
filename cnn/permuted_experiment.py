@@ -43,9 +43,12 @@ class TrainableModel(Trainable):
 
         self.model = model_utils.get_model(config['model'])
         # restore permutation
-        # if config['restore_perm'] is not None:
-        #     self.model.permute.load_state_dict(torch.load(config['restore_perm']))
-        self.model.to(device)
+        if config['restore_perm'] is not None:
+            # checkpoint = torch.load(config['restore_perm'], self.device)
+            checkpoint = torch.load(config['restore_perm'])
+            self.model.permute = model_utils.get_model(checkpoint['model']['args'])
+            self.model.load_state_dict(checkpoint['model']['state'])
+        self.model.to(self.device)
 
         self.train_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
         permutation_params = filter(lambda p: hasattr(p, '_is_perm_param') and p._is_perm_param, self.model.parameters())
@@ -288,9 +291,10 @@ def default_config():
     anneal_ent_max = 0.0
     anneal_sqrt = False
     entropy_p = None
-    restore_perm = None
     temp_min = 1.0
     temp_max = 1.0
+    restore_perm = None
+    resume_pth = None
 
 
 @ex.named_config
@@ -302,11 +306,12 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, pwd_min, pwd_max, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, restore_perm, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt, entropy_p): # TODO clean up and set min,max to pairs/dicts
+def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, pwd_min, pwd_max, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt, entropy_p, restore_perm, resume_pth): # TODO clean up and set min,max to pairs/dicts
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
+    assert restore_perm is None or resume_pth is None # If we're fully resuming training from the checkpoint, no point in restoring any part of the model
     if restore_perm is not None:
         restore_perm = '/dfs/scratch1/albertgu/learning-circuits/cnn/saved_perms/' + restore_perm
-        print("RESTORING FROM", restore_perm)
+        print("Restoring permutation from", restore_perm)
 
     args_rand = args.copy()
     args_rand['temp'] = sample_from(lambda spec: math.exp(random.uniform(math.log(temp_min), math.log(temp_max))))
@@ -374,7 +379,7 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
         stop={"training_iteration": 1 if smoke_test else nmaxepochs, 'model_ent': 200, 'neg_ent': -5.0},
         # stop={"training_iteration": 1 if smoke_test else nmaxepochs},
-        restore=restore_perm,
+        restore=resume_pth,
         config=config,
     )
     return experiment
