@@ -31,10 +31,12 @@ class Butterfly(nn.Module):
         diag_constraint: whether to constrain the diagonal in ODO parameterization.
             None (no constraint), 'positive' (>= 0), 'bounded' (between [1/max_gain, max_gain]),
                 'square' (use sigma^2 parameterization instead)
+        expansion: the linear map is a sum of @expansion butterfly matrices
     """
 
     def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
-                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0, nblocks=0, diag_constraint=None):
+                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
+                 nblocks=0, diag_constraint=None, expansion=1):
         super().__init__()
         self.in_size = in_size
         m = int(math.ceil(math.log2(in_size)))
@@ -52,6 +54,8 @@ class Butterfly(nn.Module):
         assert diag_constraint in [None, 'positive', 'bounded', 'square']
         self.diag_constraint = diag_constraint
         self.max_gain = max_gain
+        self.expansion = expansion
+        self.nstack *= self.expansion
         if nblocks > 0:
             assert not tied_weight and not complex and param in ['regular', 'ortho', 'odo'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
         if tied_weight:
@@ -94,6 +98,11 @@ class Butterfly(nn.Module):
                 self.diag = nn.Parameter(torch.ones(self.nstack, size))
                 self.twiddle1._is_structured = True
                 self.diag._is_structured = True
+                if self.expansion > 1:  # Extra diagonals on the left and right
+                    self.diag_left = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
+                    self.diag_right = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
+                    self.diag_left._is_structured = True
+                    self.diag_right._is_structured = True
             elif param == 'svd':
                 assert not tied_weight, 'svd parameterization is only implemented for non-tied weight'
                 theta_phi = torch.rand(twiddle_core_shape + (2, )) * math.pi * 2
@@ -138,9 +147,13 @@ class Butterfly(nn.Module):
                     diag.clamp_(min=1 / self.max_gain, max=self.max_gain)
             elif self.diag_constraint == 'square':
                 diag = diag * diag
+            if self.expansion > 1:
+                output = output * self.diag_right
             output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
             output = output * diag
             output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
+            if self.expansion > 1:
+                output = output * self.diag_left
         elif self.param == 'svd':
             with torch.no_grad():  # Projected SGD
                 self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
@@ -164,11 +177,11 @@ class Butterfly(nn.Module):
         batch = output.shape[0]
         output = output.view((batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
-        if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
+        if (self.nstack * self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
             if not self.complex:
-                output = output.view(batch, self.in_size_extended // out_size_extended, out_size_extended).mean(dim=1)
+                output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).mean(dim=1)
             else:
-                output = output.view(batch, self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=1)
+                output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=1)
         if self.out_size != out_size_extended:  # Take top rows
             output = output[:, :self.out_size]
         if self.bias is not None:
@@ -179,8 +192,8 @@ class Butterfly(nn.Module):
             return output.view(*input.size()[:-1], self.out_size)
 
     def extra_repr(self):
-        s = 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}'.format(
-            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks
+        s = 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, expansion={}'.format(
+            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.expansion
         )
         if self.param == 'odo':
             s += ', diag_constraint={}'.format('none' if self.diag_constraint is None else self.diag_constraint)
@@ -214,18 +227,20 @@ class ButterflyBmm(Butterfly):
         diag_constraint: whether to constrain the diagonal in ODO parameterization.
             None (no constraint), 'positive' (>= 0), 'bounded' (between [1/max_gain, max_gain]),
                 'square' (use sigma^2 parameterization instead)
+        expansion: the linear map is a sum of @expansion butterfly matrices
     """
 
     def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False, tied_weight=True,
-                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0, nblocks=0, diag_constraint=None):
+                 increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
+                 nblocks=0, diag_constraint=None, expansion=1):
         m = int(math.ceil(math.log2(in_size)))
         in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
         nstack = int(math.ceil(out_size / in_size_extended))
         super().__init__(in_size_extended, in_size_extended * nstack * matrix_batch, bias, complex,
-                         tied_weight, increasing_stride, ortho_init, param, max_gain, nblocks, diag_constraint)
+                         tied_weight, increasing_stride, ortho_init, param, max_gain, nblocks, diag_constraint, expansion)
         self.in_size = in_size
         self.out_size = out_size
-        self.nstack = nstack
+        self.nstack = nstack * expansion
         self.matrix_batch = matrix_batch
         if self.bias is not None:
             with torch.no_grad():
@@ -247,11 +262,11 @@ class ButterflyBmm(Butterfly):
         batch = output.shape[0]
         output = output.view((batch, self.matrix_batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
-        if (self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
+        if (self.nstack * self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
             if not self.complex:
-                output = output.view(batch, self.matrix_batch, self.in_size_extended // out_size_extended, out_size_extended).mean(dim=2)
+                output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).mean(dim=2)
             else:
-                output = output.view(batch, self.matrix_batch, self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=2)
+                output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=2)
         if self.out_size != out_size_extended:  # Take top rows
             output = output[:, :, :self.out_size]
         return output if self.bias is None else output + self.bias
