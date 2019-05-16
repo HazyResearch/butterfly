@@ -22,7 +22,7 @@ import model_utils
 # perm_path = 'sinkhorn.was237'
 # method = 'sinkhorn'
 # perm_path = 'butterfly-samples16-anneal.63-temp.06-lr.0008'
-perm_path = 'T5.2'
+perm_path = 'T5.10000.model_optimizer.pth'
 method = 'butterfly'
 
 if __name__ == '__main__':
@@ -69,9 +69,14 @@ if __name__ == '__main__':
     # model.load_state_dict(torch.load(perm_path))
 
     # New version:
+    # saved_model = torch.load(perm_path)
+    # model = model_utils.get_model(saved_model['args'])
+    # model.load_state_dict(saved_model['state'])
+
+    # Newer version with full model optimizer:
     saved_model = torch.load(perm_path)
-    model = model_utils.get_model(saved_model['args'])
-    model.load_state_dict(saved_model['state'])
+    model = model_utils.get_model(saved_model['model']['args'])
+    model.load_state_dict(saved_model['model']['state'])
 
 
     # TODO: nsamples should be able to be passed into forward pass

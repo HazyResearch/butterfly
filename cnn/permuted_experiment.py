@@ -51,11 +51,11 @@ class TrainableModel(Trainable):
         permutation_params = filter(lambda p: hasattr(p, '_is_perm_param') and p._is_perm_param, self.model.parameters())
         unstructured_params = filter(lambda p: not (hasattr(p, '_is_perm_param') and p._is_perm_param), self.model.parameters())
         if config['optimizer'] == 'Adam':
-            self.optimizer = optim.Adam([{'params': permutation_params, 'weight_decay': 0.0, 'lr': config['plr']},
+            self.optimizer = optim.Adam([{'params': permutation_params, 'weight_decay': config['pwd'], 'lr': config['plr']},
                                          {'params': unstructured_params}],
                                         lr=config['lr'], weight_decay=config['weight_decay'])
         else:
-            self.optimizer = optim.SGD([{'params': permutation_params, 'weight_decay': 0.0, 'lr': config['plr']},
+            self.optimizer = optim.SGD([{'params': permutation_params, 'weight_decay': config['pwd'], 'lr': config['plr']},
                                         {'params': unstructured_params}],
                                        lr=config['lr'], momentum=0.9, weight_decay=config['weight_decay'])
         self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
@@ -270,8 +270,10 @@ def default_config():
     lr_decay = True  # Whether to use learning rate decay
     lr_decay_period = 18  # Period of learning rate decay
     plr_min = 1e-4
-    plr_max = 1e-2
+    plr_max = 1e-3
     weight_decay = False  # Whether to use weight decay
+    pwd_min = 1e-4
+    pwd_max = 5e-4
     ntrials = 20  # Number of trials for hyperparameter tuning
     nmaxepochs = 72  # Maximum number of epochs
     result_dir = project_root + '/cnn/results'  # Directory to store results
@@ -281,7 +283,7 @@ def default_config():
     batch = 128
     tv_norm = 2
     tv_p = 1
-    tv_sym = False
+    tv_sym = None
     anneal_ent_min = 0.0
     anneal_ent_max = 0.0
     anneal_sqrt = False
@@ -300,7 +302,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, restore_perm, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt, entropy_p): # TODO clean up and set min,max to pairs/dicts
+def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, pwd_min, pwd_max, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, restore_perm, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt, entropy_p): # TODO clean up and set min,max to pairs/dicts
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     if restore_perm is not None:
         restore_perm = '/dfs/scratch1/albertgu/learning-circuits/cnn/saved_perms/' + restore_perm
@@ -310,6 +312,13 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
     args_rand['temp'] = sample_from(lambda spec: math.exp(random.uniform(math.log(temp_min), math.log(temp_max))))
     # args_rand['samples'] = sample_from(lambda _: np.random.choice((8,16)))
     # args_rand['sig'] = sample_from(lambda _: np.random.choice(('BT1', 'BT4')))
+
+    # if tv_sym is None:
+    #     tv_sym = sample_from(lambda _: np.random.choice((True,False)))
+    # elif tv_sym:
+    #     tv_sym = sample_from(lambda _: np.random.choice((True)))
+    # else:
+    #     tv_sym = sample_from(lambda _: np.random.choice((False)))
 
     if anneal_ent_max == 0.0:
         anneal_entropy = 0.0
@@ -325,6 +334,7 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         'lr_decay_period': lr_decay_period,
         # 'weight_decay':  sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if weight_decay else 0.0,
         'weight_decay':    2e-4 if weight_decay else 0.0,
+        'pwd': sample_from(lambda spec: math.exp(random.uniform(math.log(pwd_min), math.log(pwd_max)))),
         'seed':            sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device':          'cuda' if cuda else 'cpu',
         'model':           {'name': model, 'args': args_rand},
@@ -333,10 +343,10 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         'dataset':         {'name': dataset, 'batch': batch},
         'unsupervised':    unsupervised,
         # 'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
-        'tv':              {'norm': 2, 'p': 1, 'sym': sample_from(lambda _: np.random.choice((True,False)))},
-        'anneal_entropy':  anneal_entropy,
+        'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': sample_from(lambda _: np.random.choice((True,False)))},
+        # 'anneal_entropy':  anneal_entropy,
         # 'anneal_entropy':  sample_from(lambda _: random.uniform(anneal_ent_min, anneal_ent_max)),
-        # 'anneal_entropy':  sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
+        'anneal_entropy':  0.0 if anneal_ent_max==0.0 else sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
         'anneal_sqrt':  anneal_sqrt,
         'entropy_p': entropy_p,
         'restore_perm': restore_perm,
@@ -345,7 +355,7 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
     commit_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip().decode('utf-8')
     experiment = RayExperiment(
         # name=f'pcifar10_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
-        name=f'{dataset.lower()}_{model}_{args}_{optimizer}_epochs_{nmaxepochs}_lr_decay_{lr_decay}_plr_{plr_min}-{plr_max}_tvsym_{tv_sym}_{timestamp}_{commit_id}',
+        name=f'{dataset.lower()}_{model}_{args}_{optimizer}_epochs_{nmaxepochs}_plr_{plr_min}-{plr_max}_{timestamp}_{commit_id}',
         # name=f'{dataset.lower()}_{model}_{args_orig}_{optimizer}_epochs_{nmaxepochs}_lr_decay_{lr_decay}_plr_{plr_min}-{plr_max}_tvsym_{tv_sym}_{timestamp}_{commit_id}',
         run=TrainableModel,
         local_dir=result_dir,
