@@ -71,7 +71,7 @@ class TrainableModel(Trainable):
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, tied_weight=False, ortho_init=True,
                 param=model_args['param'])
-        elif model_args['structure_type'] == 'BBT' or model_args['nblocks'] > 1:
+        elif model_args['structure_type'] == 'BBT':
             structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, nblocks=model_args['nblocks'], tied_weight=False,
@@ -175,7 +175,7 @@ def distillation_experiment(model, model_args, optimizer,
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1)) if optimizer == 'Adam'
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1)) if optimizer == 'Adam'
                                            else random.uniform(math.log(2e-3), math.log(1e-0)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
