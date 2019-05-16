@@ -18,8 +18,10 @@ import torch.optim
 import torch.utils.data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-import models.resnet_imagenet as models # only use imagenet models
+import models.resnet_imagenet as imagenet_models # only use imagenet models
+import models
 from models.butterfly_conv import ButterflyConv2d, ButterflyConv2dBBT
+from models.low_rank_conv import LowRankConv2d
 import logging
 import torch.utils.data as data_utils
 import torchvision.models as torch_models
@@ -31,7 +33,7 @@ model_names = sorted(name for name in models.__dict__
                      and callable(models.__dict__[name]))
 
 def get_parser():
-    parser = argparse.ArgumentParser(description='Learn butterfly mapping from pretrained input to output')
+    parser = argparse.ArgumentParser(description='Learn mapping from pretrained input to output for structured layer.')
     parser.add_argument('--output-dir', type=str, default=Path.cwd(), help='Directory to save logs and models.')
     parser.add_argument('--input-dir', type=str, default=Path.cwd(), help='Directory to load intermediates.')
     parser.add_argument('-j', '--workers', default=16, type=int, metavar='N',
@@ -48,29 +50,34 @@ def get_parser():
     parser.add_argument('--print-freq', '-p', default=10, type=int,
                         metavar='N', help='Print frequency (default: 10)')
     parser.add_argument('--decay-int', default=30, type=int, help='Decay LR by 10 every decay-int epochs')
-    parser.add_argument('--structure_type', default='B', type=str, choices=['B', 'BBT', 'BBTBBT'],
-                        help='Structure of butterflies')
-    parser.add_argument('--nblocks', default=1, type=int, help='Number of blocks for each butterfly')
+    parser.add_argument('--structure_type', default='B', type=str, choices=['B', 'BBT', 'LR'],
+                        help='Structure of matrices')
+    parser.add_argument('--nblocks', default=1, type=int, help='Number of blocks for the butterfly')
+    parser.add_argument('--rank', default=1, type=int, help='Rank for low-rank matrix')
     parser.add_argument('--param', default='regular', type=str, help='Parametrization of butterfly factors')
-    parser.add_argument('--layer', required=True, type=str, help='Layer to replace with butterfly')
-    parser.add_argument('--resume', type=str, help='Butterfly to continue distilling')
+    parser.add_argument('--layer', required=True, type=str, help='Layer to replace with a structured layer')
+    parser.add_argument('--resume', type=str, help='Structued layer to continue distilling')
     parser.add_argument('--tolerance', type=float, default=1e-4, help='Convergence tolerance to stop training')
+    parser.add_argument('--dataset', type=str, help='Dataset name for selecting correct model.', required=True)
     return parser
 
 args = get_parser().parse_args()
 os.makedirs(args.output_dir, exist_ok=True)
+if args.structure_type == 'LR':
+    file_tag = f'{args.output_dir}/structure_nlayers_{args.layer}_{args.structure_type}_rank_{args.rank}'
+else:
+    file_tag = f'{args.output_dir}/structure_nlayers_{args.layer}_{args.structure_type}_blocks_{args.nblocks}_{args.param}'
 logging.basicConfig(
 level=logging.INFO,
 handlers=[
     logging.StreamHandler(),
-    logging.FileHandler(f'{args.output_dir}/'
-                        f'butterfly_{args.layer}_{args.structure_type}'
-                        f'_{args.nblocks}_{args.param}.log', 'a')
+    logging.FileHandler(f'{file_tag}.log', 'a')
 ])
 logger = logging.getLogger()
 logger.info(args)
 
-def eval_student(butterfly, train_loader, criterion, epoch):
+def eval_student(structured_layer, train_loader, criterion, epoch):
+    structured_layer.eval()
     start = time.time()
     batch_time = AverageMeter()
     loss = 0
@@ -78,7 +85,7 @@ def eval_student(butterfly, train_loader, criterion, epoch):
         teacher_output = teacher_output.cuda()
         teacher_input = teacher_input.cuda()
         data_time = time.time() - start
-        student_output = butterfly(teacher_input)
+        student_output = structured_layer(teacher_input)
         loss += F.mse_loss(student_output, teacher_output).item()
         batch_time.update(time.time() - start)
         start = time.time()
@@ -87,15 +94,15 @@ def eval_student(butterfly, train_loader, criterion, epoch):
                 f'Training Loss: {training_loss:.5f}')
     return training_loss
 
-def train_student(butterfly, train_loader, criterion, optimizer, epoch):
-    butterfly.train()
+def train_student(structured_layer, train_loader, criterion, optimizer, epoch):
+    structured_layer.train()
     start = time.time()
     batch_time = AverageMeter()
     for i, (teacher_input, teacher_output) in enumerate(train_loader):
         teacher_output = teacher_output.cuda()
         teacher_input = teacher_input.cuda()
         data_time = time.time() - start
-        student_output = butterfly(teacher_input)
+        student_output = structured_layer(teacher_input)
         loss = criterion(student_output, teacher_output)
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -128,17 +135,23 @@ def load_teacher(traindir):
 
 def main():
     # load pretrained teacher model from torchvision
-    teacher_model = models.resnet18()
+    if args.dataset == 'cifar10':
+        teacher_model = models.ResNet18()
+    elif args.dataset == 'imagenet':
+        teacher_model = imagenet_models.resnet18()
 
     modules = set([name for name, _ in teacher_model.named_modules()])
     assert args.layer in modules, "Layer not in network"
 
     if args.resume:
-        butterfly = torch.load(args.resume)
-        logging.info("Loading existing butterfly.")
+        ckpt = torch.load(args.resume)
+        structured_layer = ckpt['model']
+        start_epoch = ckpt['epoch'] + 1
+        logging.info("Loading existing structured layer.")
 
     else:
-        logging.info("Creating new butterfly.")
+        logging.info("Creating new structured layer.")
+        start_epoch = 0
         # get parameters from layer to replace to use in butterfly
         for name, module in teacher_model.named_modules():
             if name == args.layer:
@@ -153,19 +166,22 @@ def main():
 
         # create butterfly for specific layer and train
         if args.structure_type == 'B':
-            butterfly = ButterflyConv2d(in_channels, out_channels,
+            structured_layer = ButterflyConv2d(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, tied_weight=False, ortho_init=True,
                 param=args.param)
         elif args.structure_type == 'BBT' or args.nblocks > 1:
-            butterfly = ButterflyConv2dBBT(in_channels, out_channels,
+            structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, nblocks=args.nblocks, tied_weight=False,
                 ortho_init=True, param=args.param)
+        elif args.structure_type == 'LR':
+            structured_layer =  LowRankConv2d(in_channels, out_channels, kernel_size=kernel_size,
+            stride=stride, padding=padding, bias=False, rank=args.rank)
         else:
-            raise ValueError("Invalid butterfly structure!")
+            raise ValueError("Invalid structure!")
 
-    butterfly.cuda()
+    structured_layer.cuda()
 
     # load data
     traindir = args.input_dir
@@ -173,17 +189,17 @@ def main():
 
     # define loss function (criterion) and optimizer
     criterion = nn.MSELoss().cuda()
-    # optimizer = torch.optim.SGD(butterfly.parameters(), lr=args.lr, momentum=args.momentum)
-    optimizer = torch.optim.Adam(butterfly.parameters(), lr=args.lr)
+    # optimizer = torch.optim.SGD(structured_layer.parameters(), lr=args.lr, momentum=args.momentum)
+    optimizer = torch.optim.Adam(structured_layer.parameters(), lr=args.lr)
     logger.info('Created optimizer')
 
-    ckpt_file = f'{args.output_dir}/butterfly_{args.layer}_{args.structure_type}_{args.nblocks}_{args.param}.pt'
+    ckpt_file = f'{file_tag}.pt'
     prev_training_loss = float('inf')
-    for epoch in range(args.epochs):
-        train_student(butterfly, train_loader, criterion, optimizer, epoch)
-        training_loss = eval_student(butterfly, train_loader, criterion, epoch)
-        # save butterfly weights to be loaded in weight surgery to pretrained model
-        torch.save(butterfly, ckpt_file)
+    for epoch in range(start_epoch, start_epoch + args.epochs):
+        train_student(structured_layer, train_loader, criterion, optimizer, epoch)
+        training_loss = eval_student(structured_layer, train_loader, criterion, epoch)
+        # save structured_layer weights to be loaded in weight surgery to pretrained model
+        torch.save({'model': structured_layer, 'epoch': epoch}, ckpt_file)
         # convergence condition
         if abs(prev_training_loss - training_loss) < args.tolerance:
             logging.info("Converged!")
