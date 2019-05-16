@@ -313,17 +313,23 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
     # args_rand['samples'] = sample_from(lambda _: np.random.choice((8,16)))
     # args_rand['sig'] = sample_from(lambda _: np.random.choice(('BT1', 'BT4')))
 
-    # if tv_sym is None:
-    #     tv_sym = sample_from(lambda _: np.random.choice((True,False)))
-    # elif tv_sym:
-    #     tv_sym = sample_from(lambda _: np.random.choice((True)))
-    # else:
-    #     tv_sym = sample_from(lambda _: np.random.choice((False)))
+    tv = {'norm': tv_norm, 'p': tv_p}
+    if tv_sym is 'true':
+        tv['sym'] = sample_from(lambda _: np.random.choice((True,)))
+    elif tv_sym is 'false':
+        tv['sym'] = sample_from(lambda _: np.random.choice((False,)))
+    elif tv_sym is 'random':
+        tv['sym'] = sample_from(lambda _: np.random.choice((True,False)))
+    else:
+        assert tv_sym is None, 'tv_sym must be true, false, or random'
+        tv['sym'] = False
 
     if anneal_ent_max == 0.0:
         anneal_entropy = 0.0
     else:
         anneal_entropy = sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
+
+    name_smoke_test = 'smoke_' if smoke_test else '' # for easy finding and deleting unimportant logs
     config={
         'optimizer': optimizer,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-2)) if optimizer == 'Adam'
@@ -343,7 +349,8 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         'dataset':         {'name': dataset, 'batch': batch},
         'unsupervised':    unsupervised,
         # 'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': tv_sym},
-        'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': sample_from(lambda _: np.random.choice((True,False)))},
+        # 'tv':              {'norm': tv_norm, 'p': tv_p, 'sym': sample_from(lambda _: np.random.choice((True,False)))},
+        'tv': tv if unsupervised else None,
         # 'anneal_entropy':  anneal_entropy,
         # 'anneal_entropy':  sample_from(lambda _: random.uniform(anneal_ent_min, anneal_ent_max)),
         'anneal_entropy':  0.0 if anneal_ent_max==0.0 else sample_from(lambda _: math.exp(random.uniform(math.log(anneal_ent_min), math.log(anneal_ent_max)))),
@@ -355,7 +362,7 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
     commit_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip().decode('utf-8')
     experiment = RayExperiment(
         # name=f'pcifar10_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
-        name=f'{dataset.lower()}_{model}_{args}_{optimizer}_epochs_{nmaxepochs}_plr_{plr_min}-{plr_max}_{timestamp}_{commit_id}',
+        name=f'{name_smoke_test}{dataset.lower()}_{model}_{args}_{optimizer}_epochs_{nmaxepochs}_plr_{plr_min}-{plr_max}_{timestamp}_{commit_id}',
         # name=f'{dataset.lower()}_{model}_{args_orig}_{optimizer}_epochs_{nmaxepochs}_lr_decay_{lr_decay}_plr_{plr_min}-{plr_max}_tvsym_{tv_sym}_{timestamp}_{commit_id}',
         run=TrainableModel,
         local_dir=result_dir,
