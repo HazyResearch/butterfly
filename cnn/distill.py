@@ -9,6 +9,7 @@ import argparse, shutil, time, warnings
 import subprocess
 from datetime import datetime
 from pathlib import Path
+import math
 import numpy as np
 import torch
 from torch.autograd import Variable
@@ -53,20 +54,17 @@ def get_parser():
     parser.add_argument('--structure_type', default='B', type=str, choices=['B', 'BBT', 'LR'],
                         help='Structure of matrices')
     parser.add_argument('--nblocks', default=1, type=int, help='Number of blocks for the butterfly')
-    parser.add_argument('--rank', default=1, type=int, help='Rank for low-rank matrix')
     parser.add_argument('--param', default='regular', type=str, help='Parametrization of butterfly factors')
     parser.add_argument('--layer', required=True, type=str, help='Layer to replace with a structured layer')
     parser.add_argument('--resume', type=str, help='Structued layer to continue distilling')
     parser.add_argument('--tolerance', type=float, default=1e-4, help='Convergence tolerance to stop training')
     parser.add_argument('--dataset', type=str, help='Dataset name for selecting correct model.', required=True)
+    parser.add_argument('--size', action='store_true', help='Return the size of the weights')
     return parser
 
 args = get_parser().parse_args()
 os.makedirs(args.output_dir, exist_ok=True)
-if args.structure_type == 'LR':
-    file_tag = f'{args.output_dir}/structure_nlayers_{args.layer}_{args.structure_type}_rank_{args.rank}'
-else:
-    file_tag = f'{args.output_dir}/structure_nlayers_{args.layer}_{args.structure_type}_blocks_{args.nblocks}_{args.param}'
+file_tag = f'{args.output_dir}/structure_nlayers_{args.layer}_{args.structure_type}_blocks_{args.nblocks}_{args.param}'
 logging.basicConfig(
 level=logging.INFO,
 handlers=[
@@ -176,10 +174,23 @@ def main():
                 bias=False, nblocks=args.nblocks, tied_weight=False,
                 ortho_init=True, param=args.param)
         elif args.structure_type == 'LR':
+            if args.nblocks == 0:
+                rank = int(math.log2(out_channels))
+            else:
+                rank = int(math.log2(out_channels))*args.nblocks * 2
             structured_layer =  LowRankConv2d(in_channels, out_channels, kernel_size=kernel_size,
-                stride=stride, padding=padding, bias=False, rank=args.rank)
+                stride=stride, padding=padding, bias=False, rank=rank)
+            print("HERE")
         else:
             raise ValueError("Invalid structure!")
+
+    if args.size:
+        total_elems= 0
+        for p in structured_layer.parameters():
+            total_elems += p.numel()
+            logging.info(p.size())
+        logging.info(f"Number of elements: {total_elems}")
+        return
 
     structured_layer.cuda()
 
@@ -190,6 +201,7 @@ def main():
     # define loss function (criterion) and optimizer
     criterion = nn.MSELoss().cuda()
     # optimizer = torch.optim.SGD(structured_layer.parameters(), lr=args.lr, momentum=args.momentum)
+
     optimizer = torch.optim.Adam(structured_layer.parameters(), lr=args.lr)
     logger.info('Created optimizer')
 

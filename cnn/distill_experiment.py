@@ -175,7 +175,7 @@ def distillation_experiment(model, model_args, optimizer,
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-1)) if optimizer == 'Adam'
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1)) if optimizer == 'Adam'
                                            else random.uniform(math.log(2e-3), math.log(1e-0)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
