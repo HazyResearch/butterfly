@@ -32,11 +32,13 @@ class Butterfly(nn.Module):
             None (no constraint), 'positive' (>= 0), 'bounded' (between [1/max_gain, max_gain]),
                 'square' (use sigma^2 parameterization instead)
         expansion: the linear map is a sum of @expansion butterfly matrices
+        diag_init: whether to initialize the diagonal in ODO with 1, or N(0, 1)
+            'one', or 'normal'
     """
 
     def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
                  increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
-                 nblocks=0, diag_constraint=None, expansion=1):
+                 nblocks=0, diag_constraint=None, expansion=1, diag_init='one'):
         super().__init__()
         self.in_size = in_size
         m = int(math.ceil(math.log2(in_size)))
@@ -55,6 +57,7 @@ class Butterfly(nn.Module):
         self.diag_constraint = diag_constraint
         self.max_gain = max_gain
         self.expansion = expansion
+        self.diag_init = diag_init
         self.nstack *= self.expansion
         if nblocks > 0:
             assert not tied_weight and not complex and param in ['regular', 'ortho', 'odo'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
@@ -95,7 +98,10 @@ class Butterfly(nn.Module):
                 assert not tied_weight and not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 self.twiddle1 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
-                self.diag = nn.Parameter(torch.ones(self.nstack, size))
+                if diag_init == 'normal':
+                    self.diag = nn.Parameter(torch.randn(self.nstack, size))
+                else:
+                    self.diag = nn.Parameter(torch.ones(self.nstack, size))
                 self.twiddle1._is_structured = True
                 self.diag._is_structured = True
                 if self.expansion > 1:  # Extra diagonals on the left and right
@@ -272,8 +278,8 @@ class ButterflyBmm(Butterfly):
         return output if self.bias is None else output + self.bias
 
     def extra_repr(self):
-        s = 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}'.format(
-            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks
+        s = 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, diag_init={}'.format(
+            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.diag_init
         )
         if self.param == 'odo':
             s += ', diag_constraint={}'.format('none' if self.diag_constraint is None else self.diag_constraint)
