@@ -141,7 +141,7 @@ def main():
         teacher_model = imagenet_models.resnet18()
 
     modules = set([name for name, _ in teacher_model.named_modules()])
-    assert args.layer in modules, "Layer not in network"
+    assert args.layer in modules, f"{args.layer} not in network"
 
     if args.resume:
         ckpt = torch.load(args.resume)
@@ -177,7 +177,7 @@ def main():
                 ortho_init=True, param=args.param)
         elif args.structure_type == 'LR':
             structured_layer =  LowRankConv2d(in_channels, out_channels, kernel_size=kernel_size,
-            stride=stride, padding=padding, bias=False, rank=args.rank)
+                stride=stride, padding=padding, bias=False, rank=args.rank)
         else:
             raise ValueError("Invalid structure!")
 
