@@ -22,14 +22,36 @@ import model_utils
 # perm_path = 'sinkhorn.was237'
 # method = 'sinkhorn'
 # perm_path = 'butterfly-samples16-anneal.63-temp.06-lr.0008'
-perm_path = 'T5.10000.model_optimizer.pth'
+# perm_path = 'T5.10000.model_optimizer.pth'
+perm_path = 'T5.wd.10000.model_optimizer.pth'
 method = 'butterfly'
 
 if __name__ == '__main__':
-    original_dataset = {'name': 'PPCIFAR10', 'batch': 8, 'transform': 'original'}
-    permuted_dataset = {'name': 'PPCIFAR10', 'batch': 8, 'transform': 'permute'}
-    normalize_dataset = {'name': 'PPCIFAR10', 'batch': 8, 'transform': 'normalize'}
-    training_dataset = {'name': 'PPCIFAR10', 'batch': 8}
+
+    perm_path = 'saved_perms/' + perm_path
+
+    # model = model_utils.get_model({'name': 'Permutation', 'args': {'method': method, 'stochastic':True, 'param': 'logit', 'temp': 0.1}})
+    # # model = model_utils.get_model({'name': 'Permutation', 'args': {'method': method}})
+    # model.load_state_dict(torch.load(perm_path))
+
+    # New version:
+    # saved_model = torch.load(perm_path)
+    # model = model_utils.get_model(saved_model['args'])
+    # model.load_state_dict(saved_model['state'])
+
+    # Newer version with full model optimizer:
+    saved_model = torch.load(perm_path)
+    model = model_utils.get_model(saved_model['model']['args'])
+    model.load_state_dict(saved_model['model']['state'])
+    # extract model from resnet:
+    # model = model.permute
+
+
+    n_images = 2
+    original_dataset = {'name': 'PPCIFAR10', 'batch': n_images, 'transform': 'original'}
+    permuted_dataset = {'name': 'PPCIFAR10', 'batch': n_images, 'transform': 'permute'}
+    normalize_dataset = {'name': 'PPCIFAR10', 'batch': n_images, 'transform': 'normalize'}
+    training_dataset = {'name': 'PPCIFAR10', 'batch': n_images}
     torch.manual_seed(0)
     orig_train_loader, orig_test_loader = dataset_utils.get_dataset(original_dataset)
     torch.manual_seed(0)
@@ -62,22 +84,6 @@ if __name__ == '__main__':
     # show images
     # imshow(torchvision.utils.make_grid(images), 'examples')
 
-    perm_path = 'saved_perms/' + perm_path
-
-    # model = model_utils.get_model({'name': 'Permutation', 'args': {'method': method, 'stochastic':True, 'param': 'logit', 'temp': 0.1}})
-    # # model = model_utils.get_model({'name': 'Permutation', 'args': {'method': method}})
-    # model.load_state_dict(torch.load(perm_path))
-
-    # New version:
-    # saved_model = torch.load(perm_path)
-    # model = model_utils.get_model(saved_model['args'])
-    # model.load_state_dict(saved_model['state'])
-
-    # Newer version with full model optimizer:
-    saved_model = torch.load(perm_path)
-    model = model_utils.get_model(saved_model['model']['args'])
-    model.load_state_dict(saved_model['model']['state'])
-
 
     # TODO: nsamples should be able to be passed into forward pass
     for p in model.permute:
@@ -92,6 +98,7 @@ if __name__ == '__main__':
         mle_output = model(perm_images, perm='mle')
     # imshow(torchvision.utils.make_grid(mean_output), 'examples_mean')
     # imshow(torchvision.utils.make_grid(mle_output), 'examples_mle')
-    all_images = torch.cat([orig_images, perm_images, norm_images, train_images, sample_output, mean_output, mle_output], dim=0)
-    imshow(torchvision.utils.make_grid(all_images), 'all_examples')
+    # all_images = torch.cat([orig_images, perm_images, norm_images, train_images, sample_output, mean_output, mle_output], dim=0)
+    all_images = torch.stack([orig_images, perm_images, mle_output], dim=0).transpose(0,1).reshape((-1, 3, 32, 32))
+    imshow(torchvision.utils.make_grid(all_images, nrow=3), 'all_examples.pdf')
 
