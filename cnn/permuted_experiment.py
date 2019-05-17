@@ -46,8 +46,10 @@ class TrainableModel(Trainable):
         if config['restore_perm'] is not None:
             # checkpoint = torch.load(config['restore_perm'], self.device)
             checkpoint = torch.load(config['restore_perm'])
-            self.model.permute = model_utils.get_model(checkpoint['model']['args'])
-            self.model.load_state_dict(checkpoint['model']['state'])
+            # don't restore args, so that you can change temp etc when plugging into end model
+            # TODO: implement an update_args() method for the models
+            # self.model.permute = model_utils.get_model(checkpoint['model']['args'])
+            self.model.permute.load_state_dict(checkpoint['model']['state'])
         self.model.to(self.device)
 
         self.train_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
@@ -99,17 +101,17 @@ class TrainableModel(Trainable):
                 target = target.repeat(output.size(0) // target.size(0))
                 # print(output.shape, target.shape)
                 loss = F.cross_entropy(output, target)
-            tw0 = list(self.model.permute)[0].twiddle
-            tw1 = list(self.model.permute)[1].twiddle
-            assert torch.all(tw0 == tw0)
-            assert torch.all(tw1 == tw1)
+            # tw0 = list(self.model.permute)[0].twiddle
+            # tw1 = list(self.model.permute)[1].twiddle
+            # assert torch.all(tw0 == tw0)
+            # assert torch.all(tw1 == tw1)
             loss.backward()
             # breakpoint()
             self.optimizer.step()
-            tw0 = list(self.model.permute)[0].twiddle
-            tw1 = list(self.model.permute)[1].twiddle
-            assert torch.all(tw0 == tw0)
-            assert torch.all(tw1 == tw1)
+            # tw0 = list(self.model.permute)[0].twiddle
+            # tw1 = list(self.model.permute)[1].twiddle
+            # assert torch.all(tw0 == tw0)
+            # assert torch.all(tw1 == tw1)
 
     def _test(self):
         self.model.eval()
@@ -271,14 +273,15 @@ def default_config():
     args = {}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'Adam'  # Which optimizer to use, either Adam or SGD
     lr_decay = True  # Whether to use learning rate decay
-    lr_decay_period = 18  # Period of learning rate decay
+    lr_decay_period = 50  # Period of learning rate decay
     plr_min = 1e-4
     plr_max = 1e-3
-    weight_decay = False  # Whether to use weight decay
+    weight_decay = True  # Whether to use weight decay
+    pwd = True
     pwd_min = 1e-4
     pwd_max = 5e-4
     ntrials = 20  # Number of trials for hyperparameter tuning
-    nmaxepochs = 72  # Maximum number of epochs
+    nmaxepochs = 200  # Maximum number of epochs
     result_dir = project_root + '/cnn/results'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
     smoke_test = False  # Finish quickly for testing
@@ -289,10 +292,10 @@ def default_config():
     tv_sym = None
     anneal_ent_min = 0.0
     anneal_ent_max = 0.0
-    anneal_sqrt = False
+    anneal_sqrt = True
     entropy_p = None
-    temp_min = 1.0
-    temp_max = 1.0
+    temp_min = None
+    temp_max = None
     restore_perm = None
     resume_pth = None
 
@@ -306,7 +309,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, pwd_min, pwd_max, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt, entropy_p, restore_perm, resume_pth): # TODO clean up and set min,max to pairs/dicts
+def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr_decay_period, plr_min, plr_max, weight_decay, pwd, pwd_min, pwd_max, ntrials, result_dir, cuda, smoke_test, unsupervised, batch, tv_norm, tv_p, tv_sym, temp_min, temp_max, anneal_ent_min, anneal_ent_max, anneal_sqrt, entropy_p, restore_perm, resume_pth): # TODO clean up and set min,max to pairs/dicts
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     assert restore_perm is None or resume_pth is None # If we're fully resuming training from the checkpoint, no point in restoring any part of the model
     if restore_perm is not None:
@@ -314,7 +317,8 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         print("Restoring permutation from", restore_perm)
 
     args_rand = args.copy()
-    args_rand['temp'] = sample_from(lambda spec: math.exp(random.uniform(math.log(temp_min), math.log(temp_max))))
+    if temp_min is not None and temp_max is not None:
+        args_rand['temp'] = sample_from(lambda spec: math.exp(random.uniform(math.log(temp_min), math.log(temp_max))))
     # args_rand['samples'] = sample_from(lambda _: np.random.choice((8,16)))
     # args_rand['sig'] = sample_from(lambda _: np.random.choice(('BT1', 'BT4')))
 
@@ -339,14 +343,14 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
     config={
         'optimizer': optimizer,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-2)) if optimizer == 'Adam'
-        'lr': 2e-4 if optimizer == 'Adam' else math.exp(random.uniform(math.log(2e-3), math.log(1e-0))),
+        'lr': 2e-4 if optimizer == 'Adam' else math.exp(random.uniform(math.log(0.025), math.log(0.2))),
         'plr': sample_from(lambda spec: math.exp(random.uniform(math.log(plr_min), math.log(plr_max)))),
         # 'lr_decay_factor': sample_from(lambda spec: random.choice([0.1, 0.2])) if lr_decay else 1.0,
-        'lr_decay_factor': 0.12 if lr_decay else 1.0,
+        'lr_decay_factor': 0.2 if lr_decay else 1.0,
         'lr_decay_period': lr_decay_period,
         # 'weight_decay':  sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if weight_decay else 0.0,
-        'weight_decay':    2e-4 if weight_decay else 0.0,
-        'pwd': sample_from(lambda spec: math.exp(random.uniform(math.log(pwd_min), math.log(pwd_max)))),
+        'weight_decay':    5e-4 if weight_decay else 0.0,
+        'pwd': sample_from(lambda spec: math.exp(random.uniform(math.log(pwd_min), math.log(pwd_max)))) if pwd else 0.0,
         'seed':            sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device':          'cuda' if cuda else 'cpu',
         'model':           {'name': model, 'args': args_rand},
@@ -366,6 +370,10 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
      }
     timestamp = datetime.datetime.now().replace(microsecond=0).isoformat()
     commit_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip().decode('utf-8')
+    stopping_criteria = {"training_iteration": 1 if smoke_test else nmaxepochs}
+    if unsupervised: # TODO group all the unsupervised casework together
+        stopping_criteria.update({'model_ent': 200, 'neg_ent': -5.0})
+
     experiment = RayExperiment(
         # name=f'pcifar10_{model}_{args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
         name=f'{name_smoke_test}{dataset.lower()}_{model}_{name_args}_{optimizer}_epochs_{nmaxepochs}_plr_{plr_min}-{plr_max}_{timestamp}_{commit_id}',
@@ -378,7 +386,8 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
         max_failures=0,
         # resources_per_trial={'cpu': 4, 'gpu': 0.5 if cuda else 0},
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
-        stop={"training_iteration": 1 if smoke_test else nmaxepochs, 'model_ent': 200, 'neg_ent': -5.0},
+        # stop={"training_iteration": 1 if smoke_test else nmaxepochs, 'model_ent': 200, 'neg_ent': -5.0},
+        stop=stopping_criteria,
         # stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         restore=resume_pth,
         config=config,
@@ -403,7 +412,7 @@ def run(model, result_dir, nmaxepochs, unsupervised):
     trials = ray.tune.run(
         experiment, scheduler=ahb,
         raise_on_failed_trial=False, queue_trials=True,
-        with_server=True, server_port=4321,
+        # with_server=True, server_port=4321,
     )
     trials = [trial for trial in trials if trial.last_result is not None]
     accuracy = [trial.last_result.get('mean_accuracy', float('-inf')) for trial in trials]

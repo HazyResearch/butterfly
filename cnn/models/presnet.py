@@ -205,7 +205,7 @@ class PResNet(nn.Module):
         return x
 
 class TensorPermutation(nn.Module):
-    def __init__(self, w, h, method='linear', rank=2, train=True, **kwargs):
+    def __init__(self, w, h, method='identity', rank=2, train=True, **kwargs):
         super().__init__()
         self.w = w
         self.h = h
@@ -216,6 +216,8 @@ class TensorPermutation(nn.Module):
             self.perm_type = SinkhornPermutation
         elif method == 'butterfly':
             self.perm_type = ButterflyPermutation
+        elif method == 'identity':
+            self.perm_type = IdentityPermutation
         else:
             assert False, f"Permutation method {method} not supported."
 
@@ -305,6 +307,20 @@ class Permutation(nn.Module):
         """ Return soft permutation of shape sample_shape + (size, size) """
         pass
 
+class IdentityPermutation(Permutation):
+    def __init__(self, size):
+        super().__init__()
+        self.size = size
+
+    def generate_perm(self):
+        return torch.eye(self.size, device=device)
+    def mean_perm(self):
+        return torch.eye(self.size, device=device)
+    def mle_perm(self):
+        return torch.eye(self.size, device=device)
+    def sample_perm(self):
+        return torch.eye(self.size, device=device)
+
 class LinearPermutation(Permutation):
     def __init__(self, size):
         super().__init__()
@@ -313,14 +329,20 @@ class LinearPermutation(Permutation):
         self.W.is_perm_param = True
         nn.init.kaiming_uniform_(self.W)
 
+    def generate_perm(self):
+        return self.W
     def mean_perm(self):
+        return self.W
+    def mle_perm(self):
+        return self.W
+    def sample_perm(self):
         return self.W
 
     # def hard_perm(self):
     #     return self.W
 
-    def sample_soft_perm(self, sample_shape=()):
-        return self.W.view(*([1]*len(sample_shape)), size, size)
+    # def sample_soft_perm(self, sample_shape=()):
+    #     return self.W.view(*([1]*len(sample_shape)), size, size)
 
 class SinkhornPermutation(Permutation):
     def __init__(self, size, stochastic=False, temp=1.0, samples=1):
