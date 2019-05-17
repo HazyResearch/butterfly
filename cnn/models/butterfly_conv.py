@@ -88,7 +88,7 @@ class ButterflyConv2d(ButterflyBmm):
         else:
             batch_out = batch * h_out * w_out
             if self.param == 'regular':
-                if self.nblocks = 0:
+                if self.nblocks == 0:
                     output = butterfly_mult_conv2d(self.twiddle, input, self.kernel_size[0],
                         self.padding[0], self.increasing_stride)
                 else:
