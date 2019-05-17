@@ -2,7 +2,7 @@ import models
 
 
 name_to_model = {
-    'LeNet': lambda args: models.LeNet(),
+    'LeNet': lambda args: models.LeNet(**args),
     'ResNet18': lambda args: models.ResNet18(**args),
     'PResNet18': lambda args: models.PResNet18(**args),
     'Permutation': lambda args: models.TensorPermutation(32, 32, **args),

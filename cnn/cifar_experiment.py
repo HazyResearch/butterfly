@@ -116,6 +116,7 @@ def default_config():
     lr_decay_period = 25  # Period of learning rate decay
     weight_decay = False  # Whether to use weight decay
     ntrials = 20  # Number of trials for hyperparameter tuning
+    batch = 128
     nmaxepochs = 100  # Maximum number of epochs
     result_dir = project_root + '/cnn/results'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
@@ -131,11 +132,11 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test):
+def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test, batch):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-2)) if optimizer == 'Adam'
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-4), math.log(1e-2)) if optimizer == 'Adam'
                                            else random.uniform(math.log(2e-3), math.log(1e-0)))),
         'lr_decay_factor': sample_from(lambda spec: random.choice([0.1, 0.2])) if lr_decay else 1.0,
         'lr_decay_period': lr_decay_period,
@@ -143,7 +144,7 @@ def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, 
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
-        'dataset': {'name': 'CIFAR10'}
+        'dataset': {'name': 'CIFAR10', 'batch': batch},
      }
     experiment = RayExperiment(
         name=f'cifar10_{model}_{model_args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
