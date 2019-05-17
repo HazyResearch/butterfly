@@ -46,15 +46,22 @@ plot_names = sorted(list(spectra.keys()))
 print(plot_names)
 subplot_grid_dim = int(np.ceil(np.sqrt(len(plot_names))))
 
-fig, ax = plt.subplots(int(np.ceil(len(plot_names) / subplot_grid_dim)), subplot_grid_dim, figsize=(20, 20))
+figsize = 30 if dataset == 'imagenet' else 20
+fig, ax = plt.subplots(int(np.ceil(len(plot_names) / subplot_grid_dim)), subplot_grid_dim, figsize=(28, 28))
 
 for i, n in enumerate(plot_names):
     for j, s in enumerate(spectra[n]):
-        xvals = np.arange(len(s)) / len(s)
+        xvals = np.arange(len(s)) + 1
         subplot = ax[i // subplot_grid_dim, i % subplot_grid_dim]
         subplot.plot(xvals, s, label=n + '_filter{}'.format(j))
+        if len(s) <= 5:
+            subplot.set_xticks(xvals)
+        else:
+            subplot.set_xticks([1, len(s)//2, len(s)])
+        subplot.tick_params(axis='x', labelsize=6)
         subplot.tick_params(axis='y', labelsize=6)
-        subplot.axes.get_xaxis().set_visible(False)
+        subplot.set_xlabel('Index', fontsize=7)
+        subplot.set_ylabel('Singular value', fontsize=7)
         subplot.set_title(n, fontsize=10)
-fig.suptitle(dataset.capitalize())
+fig.suptitle(dataset.capitalize(), fontsize=24)
 fig.savefig('spectra_{}.png'.format(dataset), dpi=250)
