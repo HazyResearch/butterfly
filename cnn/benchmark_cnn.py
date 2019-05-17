@@ -11,12 +11,12 @@ from butterfly.butterfly_multiply import butterfly_conv2d
 import time
 nsteps = 1000
 
-in_planes = 128
-out_planes = 128
+in_planes = 256
+out_planes = 256
 kernel_size = 3
 stride = 1
 batch_size = 128
-f_dim = 16
+f_dim = 8
 padding = 1
 
 conv1 = torch.nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride,
