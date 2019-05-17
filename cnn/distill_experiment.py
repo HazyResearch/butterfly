@@ -108,7 +108,7 @@ class TrainableModel(Trainable):
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
             output = self.model(data)
-            loss = F.mse_loss(output, target)
+            loss = F.mse_loss(output, target) / torch.norm(target).pow(2)
             loss.backward()
             self.optimizer.step()
 
@@ -119,7 +119,7 @@ class TrainableModel(Trainable):
             for data, target in self.train_loader:
                 data, target = data.to(self.device), target.to(self.device)
                 output = self.model(data)
-                loss += F.mse_loss(output, target).item()
+                loss += F.mse_loss(output, target).item() / (torch.norm(target)**2).item()
         training_loss = loss / len(self.train_loader)
         return {"mean_loss": training_loss, "inverse_loss": 1/training_loss}
 
@@ -168,14 +168,16 @@ def default_config():
     dataset = 'imagenet'
     teacher_model = 'resnet18'
     iters = 1
+    min_lr = 1e-4
+    max_lr=1
 
 @ex.capture
 def distillation_experiment(model, model_args, optimizer,
-    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model, dataset, iters):
+    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model, dataset, iters, min_lr, max_lr):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1)) if optimizer == 'Adam'
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(min_lr), math.log(max_lr)) if optimizer == 'Adam'
                                            else random.uniform(math.log(2e-3), math.log(1e-0)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
