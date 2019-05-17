@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .butterfly_conv import Butterfly1x1Conv
+from .butterfly_conv import Butterfly1x1Conv, ButterflyConv2d
 from .circulant1x1conv import Circulant1x1Conv
 from .toeplitzlike1x1conv import Toeplitzlike1x1Conv
 from .low_rank_conv import LowRankConv2d
