@@ -91,17 +91,30 @@
 # python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=ODO nblocks=14 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
 
 
-# raiders 2,4,5
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=0 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=1 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=2 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True
-# p100-template-3
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=4 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
-# p100-template-4
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=6 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
-# k80-template-1
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=7 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# # raiders 2,4,5
+# python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=0 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True
+# python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=1 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True
+# python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=2 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True
+# # p100-template-3
+# python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=4 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# # p100-template-4
+# python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=6 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# # k80-template-1
+# python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=LR nblocks=7 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+
+# # p100-template-2
+# python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=ODO nblocks=0 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True
+# python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=ODONorm nblocks=0 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True
 
 # p100-template-2
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=ODO nblocks=0 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=ODONormal nblocks=0 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=OBDOBTDbl nblocks=0 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-3
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=OBDOBTDbl nblocks=1 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-4
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=OBDOBTDbl nblocks=2 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-5
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=OBDOBTDbl nblocks=4 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-6
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=OBDOBTDbl nblocks=6 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-7
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer structure_type=OBDOBTDbl nblocks=7 n_encoder_structure_layer=6 n_decoder_structure_layer=6 structured_attention=True; gcloud compute instances stop $(hostname) --zone us-west1-b -q
