@@ -35,12 +35,17 @@ class Butterfly(nn.Module):
         expansion: the linear map is a sum of @expansion butterfly matrices
         diag_init: whether to initialize the diagonal in ODO with 1, or N(0, 1)
             'one', or 'normal'
+        double: whether to double the input size, i.e. x -> [x, 0]
     """
 
     def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
                  increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
-                 nblocks=0, diag_constraint=None, expansion=1, diag_init='one'):
+                 nblocks=0, diag_constraint=None, expansion=1, diag_init='one', double=False):
         super().__init__()
+        self.double = double
+        if double:
+            in_size *= 2
+            out_size *= 2
         self.in_size = in_size
         m = int(math.ceil(math.log2(in_size)))
         self.m = m
@@ -128,7 +133,10 @@ class Butterfly(nn.Module):
                 self.twiddle = nn.Parameter(torch.stack((theta_phi, sigmas) , dim=-2))
         self.twiddle._is_structured = True  # Flag to avoid weight decay
         if bias:
-            bias_shape = (out_size, ) if not complex else (out_size, 2)
+            if not self.double:
+                bias_shape = (out_size, ) if not complex else (out_size, 2)
+            else:
+                bias_shape = (out_size // 2, ) if not complex else (out_size // 2, 2)
             self.bias = nn.Parameter(torch.Tensor(*bias_shape))
         else:
             self.register_parameter('bias', None)
@@ -188,6 +196,8 @@ class Butterfly(nn.Module):
             output = input.view(-1, *input.size()[-2:])
         else:  # Reshape to (N, in_size)
             output = input.view(-1, input.size(-1))
+        if self.double:
+            output = torch.cat((output, torch.zeros_like(output)), dim=-1)
         batch = output.shape[0]
         if self.in_size != self.in_size_extended:  # Zero-pad
             padded_shape = (batch, self.in_size_extended - self.in_size) + (() if not self.complex else (2, ))
@@ -205,18 +215,20 @@ class Butterfly(nn.Module):
                 output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).mean(dim=1)
             else:
                 output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=1)
+        if self.double:
+            output = output.view(batch, 2, out_size_extended // 2).mean(dim=1)
         if self.out_size != out_size_extended:  # Take top rows
-            output = output[:, :self.out_size]
+            output = output[:, :self.out_size] if not self.double else output[:, :self.out_size // 2]
         if self.bias is not None:
             output = output + self.bias
         if self.complex:
-            return output.view(*input.size()[:-2], self.out_size, 2)
+            return output.view(*input.size()[:-2], self.out_size, 2) if not self.double else output.view(*input.size()[:-2], self.out_size // 2, 2)
         else:
-            return output.view(*input.size()[:-1], self.out_size)
+            return output.view(*input.size()[:-1], self.out_size) if not self.double else output.view(*input.size()[:-1], self.out_size // 2)
 
     def extra_repr(self):
-        s = 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, expansion={}, diag_init={}'.format(
-            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.expansion, self.diag_init
+        s = 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, expansion={}, diag_init={}, double={}'.format(
+            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.expansion, self.diag_init, self.double
         )
         if self.param == 'odo':
             s += ', diag_constraint={}'.format('none' if self.diag_constraint is None else self.diag_constraint)
@@ -251,18 +263,20 @@ class ButterflyBmm(Butterfly):
             None (no constraint), 'positive' (>= 0), 'bounded' (between [1/max_gain, max_gain]),
                 'square' (use sigma^2 parameterization instead)
         expansion: the linear map is a sum of @expansion butterfly matrices
+        double: whether to double the input size, i.e. x -> [x, 0]
     """
 
     def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False, tied_weight=True,
                  increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
-                 nblocks=0, diag_constraint=None, expansion=1, diag_init='one'):
+                 nblocks=0, diag_constraint=None, expansion=1, diag_init='one', double=False):
         m = int(math.ceil(math.log2(in_size)))
         in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
         nstack = int(math.ceil(out_size / in_size_extended))
         super().__init__(in_size_extended, in_size_extended * nstack * matrix_batch, bias, complex,
-                         tied_weight, increasing_stride, ortho_init, param, max_gain, nblocks, diag_constraint, expansion, diag_init)
-        self.in_size = in_size
-        self.out_size = out_size
+                         tied_weight, increasing_stride, ortho_init, param, max_gain, nblocks,
+                         diag_constraint, expansion, diag_init, double)
+        self.in_size = in_size if not double else in_size * 2
+        self.out_size = out_size if not double else out_size * 2
         self.nstack = nstack * expansion
         self.matrix_batch = matrix_batch
         if self.bias is not None:
@@ -277,6 +291,8 @@ class ButterflyBmm(Butterfly):
             padded_shape = (batch, self.matrix_batch, self.in_size_extended - self.in_size) + (() if not self.complex else (2, ))
             output = torch.cat((output, torch.zeros(padded_shape, dtype=output.dtype, device=output.device)),
                                dim=-1 if not self.complex else -2)
+        if self.double:
+            output = torch.cat((output, torch.zeros_like(output)), dim=-1)
         output = output.unsqueeze(2).expand((batch, self.matrix_batch, self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         output = output.reshape((batch, self.matrix_batch * self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         return output
@@ -290,13 +306,15 @@ class ButterflyBmm(Butterfly):
                 output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).mean(dim=2)
             else:
                 output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=2)
+        if self.double:
+            output = output.view(batch, self.matrix_batch, 2, out_size_extended // 2).mean(dim=2)
         if self.out_size != out_size_extended:  # Take top rows
-            output = output[:, :, :self.out_size]
+            output = output[:, :, :self.out_size] if not self.double else output[:, :, :self.out_size // 2]
         return output if self.bias is None else output + self.bias
 
     def extra_repr(self):
-        s = 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, diag_init={}'.format(
-            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.diag_init
+        s = 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, diag_init={}, double={}'.format(
+            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.diag_init, self.double
         )
         if self.param == 'odo':
             s += ', diag_constraint={}'.format('none' if self.diag_constraint is None else self.diag_constraint)
