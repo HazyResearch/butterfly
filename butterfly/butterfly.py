@@ -21,9 +21,10 @@ class Butterfly(nn.Module):
             Note that this only changes the order of multiplication, not how twiddle is stored.
             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
-        param: The parameterization of the 2x2 butterfly factors, either 'regular', 'ortho', 'odo', or 'svd'.
+        param: The parameterization of the 2x2 butterfly factors, either 'regular', 'ortho', 'odo', or 'obdobt', or 'svd'.
             'ortho' and 'svd' only support real, not complex.
             'odo' means two orthogonal butterfly matrices and one diagonal matrix.
+            'obdobt' means the building block is (OB D OBT)^nblocks, where OB means orthogonal butterfly.
         max_gain: (only for svd parameterization) controls the maximum and minimum singular values
             of the whole matrix (not of each factor).
             For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
@@ -42,6 +43,7 @@ class Butterfly(nn.Module):
         super().__init__()
         self.in_size = in_size
         m = int(math.ceil(math.log2(in_size)))
+        self.m = m
         size = self.in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
         self.out_size = out_size
         self.nstack = int(math.ceil(out_size / self.in_size_extended))
@@ -49,7 +51,7 @@ class Butterfly(nn.Module):
         self.tied_weight = tied_weight
         self.increasing_stride = increasing_stride
         self.ortho_init = ortho_init
-        assert param in ['regular', 'ortho', 'odo', 'svd']
+        assert param in ['regular', 'ortho', 'odo', 'obdobt', 'svd']
         self.param = param
         self.max_gain_per_factor = max_gain ** (1 / m)
         self.nblocks = nblocks
@@ -60,7 +62,7 @@ class Butterfly(nn.Module):
         self.diag_init = diag_init
         self.nstack *= self.expansion
         if nblocks > 0:
-            assert not tied_weight and not complex and param in ['regular', 'ortho', 'odo'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
+            assert not tied_weight and not complex and param in ['regular', 'ortho', 'odo', 'obdobt'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
         if tied_weight:
             twiddle_core_shape = (self.nstack, size - 1)
         else:
@@ -109,6 +111,16 @@ class Butterfly(nn.Module):
                     self.diag_right = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
                     self.diag_left._is_structured = True
                     self.diag_right._is_structured = True
+            elif param == 'obdobt':
+                assert not tied_weight and not complex
+                self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
+                self.twiddle1 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
+                if diag_init == 'normal':
+                    self.diag = nn.Parameter(torch.randn(twiddle_core_shape[0], self.nstack, size))
+                else:
+                    self.diag = nn.Parameter(torch.ones(twiddle_core_shape[0], self.nstack, size))
+                self.twiddle1._is_structured = True
+                self.diag._is_structured = True
             elif param == 'svd':
                 assert not tied_weight, 'svd parameterization is only implemented for non-tied weight'
                 theta_phi = torch.rand(twiddle_core_shape + (2, )) * math.pi * 2
@@ -160,6 +172,11 @@ class Butterfly(nn.Module):
             output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
             if self.expansion > 1:
                 output = output * self.diag_left
+        elif self.param == 'obdobt':
+            for t, t1, d in zip(self.twiddle.split(self.m, dim=1), self.twiddle1.split(self.m, dim=1), self.diag):
+                output = butterfly_ortho_mult_untied(t, output, False)
+                output = output * d
+                output = butterfly_ortho_mult_untied(t1, output, True)
         elif self.param == 'svd':
             with torch.no_grad():  # Projected SGD
                 self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
