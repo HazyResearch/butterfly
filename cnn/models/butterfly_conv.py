@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 from butterfly import Butterfly
 from butterfly.butterfly import ButterflyBmm
-from butterfly.butterfly_multiply import butterfly_mult_conv2d, butterfly_mult_conv2d_svd
+from butterfly.butterfly_multiply import butterfly_mult_conv2d, butterfly_mult_conv2d_svd, bbt_mult_conv2d
 
 import math
 
@@ -36,25 +36,11 @@ class ButterflyConv2d(ButterflyBmm):
         stride: int or (int, int)
         padding; int or (int, int)
         dilation: int or (int, int)
-        bias: If set to False, the layer will not learn an additive bias.
-                Default: ``True``
-        tied_weight: whether the weights in the butterfly factors are tied.
-            If True, will have 4N parameters, else will have 2 N log N parameters (not counting bias)
-         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
-             decreasing stride (e.g., n/2, n/4, ..., 1).
-             Note that this only changes the order of multiplication, not how twiddle is stored.
-             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
-        ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
-        param: The parameterization of the 2x2 butterfly factors, either 'regular' or 'ortho' or 'svd'.
-            'ortho' and 'svd' only support real, not complex.
-        max_gain: (only for svd parameterization) controls the maximum and minimum singular values
-            of the whole matrix (not of each factor).
-            For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
+        **kwargs: args to ButterflyBmm, see Butterfly class
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True,
-                 tied_weight=True, increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
-                 fused_unfold=True):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, fused_unfold=False, **kwargs):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
@@ -62,8 +48,8 @@ class ButterflyConv2d(ButterflyBmm):
         self.padding = (padding, padding) if isinstance(padding, int) else padding
         self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
         self.fused_unfold = fused_unfold
-        super().__init__(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1], bias, False,
-                         tied_weight, increasing_stride, ortho_init, param, max_gain)
+        super().__init__(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1],
+                         complex=False, **kwargs)
 
     def forward(self, input):
         """
@@ -76,8 +62,9 @@ class ButterflyConv2d(ButterflyBmm):
         batch, c, h, w = input.shape
         h_out = (h + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) // self.stride[0] + 1
         w_out = (h + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
-        if not (self.fused_unfold and self.stride == (1, 1) and self.kernel_size[0] == self.kernel_size[1]
-                and self.padding[0] == self.padding[1] and self.dilation == (1, 1) and c <= 1024 and input.is_cuda):
+        # if not (self.fused_unfold and self.stride == (1, 1) and self.kernel_size[0] == self.kernel_size[1]
+        #         and self.padding[0] == self.padding[1] and self.dilation == (1, 1) and c <= 1024 and input.is_cuda):
+        if True:  # Not using fused unfolding for now to quickly try variants of butterfly
             # unfold input into patches and call batch matrix multiply
             input_patches = F.unfold(input, self.kernel_size, self.dilation, self.padding, self.stride).view(
                 batch, c, self.kernel_size[0] * self.kernel_size[1], h_out * w_out)
@@ -86,8 +73,11 @@ class ButterflyConv2d(ButterflyBmm):
         else:
             batch_out = batch * h_out * w_out
             if self.param == 'regular':
-                output = butterfly_mult_conv2d(self.twiddle, input, self.kernel_size[0],
-                    self.padding[0], self.increasing_stride)
+                if self.nblocks == 0:
+                    output = butterfly_mult_conv2d(self.twiddle, input, self.kernel_size[0],
+                        self.padding[0], self.increasing_stride)
+                else:
+                    output = bbt_mult_conv2d(self.twiddle, input, self.kernel_size[0], self.padding[0])
             elif self.param == 'ortho':
                 c, s = torch.cos(self.twiddle), torch.sin(self.twiddle)
                 twiddle = torch.stack((torch.stack((c, -s), dim=-1),

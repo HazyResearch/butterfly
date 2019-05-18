@@ -11,14 +11,15 @@ try:
     from factor_multiply import butterfly_multiply_intermediate, butterfly_multiply_intermediate_backward
     from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_backward
     from factor_multiply import butterfly_multiply_untied_forward_backward
-    from factor_multiply import butterfly_ortho_multiply_untied, butterfly_ortho_multiply_untied_forward_backward
+    from factor_multiply import butterfly_ortho_multiply_untied, butterfly_ortho_multiply_untied_backward
     from factor_multiply import bbt_multiply_untied, bbt_multiply_untied_forward_backward
-    from factor_multiply import bbt_ortho_multiply_untied, bbt_ortho_multiply_untied_forward_backward
+    from factor_multiply import bbt_ortho_multiply_untied, bbt_ortho_multiply_untied_backward
     from factor_multiply import butterfly_multiply_untied_svd, butterfly_multiply_untied_svd_backward
     from factor_multiply import butterfly_multiply_untied_svd_forward_backward
     from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
     from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
     from factor_multiply import butterfly_conv2d, butterfly_conv2d_backward, butterfly_conv2d_forward_backward
+    from factor_multiply import bbt_conv2d, bbt_conv2d_forward_backward
     from factor_multiply import butterfly_conv2d_svd, butterfly_conv2d_svd_forward_backward
     from factor_multiply import butterfly_multiply_untied_eval
 except:
@@ -211,7 +212,7 @@ class ButterflyOrthoMultUntied(torch.autograd.Function):
         """
         twiddle_cos, twiddle_sin = torch.cos(twiddle), torch.sin(twiddle)
         output = butterfly_ortho_multiply_untied(twiddle_cos, twiddle_sin, input, increasing_stride)
-        ctx.save_for_backward(twiddle_cos, twiddle_sin, input)
+        ctx.save_for_backward(twiddle_cos, twiddle_sin, output)
         ctx._increasing_stride = increasing_stride
         return output
 
@@ -224,9 +225,9 @@ class ButterflyOrthoMultUntied(torch.autograd.Function):
             d_twiddle: (nstack, log n, n / 2, 2, 2)
             d_input: (batch_size, nstack, n)
         """
-        twiddle_cos, twiddle_sin, input = ctx.saved_tensors
+        twiddle_cos, twiddle_sin, output = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
-        d_coefficients, d_input = butterfly_ortho_multiply_untied_forward_backward(twiddle_cos, twiddle_sin, input, grad, increasing_stride)
+        d_coefficients, d_input = butterfly_ortho_multiply_untied_backward(twiddle_cos, twiddle_sin, output, grad, increasing_stride)
         return d_coefficients, d_input, None
 
 
@@ -320,7 +321,7 @@ class BbtOrthoMultUntied(torch.autograd.Function):
         """
         twiddle_cos, twiddle_sin = torch.cos(twiddle), torch.sin(twiddle)
         output = bbt_ortho_multiply_untied(twiddle_cos, twiddle_sin, input)
-        ctx.save_for_backward(twiddle_cos, twiddle_sin, input)
+        ctx.save_for_backward(twiddle_cos, twiddle_sin, output)
         return output
 
     @staticmethod
@@ -332,8 +333,8 @@ class BbtOrthoMultUntied(torch.autograd.Function):
             d_twiddle: (nstack, nblocks * 2 * log n, n / 2)
             d_input: (batch_size, nstack, n)
         """
-        twiddle_cos, twiddle_sin, input = ctx.saved_tensors
-        d_coefficients, d_input = bbt_ortho_multiply_untied_forward_backward(twiddle_cos, twiddle_sin, input, grad)
+        twiddle_cos, twiddle_sin, output = ctx.saved_tensors
+        d_coefficients, d_input = bbt_ortho_multiply_untied_backward(twiddle_cos, twiddle_sin, output, grad)
         return d_coefficients, d_input
 
 
@@ -341,7 +342,7 @@ def bbt_ortho_mult_untied(twiddle, input):
     n = input.shape[2]
     m = int(math.log2(n))
     nblocks = twiddle.shape[1] // (2 * m)
-    if n <= 1024 and input.is_cuda and nblocks <= 14:  # CUDA only supports nblocks <= 14
+    if n <= 1024 and input.is_cuda:
         return BbtOrthoMultUntied.apply(twiddle, input)
     else:
         c, s = torch.cos(twiddle), torch.sin(twiddle)
@@ -557,6 +558,88 @@ class ButterflyMultConv2d(torch.autograd.Function):
         # Autograd requires 5 gradients
 
 butterfly_mult_conv2d = ButterflyMultConv2d.apply if use_extension else butterfly_mult_conv2d_torch
+
+
+class BbtMultConv2d(torch.autograd.Function):
+    # For fused unfolding, n <= 1024, CUDA only, real only
+    # Assumes dilation=1, stride=1, and square kernels
+
+    @staticmethod
+    def forward(ctx, twiddle, input, kernel_size, padding):
+        """
+        Parameters:
+            twiddle: (nstack, nblocks * 2 * log n, n/2, 2, 2) where n = c_in
+            input: (b_in, c_in, h_in, w_in)
+            kernel_size: int, size of convolution kernel, currently only supports square kernels
+            padding: amount of zero-padding around border of input
+        Returns:
+            output: (b_in * h_out * w_out, nstack, c_in)
+        """
+        output = bbt_conv2d(twiddle, input, kernel_size, padding)
+        ctx.save_for_backward(twiddle, input)
+        ctx._kernel_size = kernel_size
+        ctx._padding = padding
+        ctx._input_size = input.size()
+        ctx._b_in= input.size(0)
+        ctx._c_in = input.size(1)
+        ctx._h_in = input.size(2)
+        ctx._w_in = input.size(3)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad):
+        """
+        Parameters:
+            grad: (b_in * h_out * w_out, cin/cout * nstack, c_out)
+            twiddle: (nstack, nblocks * 2 * log n, n / 2, 2, 2) where n = c_in
+        Return:
+            d_twiddle: (nstack, log n, n / 2, 2, 2)
+            d_input: (b_in, c_in, h_in, w_in)
+        """
+        twiddle, input = ctx.saved_tensors
+        d_coefficients, d_input = bbt_conv2d_forward_backward(twiddle, input, grad, ctx._kernel_size, ctx._padding)
+        return d_coefficients, d_input, None, None
+        # Autograd requires 4 gradients
+
+def bbt_mult_conv2d(twiddle, input, kernel_size, padding):
+    n = input.shape[1]
+    m = int(math.log2(n))
+    nblocks = twiddle.shape[1] // (2 * m)
+    assert nblocks * 2 * m == twiddle.shape[1], 'twiddle must have shape (nstack, nblocks * 2 * log n, n / 2, 2, 2)'
+    if n <= 1024 and input.is_cuda and nblocks <= 14:  # CUDA only supports nblocks <= 14
+        return BbtMultConv2d.apply(twiddle, input, kernel_size, padding)
+    else:
+        output = input
+        reverse_idx = torch.arange(m - 1, -1, -1, device=twiddle.device)
+        first = True
+        for t in twiddle.chunk(nblocks, dim=1):
+            # output = butterfly_mult_conv2d(t[:, :m].flip(1), output, False)
+            # flip is crazy slow, advanced indexing is slightly faster
+            if first:
+                output = butterfly_mult_conv2d(t[:, reverse_idx], output, kernel_size, padding, False)
+                first = False
+            else:
+                output = butterfly_mult_untied(t[:, reverse_idx], output, False)
+            output = butterfly_mult_untied(t[:, m:], output, True)
+        return output
+
+
+def bbt_mult_conv2d_torch(twiddle, input, kernel_size, padding):
+    n = input.shape[1]
+    m = int(math.log2(n))
+    nblocks = twiddle.shape[1] // (2 * m)
+    assert nblocks * 2 * m == twiddle.shape[1], 'twiddle must have shape (nstack, nblocks * 2 * log n, n / 2, 2, 2)'
+    output = input
+    first = True
+    for t in twiddle.chunk(nblocks, dim=1):
+        if first:
+            output = butterfly_mult_conv2d_torch(t[:, :m].flip(1), output, kernel_size, padding, False)
+            first = False
+        else:
+            output = butterfly_mult_untied_torch(t[:, :m].flip(1), output, False)
+        output = butterfly_mult_untied_torch(t[:, m:], output, True)
+    return output
+
 
 
 def butterfly_mult_conv2d_svd_torch(twiddle, input, kernel_size, padding, increasing_stride=True, return_intermediates=False):
