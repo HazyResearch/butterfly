@@ -23,17 +23,19 @@ def get_dataset(config_dataset):
 
         trainset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=True, transform=transform_train)
         validset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=False, transform=transform_test)
+        testset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=False, download=True, transform=transform_test)
         np_random_state = np.random.get_state()  # To get exactly the same training and validation sets
         np.random.seed(0)
         indices = np.random.permutation(range(len(trainset)))
         np.random.set_state(np_random_state)
-        trainset = torch.utils.data.Subset(trainset, indices[:40000])
+        trainset = torch.utils.data.Subset(trainset, indices[:45000])
         # trainset = torch.utils.data.Subset(trainset, indices[:5000])
-        validset = torch.utils.data.Subset(validset, indices[-10000:])
+        validset = torch.utils.data.Subset(validset, indices[-5000:])
 
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=4)
-        testloader = torch.utils.data.DataLoader(validset, batch_size=128, shuffle=False, num_workers=4)
-        return trainloader, testloader
+        validloader = torch.utils.data.DataLoader(validset, batch_size=128, shuffle=False, num_workers=4)
+        testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=4)
+        return trainloader, validloader, testloader
     else:
         assert False, 'Dataset not implemented'
 
