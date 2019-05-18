@@ -41,6 +41,33 @@ else:
                 names.append(n)
                 # Add two dummy dimensions at the end just to simplify later code
                 tensors.append(model[n].detach().cpu().unsqueeze_(-1).unsqueeze_(-1).numpy())
+    elif dataset == 'transformer':
+        model = torch.load('checkpoint_last.pt')['model']
+        name_patterns = ['in_proj', 'out_proj']
+        for n in model.keys():
+            if any([x in n for x in name_patterns]) and 'bias' not in n:
+                names.append(n)
+                tensors.append(model[n].detach().cpu())
+        names_old = names
+        tensors_old = tensors
+        names = []
+        tensors = []
+        num_heads = 4
+        for n, p in zip(names_old, tensors_old):
+            if 'in_proj' in n:
+                q_dim = p.size(0) // 3
+                q_proj = p[:q_dim]
+                k_proj = p[q_dim:2*q_dim]
+                q_heads = q_proj.chunk(num_heads)
+                k_heads = k_proj.chunk(num_heads)
+                q_heads = [x.numpy().T for x in q_heads]
+                k_heads = [x.numpy() for x in k_heads]
+                prods = [qh @ kh for qh, kh in zip(q_heads, k_heads)]
+                output = np.zeros((prods[0].shape[0], prods[0].shape[1], num_heads, 1))
+                for i in range(num_heads):
+                    output[:,:,i,0] = prods[i]  # put all heads on the same plot
+                names.append(n)
+                tensors.append(output)
     else:
         raise ValueError('Unknown dataset')
     spectra = {}
@@ -71,8 +98,10 @@ for i, n in enumerate(plot_names):
         subplot.plot(xvals, s, label=n + '_filter{}'.format(j))
         if len(s) <= 5:
             subplot.set_xticks(xvals)
-        else:
+        elif dataset != 'transformer':
             subplot.set_xticks([1, len(s)//2, len(s)])
+        else:
+            subplot.set_xticks([1, len(s)//4, len(s)//2, 3*len(s)//4, len(s)])
         subplot.tick_params(axis='x', labelsize=6)
         subplot.tick_params(axis='y', labelsize=6)
         subplot.set_xlabel('Index', fontsize=7)
