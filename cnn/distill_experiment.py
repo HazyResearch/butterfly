@@ -69,8 +69,9 @@ class TrainableModel(Trainable):
         if model_args['structure_type'] == 'B':
             structured_layer = ButterflyConv2d(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
-                bias=False, tied_weight=False, ortho_init=True,
-                param=model_args['param'], nblocks=model_args['nblocks'])
+                bias=False, tied_weight=bool(model_args['tied_weight']), ortho_init=True,
+                param=model_args['param'], nblocks=model_args['nblocks'], 
+                expansion=model_args['expansion'], diag_init=model_args['diag_init'])
 #        elif model_args['structure_type'] == 'BBT':
 #            structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
 #                kernel_size=kernel_size, stride=stride, padding=padding,
@@ -155,8 +156,11 @@ if slack_config_path.exists():
 def default_config():
     model = 'resnet18'  # Name of model, see model_utils.py
     model_args = {'structure_type': 'B',
-                  'nblocks': 1,
-                  'param': 'regular'}  # Arguments to be passed to the model, as a dictionary
+                  'nblocks': 0,
+                  'param': 'regular',
+                  'diag_init': 'one',
+                  'expansion': 1,
+                  'tied_weight': 0}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'SGD'  # Which optimizer to use, either Adam or SGD
     ntrials = 100  # Number of trials for hyperparameter tuning
     nmaxepochs = 10  # Maximum number of epochs
@@ -169,6 +173,7 @@ def default_config():
     teacher_model = 'resnet18'
     min_lr = 1e-4
     max_lr=1
+    grace_period=2
 
 @ex.capture
 def distillation_experiment(model, model_args, optimizer,
@@ -203,7 +208,7 @@ def distillation_experiment(model, model_args, optimizer,
 
 
 @ex.automain
-def run(model, result_dir, nmaxepochs):
+def run(model, result_dir, nmaxepochs, grace_period):
     experiment = distillation_experiment()
     try:
         with open('../config/redis_address', 'r') as f:
@@ -211,7 +216,7 @@ def run(model, result_dir, nmaxepochs):
             ray.init(redis_address=address)
     except:
         ray.init()
-    ahb = AsyncHyperBandScheduler(reward_attr='inverse_loss', grace_period=5, reduction_factor=2, brackets=3, max_t=nmaxepochs)
+    ahb = AsyncHyperBandScheduler(reward_attr='inverse_loss', grace_period=grace_period, reduction_factor=2, brackets=3, max_t=nmaxepochs)
     trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     loss = [trial.last_result.get('mean_loss', float('inf')) for trial in trials]
