@@ -2,7 +2,10 @@ import math
 import torch
 from torch import nn
 
-from .butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_ortho_mult_untied, butterfly_mult_untied_svd, bbt_mult_untied, bbt_ortho_mult_untied
+from .butterfly_multiply import butterfly_mult, butterfly_mult_untied
+from .butterfly_multiply import butterfly_ortho_mult_tied
+from .butterfly_multiply import butterfly_ortho_mult_untied, butterfly_mult_untied_svd
+from .butterfly_multiply import bbt_mult_untied, bbt_ortho_mult_untied
 
 class Butterfly(nn.Module):
     """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
@@ -99,23 +102,23 @@ class Butterfly(nn.Module):
         else:
             assert not complex, 'orthogonal/svd parameterization is only implemented for real, not complex'
             if param == 'ortho':
-                assert not tied_weight and not complex
+                assert not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
             elif param == 'odo':
-                assert not tied_weight and not complex
+                assert not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 self.twiddle1 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 if diag_init == 'normal':
-                    self.diag = nn.Parameter(torch.randn(self.nstack, size))
+                    self.diag = nn.Parameter(torch.randn(self.nstack, size)) / math.sqrt(self.nstack)
                 else:
-                    self.diag = nn.Parameter(torch.ones(self.nstack, size))
+                    self.diag = nn.Parameter(torch.ones(self.nstack, size)) / math.sqrt(self.nstack)
                 self.twiddle1._is_structured = True
                 self.diag._is_structured = True
-                if self.expansion > 1:  # Extra diagonals on the left and right
-                    self.diag_left = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
-                    self.diag_right = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
-                    self.diag_left._is_structured = True
-                    self.diag_right._is_structured = True
+                # if self.expansion > 1:  # Extra diagonals on the left and right
+                #     self.diag_left = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
+                #     self.diag_right = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
+                #     self.diag_left._is_structured = True
+                #     self.diag_right._is_structured = True
             elif param == 'obdobt':
                 assert not tied_weight and not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
@@ -168,7 +171,10 @@ class Butterfly(nn.Module):
             else:
                 output = butterfly_mult_untied(self.twiddle, output, self.increasing_stride, self.training) if self.nblocks == 0 else bbt_mult_untied(self.twiddle, output)
         elif self.param == 'ortho':
-            output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
+            if self.tied_weight:
+                output = butterfly_ortho_mult_tied(self.twiddle, output, self.increasing_stride)
+            else:
+                output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
         elif self.param == 'odo':
             diag = self.diag
             if self.diag_constraint == 'positive':
@@ -179,13 +185,19 @@ class Butterfly(nn.Module):
                     diag.clamp_(min=1 / self.max_gain, max=self.max_gain)
             elif self.diag_constraint == 'square':
                 diag = diag * diag
-            if self.expansion > 1:
-                output = output * self.diag_right
-            output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
+            # if self.expansion > 1:
+            #     output = output * self.diag_right
+            if self.tied_weight:
+                output = butterfly_ortho_mult_tied(self.twiddle, output, False)
+            else:
+                output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
             output = output * diag
-            output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
-            if self.expansion > 1:
-                output = output * self.diag_left
+            if self.tied_weight:
+                output = butterfly_ortho_mult_tied(self.twiddle, output, True)
+            else:
+                output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
+            # if self.expansion > 1:
+            #     output = output * self.diag_left
         elif self.param == 'obdobt':
             for t, t1, d in zip(self.twiddle.split(self.m, dim=1), self.twiddle1.split(self.m, dim=1), self.diag):
                 output = butterfly_ortho_mult_untied(t, output, False)
@@ -234,11 +246,11 @@ class Butterfly(nn.Module):
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.nstack * self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
             if not self.complex:
-                output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).mean(dim=1)
+                output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).sum(dim=1)
             else:
-                output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=1)
+                output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).sum(dim=1)
         if self.double:
-            output = output.view(batch, 2, out_size_extended // 2).mean(dim=1)
+            output = output.view(batch, 2, out_size_extended // 2).sum(dim=1)
         if self.out_size != out_size_extended:  # Take top rows
             output = output[:, :self.out_size] if not self.double else output[:, :self.out_size // 2]
         if self.bias is not None:
@@ -338,9 +350,9 @@ class ButterflyBmm(Butterfly):
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.nstack * self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
             if not self.complex:
-                output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).mean(dim=2)
+                output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).sum(dim=2)
             else:
-                output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=2)
+                output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).sum(dim=2)
         if self.double:
             output = output.view(batch, self.matrix_batch, 2, out_size_extended // 2).mean(dim=2)
         if self.out_size != out_size_extended:  # Take top rows
