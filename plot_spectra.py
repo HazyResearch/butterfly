@@ -34,6 +34,15 @@ else:
             if 'weight' in n and any([x in n for x in name_patterns]) and not 'downsample.1.weight' in n:
                 names.append(n)
                 tensors.append(p.detach().cpu().numpy())
+    elif dataset == 'timit':
+        model = torch.load('final_architecture1.pkl')['model_par']
+        for n in model.keys():
+            if 'ln' not in n and 'bn' not in n and 'bias' not in n:
+                names.append(n)
+                # Add two dummy dimensions at the end just to simplify later code
+                tensors.append(model[n].detach().cpu().unsqueeze_(-1).unsqueeze_(-1).numpy())
+    else:
+        raise ValueError('Unknown dataset')
     spectra = {}
     for n, t in zip(names, tensors):
         t_spectra = []
@@ -47,6 +56,8 @@ else:
     with open(svds_file, 'wb') as pkl: pickle.dump(spectra, pkl)
 
 plot_names = sorted(list(spectra.keys()))
+if dataset == 'timit':
+    plot_names.sort(key = lambda s: int("".join(filter(str.isdigit, s))))
 print(plot_names)
 subplot_grid_dim = int(np.ceil(np.sqrt(len(plot_names))))
 
