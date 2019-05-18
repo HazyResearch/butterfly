@@ -15,7 +15,7 @@ if os.path.exists(svds_file):
 else:
     names = []
     tensors = []
-    name_patterns = ['conv', 'shortcut']
+    name_patterns = ['conv', 'shortcut', 'downsample']
     if dataset == 'cifar10':
         model = torch.load('model_optimizer.pth')['model']
         for n in model.keys():
@@ -25,9 +25,13 @@ else:
                 tensors.append(model[n].detach().cpu().numpy())
     elif dataset == 'imagenet':
         import torchvision.models as models
-        model = models.resnet50(pretrained=True)
+        resnet50 = False
+        if resnet50:
+            model = models.resnet50(pretrained=True)
+        else:
+            model = models.resnet18(pretrained=True)
         for n, p in model.named_parameters():
-            if 'weight' in n and any([x in n for x in name_patterns]):
+            if 'weight' in n and any([x in n for x in name_patterns]) and not 'downsample.1.weight' in n:
                 names.append(n)
                 tensors.append(p.detach().cpu().numpy())
     spectra = {}
