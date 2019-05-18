@@ -2,7 +2,10 @@ import math
 import torch
 from torch import nn
 
-from .butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_ortho_mult_untied, butterfly_mult_untied_svd, bbt_mult_untied, bbt_ortho_mult_untied
+from .butterfly_multiply import butterfly_mult, butterfly_mult_untied
+from .butterfly_multiply import butterfly_ortho_mult_tied
+from .butterfly_multiply import butterfly_ortho_mult_untied, butterfly_mult_untied_svd
+from .butterfly_multiply import bbt_mult_untied, bbt_ortho_mult_untied
 
 class Butterfly(nn.Module):
     """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
@@ -99,7 +102,7 @@ class Butterfly(nn.Module):
         else:
             assert not complex, 'orthogonal/svd parameterization is only implemented for real, not complex'
             if param == 'ortho':
-                assert not tied_weight and not complex
+                assert not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
             elif param == 'odo':
                 assert not tied_weight and not complex
@@ -162,7 +165,10 @@ class Butterfly(nn.Module):
             else:
                 output = butterfly_mult_untied(self.twiddle, output, self.increasing_stride, self.training) if self.nblocks == 0 else bbt_mult_untied(self.twiddle, output)
         elif self.param == 'ortho':
-            output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
+            if self.tied_weight:
+                output = butterfly_ortho_mult_tied(self.twiddle, output, self.increasing_stride)
+            else:
+                output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
         elif self.param == 'odo':
             diag = self.diag
             if self.diag_constraint == 'positive':
