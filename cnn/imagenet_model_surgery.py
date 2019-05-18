@@ -26,6 +26,7 @@ def get_parser():
     parser.add_argument('--input-dir', default='/distillation/resnet18/butterflies', type=str, help='Input directory for distilled butterflies')
     parser.add_argument('--output-dir', default='.', help='Output directory for initialized resnets with butterflies.')
     parser.add_argument('--random', action='store_true', help='Use randomly initialized butterflies so don\'t load weights for butterflies')
+    parser.add_argument('--start-epoch', type=int, help='Starting epoch for training.', default=0) 
     return parser
 
 # from imagenet_experiment import get_loaders, validate
@@ -147,7 +148,7 @@ else:
 student_model_dict = train_utils.add_prefix(student_model.state_dict(), prefix="module.")
 state = {'state_dict': student_model_dict,
          'best_acc1': 0,
-         'epoch': 0}
+         'epoch': args.start_epoch}
 
 # save model state for loading into code for fine-tuning
 if args.random:
