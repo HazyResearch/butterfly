@@ -70,12 +70,12 @@ class TrainableModel(Trainable):
             structured_layer = ButterflyConv2d(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, tied_weight=False, ortho_init=True,
-                param=model_args['param'])
-        elif model_args['structure_type'] == 'BBT':
-            structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
-                kernel_size=kernel_size, stride=stride, padding=padding,
-                bias=False, nblocks=model_args['nblocks'], tied_weight=False,
-                ortho_init=True, param=model_args['param'])
+                param=model_args['param'], nblocks=model_args['nblocks'])
+#        elif model_args['structure_type'] == 'BBT':
+#            structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
+#                kernel_size=kernel_size, stride=stride, padding=padding,
+#                bias=False, nblocks=model_args['nblocks'], tied_weight=False,
+#                ortho_init=True, param=model_args['param'])
         elif model_args['structure_type'] == 'LR':
             assert out_channels >= in_channels, "Out channels < in channels"
             if model_args['nblocks'] == 0:
@@ -108,7 +108,7 @@ class TrainableModel(Trainable):
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
             output = self.model(data)
-            loss = F.mse_loss(output, target) / torch.norm(target).pow(2)
+            loss = F.mse_loss(output, target)
             loss.backward()
             self.optimizer.step()
 
@@ -119,7 +119,7 @@ class TrainableModel(Trainable):
             for data, target in self.train_loader:
                 data, target = data.to(self.device), target.to(self.device)
                 output = self.model(data)
-                loss += F.mse_loss(output, target).item() / (torch.norm(target)**2).item()
+                loss += F.mse_loss(output, target).item()
         training_loss = loss / len(self.train_loader)
         return {"mean_loss": training_loss, "inverse_loss": 1/training_loss}
 
@@ -158,7 +158,7 @@ def default_config():
                   'nblocks': 1,
                   'param': 'regular'}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'SGD'  # Which optimizer to use, either Adam or SGD
-    ntrials = 8  # Number of trials for hyperparameter tuning
+    ntrials = 100  # Number of trials for hyperparameter tuning
     nmaxepochs = 10  # Maximum number of epochs
     result_dir = project_root + '/cnn/ray_results'  # Directory to store results
     train_dir = '/distillation/imagenet/activations'
@@ -167,13 +167,12 @@ def default_config():
     workers = 4
     dataset = 'imagenet'
     teacher_model = 'resnet18'
-    iters = 1
     min_lr = 1e-4
     max_lr=1
 
 @ex.capture
 def distillation_experiment(model, model_args, optimizer,
-    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model, dataset, iters, min_lr, max_lr):
+    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model, dataset, min_lr, max_lr):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -197,7 +196,7 @@ def distillation_experiment(model, model_args, optimizer,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
-        stop={"training_iteration": iters},
+        stop={"training_iteration": 1 if smoke_test else 9999},
         config=config,
     )
     return experiment
@@ -212,7 +211,8 @@ def run(model, result_dir, nmaxepochs):
             ray.init(redis_address=address)
     except:
         ray.init()
-    trials = ray.tune.run(experiment, raise_on_failed_trial=True, queue_trials=True)
+    ahb = AsyncHyperBandScheduler(reward_attr='inverse_loss', max_t=nmaxepochs)
+    trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     loss = [trial.last_result.get('mean_loss', float('inf')) for trial in trials]
 
