@@ -20,7 +20,7 @@ from sacred import Experiment
 from sacred.observers import FileStorageObserver, SlackObserver
 
 import ray
-from ray.tune import Trainable, Experiment as RayExperiment, sample_from
+from ray.tune import Trainable, Experiment as RayExperiment, sample_from, grid_search
 from ray.tune.schedulers import AsyncHyperBandScheduler
 
 
@@ -39,7 +39,7 @@ class TrainableModel(Trainable):
         if self.device == 'cuda':
             torch.cuda.manual_seed(config['seed'])
         self.model = model_utils.get_model(config['model']).to(device)
-        self.train_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
+        self.train_loader, self.valid_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
         structured_params = filter(lambda p: hasattr(p, '_is_structured') and p._is_structured, self.model.parameters())
         unstructured_params = filter(lambda p: not (hasattr(p, '_is_structured') and p._is_structured), self.model.parameters())
         if config['optimizer'] == 'Adam':
@@ -50,7 +50,8 @@ class TrainableModel(Trainable):
             self.optimizer = optim.SGD([{'params': structured_params, 'weight_decay': 0.0},
                                         {'params': unstructured_params}],
                                        lr=config['lr'], momentum=0.9, weight_decay=config['weight_decay'])
-        self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
+        # self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
+        self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[60, 120, 160], gamma=config['lr_decay_factor'])
 
     def _train_iteration(self):
         self.model.train()
@@ -64,6 +65,17 @@ class TrainableModel(Trainable):
 
     def _test(self):
         self.model.eval()
+        valid_loss = 0.0
+        correct = 0
+        with torch.no_grad():
+            for data, target in self.valid_loader:
+                data, target = data.to(self.device), target.to(self.device)
+                output = self.model(data)
+                valid_loss += F.cross_entropy(output, target, reduction='sum').item()
+                pred = output.argmax(dim=1, keepdim=True)
+                correct += (pred == target.data.view_as(pred)).long().cpu().sum()
+        valid_loss = valid_loss / len(self.valid_loader.dataset)
+        valid_accuracy = correct.item() / len(self.valid_loader.dataset)
         test_loss = 0.0
         correct = 0
         with torch.no_grad():
@@ -74,8 +86,8 @@ class TrainableModel(Trainable):
                 pred = output.argmax(dim=1, keepdim=True)
                 correct += (pred == target.data.view_as(pred)).long().cpu().sum()
         test_loss = test_loss / len(self.test_loader.dataset)
-        accuracy = correct.item() / len(self.test_loader.dataset)
-        return {"mean_loss": test_loss, "mean_accuracy": accuracy}
+        test_accuracy = correct.item() / len(self.test_loader.dataset)
+        return {"mean_loss": valid_loss, "mean_accuracy": valid_accuracy, "test_loss": test_loss, "test_accuracy": test_accuracy}
 
     def _train(self):
         self.scheduler.step()
@@ -132,22 +144,23 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, result_dir, cuda, smoke_test, batch):
+def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, nmaxepochs, result_dir, cuda, smoke_test, batch):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-4), math.log(1e-2)) if optimizer == 'Adam'
                                            else random.uniform(math.log(2e-3), math.log(1e-0)))),
-        'lr_decay_factor': sample_from(lambda spec: random.choice([0.1, 0.2])) if lr_decay else 1.0,
+        # 'lr': grid_search([0.025, 0.05, 0.1, 0.2]),
+        'lr_decay_factor': 0.2 if lr_decay else 1.0,
         'lr_decay_period': lr_decay_period,
-        'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if weight_decay else 0.0,
+        'weight_decay': 5e-4 if weight_decay else 0.0,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
         'dataset': {'name': 'CIFAR10', 'batch': batch},
      }
     experiment = RayExperiment(
-        name=f'cifar10_{model}_{model_args}_{optimizer}_lr_decay_{lr_decay}_weight_decay_{weight_decay}',
+        name=f'cifar10_{model}_{model_args}_{optimizer}',
         run=TrainableModel,
         local_dir=result_dir,
         num_samples=ntrials,
@@ -155,14 +168,14 @@ def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, 
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
-        stop={"training_iteration": 1 if smoke_test else 9999},
+        stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         config=config,
     )
     return experiment
 
 
 @ex.automain
-def run(model, result_dir, nmaxepochs):
+def run(model, model_args, result_dir, nmaxepochs):
     experiment = cifar10_experiment()
     try:
         with open('../config/redis_address', 'r') as f:
@@ -172,6 +185,7 @@ def run(model, result_dir, nmaxepochs):
         ray.init()
     ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
     trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
+    # trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     accuracy = [trial.last_result.get('mean_accuracy', float('-inf')) for trial in trials]
 
@@ -182,4 +196,4 @@ def run(model, result_dir, nmaxepochs):
         pickle.dump(trials, f)
 
     ex.add_artifact(str(checkpoint_path))
-    return max(accuracy)
+    return model, model_args, max(accuracy)

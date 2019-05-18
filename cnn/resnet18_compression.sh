@@ -34,18 +34,34 @@
 # done
 # wait
 
-for numlayer in $(seq 2 2); do
-    for nblocks in 3 4 5; do
-        python cifar_experiment.py with model=ResNet18 model_args.num_structured_layers=$numlayer model_args.structure_type=BBT model_args.nblocks=$nblocks model_args.param='regular' optimizer=Adam lr_decay=True weight_decay=True &
-        sleep 1.25h
-    done
-done
-sleep 1h
+# for numlayer in $(seq 2 2); do
+#     for nblocks in 3 4 5; do
+#         python cifar_experiment.py with model=ResNet18 model_args.num_structured_layers=$numlayer model_args.structure_type=BBT model_args.nblocks=$nblocks model_args.param='regular' optimizer=Adam lr_decay=True weight_decay=True &
+#         sleep 1.25h
+#     done
+# done
+# sleep 1h
 
-for numlayer in $(seq 2 2); do
-    for nblocks in 3 4 5; do
-        python cifar_experiment.py with model=ResNet18 model_args.num_structured_layers=$numlayer model_args.structure_type=BBT model_args.nblocks=$nblocks model_args.param='svd' optimizer=Adam lr_decay=True weight_decay=True &
-        sleep 2.25h
-    done
-done
-wait
+# for numlayer in $(seq 2 2); do
+#     for nblocks in 3 4 5; do
+#         python cifar_experiment.py with model=ResNet18 model_args.num_structured_layers=$numlayer model_args.structure_type=BBT model_args.nblocks=$nblocks model_args.param='svd' optimizer=Adam lr_decay=True weight_decay=True &
+#         sleep 2.25h
+#     done
+# done
+# wait
+
+# raiders2,4,5
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=0 model_args.structure_type=B optimizer=SGD nmaxepochs=200
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=1 model_args.structure_type=B optimizer=SGD nmaxepochs=200
+# p100-template-4
+# python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-3
+# python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=BBT optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+
+# raiders2,4,5
+python cifar_experiment.py with ntrials=3 model=MobileNet optimizer=SGD nmaxepochs=200
+python cifar_experiment.py with ntrials=3 model=ShuffleNet optimizer=SGD nmaxepochs=200
+
+# Low-rank Conv2d
+# p100-template-3
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=1 model_args.structure_type=LR optimizer=SGD nmaxepochs=200 && python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q
