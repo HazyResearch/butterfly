@@ -26,7 +26,7 @@ class ButterflyTest(unittest.TestCase):
                                     for nblocks in [0, 1, 2, 3] if param in ['regular', 'ortho', 'odo', 'obdobt'] else [0]:
                                         for expansion in [1, 2]:
                                             for double in [False, True]:
-                                                if param in ['odo', 'obdobt', 'svd'] and tied_weight:
+                                                if param in ['obdobt', 'svd'] and tied_weight:
                                                     continue
                                                 if nblocks > 0 and (tied_weight or complex or param not in ['regular', 'ortho', 'odo', 'obdobt']):
                                                     continue
@@ -57,7 +57,7 @@ class ButterflyTest(unittest.TestCase):
                                     for nblocks in [0, 1, 2, 3] if param in ['regular', 'ortho', 'odo', 'obdobt'] else [0]:
                                         for expansion in [1, 2]:
                                             for double in [False, True]:
-                                                if param in ['odo', 'obdobt', 'svd'] and tied_weight:
+                                                if param in ['obdobt', 'svd'] and tied_weight:
                                                     continue
                                                 if nblocks > 0 and (tied_weight or complex or param not in ['regular', 'ortho', 'odo', 'obdobt']):
                                                     continue
