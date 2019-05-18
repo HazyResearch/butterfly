@@ -15,20 +15,20 @@ import structure.layer as sl
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class LeNet(nn.Module):
-    def __init__(self, method='linear', tied_weight=False, **kwargs):
+    def __init__(self, method='linear', **kwargs):
         super(LeNet, self).__init__()
         self.conv1 = nn.Conv2d(3, 6, 5, padding=2)
         self.conv2 = nn.Conv2d(6, 16, 5, padding=2)
 
-        print(method, tied_weight, kwargs)
+        # print(method, tied_weight, kwargs)
         if method == 'linear':
             self.fc   = nn.Linear(1024, 1024)
         elif method == 'butterfly':
-            self.fc   = Butterfly(1024, 1024, tied_weight=tied_weight, bias=True, **kwargs)
+            self.fc   = Butterfly(1024, 1024, bias=True, **kwargs)
             # self.fc   = Butterfly(1024, 1024, tied_weight=False, bias=False, param='regular', nblocks=0)
             # self.fc   = Butterfly(1024, 1024, tied_weight=False, bias=False, param='odo', nblocks=1)
         elif method == 'low-rank':
-            self.fc = nn.Sequential(nn.Linear(1024, kwargs['rank'], bias=True), nn.Linear(kwargs['rank'], 1024))
+            self.fc = nn.Sequential(nn.Linear(1024, kwargs['rank'], bias=False), nn.Linear(kwargs['rank'], 1024))
         elif method == 'toeplitz':
             self.fc = sl.ToeplitzLikeC(layer_size=1024, bias=True, **kwargs)
         else: assert False, f"method {method} not supported"
