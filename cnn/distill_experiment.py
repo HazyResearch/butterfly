@@ -211,7 +211,7 @@ def run(model, result_dir, nmaxepochs):
             ray.init(redis_address=address)
     except:
         ray.init()
-    ahb = AsyncHyperBandScheduler(reward_attr='inverse_loss', max_t=nmaxepochs)
+    ahb = AsyncHyperBandScheduler(reward_attr='inverse_loss', grace_period=5, reduction_factor=2, brackets=3, max_t=nmaxepochs)
     trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     loss = [trial.last_result.get('mean_loss', float('inf')) for trial in trials]
