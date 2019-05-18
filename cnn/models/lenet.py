@@ -24,16 +24,16 @@ class LeNet(nn.Module):
         if method == 'linear':
             self.fc   = nn.Linear(1024, 1024)
         elif method == 'butterfly':
-            self.fc   = Butterfly(1024, 1024, tied_weight=tied_weight, bias=False, **kwargs)
+            self.fc   = Butterfly(1024, 1024, tied_weight=tied_weight, bias=True, **kwargs)
             # self.fc   = Butterfly(1024, 1024, tied_weight=False, bias=False, param='regular', nblocks=0)
             # self.fc   = Butterfly(1024, 1024, tied_weight=False, bias=False, param='odo', nblocks=1)
         elif method == 'low-rank':
-            self.fc = nn.Sequential(nn.Linear(1024, kwargs['rank'], bias=False), nn.Linear(kwargs['rank'], 1024))
+            self.fc = nn.Sequential(nn.Linear(1024, kwargs['rank'], bias=True), nn.Linear(kwargs['rank'], 1024))
         elif method == 'toeplitz':
-            self.fc = sl.ToeplitzLike(layer_size=1024, bias=False, **kwargs)
+            self.fc = sl.ToeplitzLikeC(layer_size=1024, bias=True, **kwargs)
         else: assert False, f"method {method} not supported"
 
-        self.bias = nn.Parameter(torch.zeros(1024))
+        # self.bias = nn.Parameter(torch.zeros(1024))
         self.logits   = nn.Linear(1024, 10)
 
 
@@ -44,7 +44,7 @@ class LeNet(nn.Module):
         out = F.max_pool2d(out, 2)
         out = out.view(out.size(0), -1)
         out = F.relu(self.fc(out))
-        out = out + self.bias
+        # out = out + self.bias
         out = self.logits(out)
         return out
 
@@ -76,25 +76,27 @@ class AlexNet(nn.Module):
         )
         self.dropout = nn.Dropout() if dropout else nn.Identity()
         self.features_size = 256 * 4 * 4
+
         self.fc1 = nn.Linear(self.features_size, self.features_size)
         if method == 'linear':
-            self.fc   = nn.Linear(self.features_size, self.features_size)
+            self.fc   = nn.Linear(self.features_size, self.features_size, bias=False)
         elif method == 'butterfly':
             self.fc   = Butterfly(self.features_size, self.features_size, tied_weight=tied_weight, bias=False, **kwargs)
             # self.fc   = Butterfly(self.features_size, self.features_size, tied_weight=False, bias=False, param='regular', nblocks=0)
             # self.fc   = Butterfly(self.features_size, self.features_size, tied_weight=False, bias=False, param='odo', nblocks=1)
         elif method == 'low-rank':
-            self.fc = nn.Sequential(nn.Linear(self.features_size, kwargs['rank'], bias=False), nn.Linear(kwargs['rank'], self.features_size))
+            self.fc = nn.Sequential(nn.Linear(self.features_size, kwargs['rank'], bias=False), nn.Linear(kwargs['rank'], self.features_size, bias=False))
         else: assert False, f"method {method} not supported"
-        # self.fc2 = nn.Linear(4096, 4096)
-        self.fc2 = nn.Identity()
+        self.bias = nn.Parameter(torch.zeros(self.features_size))
+        self.fc2 = nn.Linear(4096, 4096)
+        # self.fc2 = nn.Identity()
         self.classifier = nn.Sequential(
             # nn.Dropout(),
             # self.dropout,
-            self.fc1,
-            nn.ReLU(),
+            # self.fc1,
+            # nn.ReLU(),
             # nn.Dropout(),
-            # self.dropout,
+            self.dropout,
             self.fc2,
             nn.ReLU(),
             nn.Linear(self.features_size, num_classes),
@@ -104,5 +106,7 @@ class AlexNet(nn.Module):
         x = self.features(x)
         # print("HELLO ", x.size())
         x = x.view(-1, self.features_size)
+        x = self.dropout(x)
+        x = nn.ReLU(self.fc1(x) + self.bias)
         x = self.classifier(x)
         return x
