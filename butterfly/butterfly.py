@@ -109,9 +109,9 @@ class Butterfly(nn.Module):
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 self.twiddle1 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 if diag_init == 'normal':
-                    self.diag = nn.Parameter(torch.randn(self.nstack, size))
+                    self.diag = nn.Parameter(torch.randn(self.nstack, size)) / math.sqrt(self.nstack)
                 else:
-                    self.diag = nn.Parameter(torch.ones(self.nstack, size))
+                    self.diag = nn.Parameter(torch.ones(self.nstack, size)) / math.sqrt(self.nstack)
                 self.twiddle1._is_structured = True
                 self.diag._is_structured = True
                 # if self.expansion > 1:  # Extra diagonals on the left and right
@@ -224,11 +224,11 @@ class Butterfly(nn.Module):
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.nstack * self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
             if not self.complex:
-                output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).mean(dim=1)
+                output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).sum(dim=1)
             else:
-                output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=1)
+                output = output.view(batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).sum(dim=1)
         if self.double:
-            output = output.view(batch, 2, out_size_extended // 2).mean(dim=1)
+            output = output.view(batch, 2, out_size_extended // 2).sum(dim=1)
         if self.out_size != out_size_extended:  # Take top rows
             output = output[:, :self.out_size] if not self.double else output[:, :self.out_size // 2]
         if self.bias is not None:
@@ -315,9 +315,9 @@ class ButterflyBmm(Butterfly):
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
         if (self.nstack * self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
             if not self.complex:
-                output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).mean(dim=2)
+                output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).sum(dim=2)
             else:
-                output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).mean(dim=2)
+                output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended, 2).sum(dim=2)
         if self.double:
             output = output.view(batch, self.matrix_batch, 2, out_size_extended // 2).mean(dim=2)
         if self.out_size != out_size_extended:  # Take top rows
