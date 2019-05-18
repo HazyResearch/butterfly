@@ -28,6 +28,8 @@ import model_utils
 import dataset_utils
 
 
+nparameters = 0
+
 class TrainableModel(Trainable):
     """Trainable object for a Pytorch model, to be used with Ray's Hyperband tuning.
     """
@@ -39,6 +41,10 @@ class TrainableModel(Trainable):
         if self.device == 'cuda':
             torch.cuda.manual_seed(config['seed'])
         self.model = model_utils.get_model(config['model']).to(device)
+        # count parameters
+        nparameters = sum(param.nelement() for param in self.model.parameters())
+        print("Parameter count: ", nparameters)
+
         self.train_loader, self.valid_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
         structured_params = filter(lambda p: hasattr(p, '_is_structured') and p._is_structured, self.model.parameters())
         unstructured_params = filter(lambda p: not (hasattr(p, '_is_structured') and p._is_structured), self.model.parameters())
@@ -55,6 +61,7 @@ class TrainableModel(Trainable):
 
     def _train_iteration(self):
         self.model.train()
+        # with torch.autograd.set_detect_anomaly(True):
         for data, target in self.train_loader:
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
@@ -122,7 +129,7 @@ if slack_config_path.exists():
 @ex.config
 def default_config():
     model = 'LeNet'  # Name of model, see model_utils.py
-    model_args = {}  # Arguments to be passed to the model, as a dictionary
+    args = {}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'Adam'  # Which optimizer to use, either Adam or SGD
     lr_decay = False  # Whether to use learning rate decay
     lr_decay_period = 25  # Period of learning rate decay
@@ -144,11 +151,11 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, nmaxepochs, result_dir, cuda, smoke_test, batch):
+def cifar10_experiment(model, args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, nmaxepochs, result_dir, cuda, smoke_test, batch):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-4), math.log(1e-2)) if optimizer == 'Adam'
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-4), math.log(5e-3)) if optimizer == 'Adam'
                                            else random.uniform(math.log(2e-3), math.log(1e-0)))),
         # 'lr': grid_search([0.025, 0.05, 0.1, 0.2]),
         'lr_decay_factor': 0.2 if lr_decay else 1.0,
@@ -156,17 +163,17 @@ def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, 
         'weight_decay': 5e-4 if weight_decay else 0.0,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
-        'model': {'name': model, 'args': model_args},
+        'model': {'name': model, 'args': args},
         'dataset': {'name': 'CIFAR10', 'batch': batch},
      }
     experiment = RayExperiment(
-        name=f'cifar10_{model}_{model_args}_{optimizer}',
+        name=f'cifar10_{model}_{args}_{optimizer}',
         run=TrainableModel,
         local_dir=result_dir,
         num_samples=ntrials,
         checkpoint_at_end=True,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
-        max_failures=-1,
+        max_failures=0,
         resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
         stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         config=config,
@@ -175,7 +182,7 @@ def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, 
 
 
 @ex.automain
-def run(model, model_args, result_dir, nmaxepochs):
+def run(model, args, result_dir, nmaxepochs):
     experiment = cifar10_experiment()
     try:
         with open('../config/redis_address', 'r') as f:
@@ -196,4 +203,4 @@ def run(model, model_args, result_dir, nmaxepochs):
         pickle.dump(trials, f)
 
     ex.add_artifact(str(checkpoint_path))
-    return model, model_args, max(accuracy)
+    return model, nparameters, args, max(accuracy)
