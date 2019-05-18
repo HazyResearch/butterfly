@@ -21,13 +21,14 @@ class BasicBlock(nn.Module):
 
     def __init__(self, in_planes, planes, stride=1, is_structured=False, structure_type='B', **kwargs):
         super(BasicBlock, self).__init__()
+        nblocks = kwargs.get('nblocks', 0)
         if is_structured:
             if structure_type == 'B':
                 self.conv1 = ButterflyConv2d(in_planes, planes, kernel_size=3, stride=stride,
                                              padding=1, bias=False, ortho_init=True, **kwargs)
             elif structure_type == 'LR':
                 # Low rank should match the number of parameters of butterfly
-                rank = int(math.log2(planes)) if nblocks == 0 else nblocks * 2 * int(math.log2(planes))
+                rank = kwargs.get('rank', int(math.log2(planes)) if nblocks == 0 else nblocks * 2 * int(math.log2(planes)))
                 self.conv1 = LowRankConv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False, rank=rank)
         else:
             self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
@@ -37,7 +38,7 @@ class BasicBlock(nn.Module):
                 self.conv2 = ButterflyConv2d(planes, planes, kernel_size=3, stride=1, padding=1,
                                              bias=False, ortho_init=True, **kwargs)
             elif structure_type == 'LR':
-                rank = int(math.log2(planes)) if nblocks == 0 else nblocks * 2 * int(math.log2(planes))
+                rank = kwargs.get('rank', int(math.log2(planes)) if nblocks == 0 else nblocks * 2 * int(math.log2(planes)))
                 self.conv2 = LowRankConv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False, rank=rank)
         else:
             self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
@@ -50,7 +51,7 @@ class BasicBlock(nn.Module):
                     conv = ButterflyConv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride,
                                            bias=False, ortho_init=True, **kwargs)
                 elif structure_type == 'LR':
-                    rank = int(math.log2(self.expansion * planes)) if nblocks == 0 else nblocks * 2 * int(math.log2(self.expansion * planes))
+                    rank = kwargs.get('rank', int(math.log2(self.expansion * planes)) if nblocks == 0 else nblocks * 2 * int(math.log2(self.expansion * planes)))
                     conv = LowRankConv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False, rank=rank)
             else:
                 conv = nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False)
@@ -101,6 +102,10 @@ class ResNet(nn.Module):
         assert structure_type in ['B', 'LR']
         super(ResNet, self).__init__()
         self.is_structured = [False] * (4 - num_structured_layers) + [True] * num_structured_layers
+        self.butterfly_expansion = kwargs.pop('expansion', [0] * 4)
+        self.rank = kwargs.pop('rank', [-1] * 4)
+        if isinstance(self.butterfly_expansion, int):
+            sefl.butterfly_expansion = [self.butterfly_expansion] * 4
         self.in_planes = 64
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -109,9 +114,11 @@ class ResNet(nn.Module):
         self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2, is_structured=self.is_structured[1])
         # Only stacking butterflies in the 3rd layer for now
         self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2, is_structured=self.is_structured[2],
-                                       structure_type=structure_type, **kwargs)
+                                       structure_type=structure_type, expansion=self.butterfly_expansion[2],
+                                       **{**kwargs, **({'rank': self.rank[2]} if structure_type=='LR' else {})})
         self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2, is_structured=self.is_structured[3],
-                                       structure_type=structure_type, **kwargs)
+                                       structure_type=structure_type, expansion=self.butterfly_expansion[3],
+                                       **{**kwargs, **({'rank': self.rank[3]} if structure_type=='LR' else {})})
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
     def _make_layer(self, block, planes, num_blocks, stride, is_structured, structure_type='B', **kwargs):
