@@ -29,12 +29,20 @@ print(f"mkdir -p {resultdir}")
 
 min_lr = 1e-4 
 max_lr = 1 
+grace_period=5 
 
 for layer in layers:
     # butterflies
-    for nblocks in range(0,6):
-        print(f"{qsub_cmd} -N {layer}_B_{nblocks} -o {resultdir}/{layer}_B_{nblocks}.log python distill_experiment.py with model_args.layer={layer} ntrials=50 nmaxepochs=20 max_lr={max_lr} min_lr={min_lr} optimizer=Adam model_args.structure_type=B model_args.nblocks={nblocks} dataset=cifar10 teacher_model=ResNet18 result_dir={resultdir} train_dir={traindir}")
+#    for nblocks in range(0,6):
+#        print(f"{qsub_cmd} -N {layer}_B_{nblocks} -o {resultdir}/{layer}_B_{nblocks}.log python distill_experiment.py with model_args.layer={layer} ntrials=50 nmaxepochs=20 max_lr={max_lr} min_lr={min_lr} optimizer=Adam model_args.structure_type=B model_args.nblocks={nblocks} dataset=cifar10 teacher_model=ResNet18 result_dir={resultdir} train_dir={traindir}")
+#
+#    # low rank
+#    for nblocks in range(0,6):
+#        print(f"{qsub_cmd} -N {layer}_LR_{nblocks} -o {resultdir}/{layer}_LR_{nblocks}.log  python distill_experiment.py with model_args.layer={layer} ntrials=12 nmaxepochs=20 max_lr={max_lr} min_lr={min_lr} optimizer=Adam model_args.structure_type=LR model_args.nblocks={nblocks} dataset=cifar10 teacher_model=ResNet18 result_dir={resultdir} train_dir={traindir}")
 
-    # low rank
-    for nblocks in range(0,6):
-        print(f"{qsub_cmd} -N {layer}_LR_{nblocks} -o {resultdir}/{layer}_LR_{nblocks}.log  python distill_experiment.py with model_args.layer={layer} ntrials=12 nmaxepochs=20 max_lr={max_lr} min_lr={min_lr} optimizer=Adam model_args.structure_type=LR model_args.nblocks={nblocks} dataset=cifar10 teacher_model=ResNet18 result_dir={resultdir} train_dir={traindir}")
+#    for nblocks in range(0,6):
+#        print(f"{qsub_cmd} -N {layer}_B_{nblocks} -o {resultdir}/{layer}_B_{nblocks}.log python distill_experiment.py with model_args.layer={layer} model_args.param=odo ntrials=50 nmaxepochs=20 max_lr={max_lr} min_lr={min_lr} optimizer=Adam model_args.structure_type=B model_args.nblocks={nblocks} dataset=cifar10 teacher_model=ResNet18 result_dir={resultdir} train_dir={traindir}")
+
+    for expansion in range(6, 42, 6):        
+        print(f"{qsub_cmd} -N {layer}_B_{nblocks} -o {resultdir}/{layer}_B_{nblocks}.log python distill_experiment.py with grace_period={grace_period} model_args.nblocks=0 model_args.param=odo model_args.tied_weight=1 model_args.expansion=$exp model_args.diag_init=normal model_args.layer={layer} ntrials=50 nmaxepochs=20 max_lr={max_lr} min_lr={min_lr} optimizer=Adam model_args.structure_type=B model_args.nblocks={nblocks} dataset=cifar10 teacher_model=ResNet18 result_dir={resultdir} train_dir={traindir}")
+
