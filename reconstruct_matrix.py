@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from butterfly import Butterfly
 
+print('Initializing...')
+
 # TODO..
 parser = argparse.ArgumentParser('Butterfly matrix recovery')
 parser.parse_args()
@@ -29,6 +31,11 @@ print('Numerical reconstruction error:', np.sum(np.square(diff)))
 s[rank:] = 0
 diff = (u * s) @ v - numpy_mat
 print('Low-rank reconstruction error:', np.sum(np.square(diff)))
+
+nth_largest = sorted(np.abs(numpy_mat).flatten(), reverse=True)[tot_param]
+pruned = numpy_mat * (np.abs(numpy_mat) > nth_largest)
+diff = pruned - numpy_mat
+print('Pruned error:', np.sum(np.square(diff)))
 
 butterfly = butterfly.cuda()
 ident = torch.eye(n).cuda()
