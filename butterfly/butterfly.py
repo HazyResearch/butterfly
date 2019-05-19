@@ -199,7 +199,7 @@ class Butterfly(nn.Module):
             if self.param == 'opdo' and self.expansion > 1:
                 output = output.view(-1, self.expansion, output.shape[-1]).sum(dim=-2, keepdim=True).expand(-1, self.expansion, -1).reshape(output.shape)
             if self.tied_weight:
-                output = butterfly_ortho_mult_tied(self.twiddle, output, True)
+                output = butterfly_ortho_mult_tied(self.twiddle1, output, True)
             else:
                 output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
             # if self.expansion > 1:
