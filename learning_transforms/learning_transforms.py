@@ -117,6 +117,23 @@ class TrainableBP(TrainableMatrixFactorization):
                     for _ in range(depth)
                 ]
             )
+        elif config['model'][0:3] == 'ODO':
+            if (config['model'][3:]).isdigit():
+                width = int(config['model'][3:])
+                self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=False, param='odo', tied_weight=True, nblocks=0, expansion=width)
+            elif config['model'][3] == 'k':
+                k = int(config['model'][4:])
+                self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=False, param='odo', nblocks=k)
+
+        # non-butterfly transforms
+        # elif config['model'][0:2] == 'TL' and (config['model'][2:]).isdigit():
+        #     rank = int(config['model'][2:])
+        elif config['model'][0:4] == 'rank' and (config['model'][4:]).isdigit():
+            rank = int(config['model'][4:])
+            self.model = nn.Sequential(
+                nn.Linear(size, rank, bias=False),
+                nn.Linear(rank, size, bias=False),
+            )
 
         else:
             assert False, f"Model {config['model']} not implemented"
@@ -128,9 +145,12 @@ class TrainableBP(TrainableMatrixFactorization):
             self.input = real_to_complex(self.input)
 
     def freeze(self):
-        for i, m in enumerate(self.model):
-            if isinstance(m, Permutation) or isinstance(m, PermutationFactor):
-                self.model[i] = FixedPermutation(m.argmax())
+        try:
+            for i, m in enumerate(self.model):
+                if isinstance(m, Permutation) or isinstance(m, PermutationFactor):
+                    self.model[i] = FixedPermutation(m.argmax())
+        except:
+            pass
 
 
 def polish(trial):
@@ -172,8 +192,8 @@ def default_config():
     complex = False  # Whether to use complex factorization or real factorization
     fixed_order = True  # Whether the order of the factors are fixed
     param = 'regular' # How to constrain the parameters
-    lr_min = 1e-2
-    lr_max = 5e-1
+    lr_min = 1e-4
+    lr_max = 1e-2
     ntrials = 20  # Number of trials for hyperparameter tuning
     nsteps = 400  # Number of steps per epoch
     nepochsvalid = 5  # Frequency of validation (polishing), in terms of epochs

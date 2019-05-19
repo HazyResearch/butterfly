@@ -113,5 +113,21 @@ def named_target_matrix(name, size):
         perm = np.random.permutation(size)
         P = np.eye(size)[perm]
         return P
+    elif name == 'low-rank-unnorm':
+        np.random.seed(0)
+        r = 1
+        G = np.random.randn(size, r)
+        H = np.random.randn(size, r)
+        M = G @ H.T
+        # M /= math.sqrt(size*r)
+        return M
+    elif name == 'low-rank':
+        np.random.seed(0)
+        r = 1
+        G = np.random.randn(size, r)
+        H = np.random.randn(size, r)
+        M = G @ H.T
+        M /= math.sqrt(size*r)
+        return M
     else:
         assert False, 'Target matrix name not recognized or implemented'
