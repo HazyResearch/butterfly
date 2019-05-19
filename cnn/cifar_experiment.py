@@ -28,8 +28,6 @@ import model_utils
 import dataset_utils
 
 
-nparameters = 0
-
 class TrainableModel(Trainable):
     """Trainable object for a Pytorch model, to be used with Ray's Hyperband tuning.
     """
@@ -42,8 +40,8 @@ class TrainableModel(Trainable):
             torch.cuda.manual_seed(config['seed'])
         self.model = model_utils.get_model(config['model']).to(device)
         # count parameters
-        nparameters = sum(param.nelement() for param in self.model.parameters())
-        print("Parameter count: ", nparameters)
+        self.nparameters = sum(param.nelement() for param in self.model.parameters())
+        print("Parameter count: ", self.nparameters)
 
         self.train_loader, self.valid_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
         structured_params = filter(lambda p: hasattr(p, '_is_structured') and p._is_structured, self.model.parameters())
@@ -94,7 +92,7 @@ class TrainableModel(Trainable):
                 correct += (pred == target.data.view_as(pred)).long().cpu().sum()
         test_loss = test_loss / len(self.test_loader.dataset)
         test_accuracy = correct.item() / len(self.test_loader.dataset)
-        return {"mean_loss": valid_loss, "mean_accuracy": valid_accuracy, "test_loss": test_loss, "test_accuracy": test_accuracy}
+        return {"nparams": self.nparameters, "mean_loss": valid_loss, "mean_accuracy": valid_accuracy, "test_loss": test_loss, "test_accuracy": test_accuracy}
 
     def _train(self):
         self.scheduler.step()
@@ -195,6 +193,7 @@ def run(model, args, result_dir, nmaxepochs):
     # trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     accuracy = [trial.last_result.get('mean_accuracy', float('-inf')) for trial in trials]
+    nparams = trials[0].last_result['nparams']
 
     checkpoint_path = Path(result_dir) / experiment.name
     checkpoint_path.mkdir(parents=True, exist_ok=True)
@@ -203,4 +202,4 @@ def run(model, args, result_dir, nmaxepochs):
         pickle.dump(trials, f)
 
     ex.add_artifact(str(checkpoint_path))
-    return model, nparameters, args, max(accuracy)
+    return max(accuracy), model, nparams, args
