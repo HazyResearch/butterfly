@@ -9,6 +9,7 @@ import numpy as np
 from numpy.polynomial import legendre
 import scipy.linalg as LA
 from scipy.fftpack import dct, dst, fft2
+import scipy.sparse as sparse
 
 # Copied from https://stackoverflow.com/questions/23869694/create-nxn-haar-matrix
 def haar_matrix(n, normalized=False):
@@ -49,6 +50,17 @@ def hilbert_matrix(n):
     arg = range_[:, None] + range_ - 1
     return 1.0 / arg
 
+def krylov_construct(A, v, m):
+    n = v.shape[0]
+    assert A.shape == (n,n)
+    d = np.diagonal(A, 0)
+    subd = np.diagonal(A, -1)
+
+    K = np.zeros(shape=(m,n))
+    K[0,:] = v
+    for i in range(1,m):
+        K[i,1:] = subd*K[i-1,:-1]
+    return K
 
 def named_target_matrix(name, size):
     """
@@ -113,21 +125,35 @@ def named_target_matrix(name, size):
         perm = np.random.permutation(size)
         P = np.eye(size)[perm]
         return P
-    elif name == 'low-rank-unnorm':
+    elif name.startswith('rank-unnorm'):
+        r = int(name[11:])
         np.random.seed(0)
-        r = 1
         G = np.random.randn(size, r)
         H = np.random.randn(size, r)
         M = G @ H.T
         # M /= math.sqrt(size*r)
         return M
-    elif name == 'low-rank':
+    elif name.startswith('rank'):
+        r = int(name[4:])
         np.random.seed(0)
-        r = 1
         G = np.random.randn(size, r)
         H = np.random.randn(size, r)
         M = G @ H.T
         M /= math.sqrt(size*r)
         return M
+    elif name.startswith('sparse'):
+        r = int(name[6:])
+        # 2rn parameters
+        np.random.seed(0)
+        mask = sparse.random(size, size, density=2*r/size, data_rvs=np.ones)
+        M = np.random.randn(size, size) * mask
+        M /= math.sqrt(2*r)
+        return M
+    elif name.startswith('toeplitz'):
+        r = int(name[8:])
+        G = np.random.randn(size, r) / math.sqrt(size*r)
+        H = np.random.randn(size, r) / math.sqrt(size*r)
+        # M = 
     else:
         assert False, 'Target matrix name not recognized or implemented'
+

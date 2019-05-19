@@ -87,6 +87,9 @@ class TrainableBP(TrainableMatrixFactorization):
                 Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=False),
                 Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
             )
+        elif config['model'].startswith('BBTe'):
+            e = int(config['model'][4:])
+            self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, expansion=e, tied_weight=True)
         elif config['model'][0] == 'B' and (config['model'][1:]).isdigit():
             depth = int(config['model'][1:])
             param_type = config['param']
@@ -120,10 +123,10 @@ class TrainableBP(TrainableMatrixFactorization):
         elif config['model'][0:3] == 'ODO':
             if (config['model'][3:]).isdigit():
                 width = int(config['model'][3:])
-                self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=False, param='odo', tied_weight=True, nblocks=0, expansion=width)
+                self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=False, param='odo', tied_weight=True, nblocks=0, expansion=width, diag_init='normal')
             elif config['model'][3] == 'k':
                 k = int(config['model'][4:])
-                self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=False, param='odo', nblocks=k)
+                self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=False, param='odo', tide_weight=True, nblocks=k, diag_init='normal')
 
         # non-butterfly transforms
         # elif config['model'][0:2] == 'TL' and (config['model'][2:]).isdigit():
@@ -196,7 +199,7 @@ def default_config():
     lr_max = 1e-2
     ntrials = 20  # Number of trials for hyperparameter tuning
     nsteps = 400  # Number of steps per epoch
-    nepochsvalid = 5  # Frequency of validation (polishing), in terms of epochs
+    nepochsvalid = 10  # Frequency of validation (polishing), in terms of epochs
     nmaxepochs = 200  # Maximum number of epochs
     result_dir = project_root + '/learning_transforms/results_new'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
@@ -224,7 +227,8 @@ def transform_experiment(model, target, size, complex, param, lr_min, lr_max, nt
      }
     commit_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip().decode('utf-8')
     experiment = RayExperiment(
-        name=f'{commit_id}_{target}_factorization_{model}_{complex}_{size}_{param}',
+        # name=f'{commit_id}_{target}_factorization_{model}_{complex}_{size}_{param}',
+        name=f'{size}_{target}_{model}_c{complex}_{param}_{commit_id}',
         run=TrainableBP,
         local_dir=result_dir,
         num_samples=ntrials,
@@ -240,7 +244,7 @@ def transform_experiment(model, target, size, complex, param, lr_min, lr_max, nt
 
 
 @ex.automain
-def run(result_dir, nmaxepochs, nthreads, cuda):
+def run(model, target, size, result_dir, nmaxepochs, nthreads, cuda):
     experiment = transform_experiment()
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(nthreads)
@@ -260,11 +264,16 @@ def run(result_dir, nmaxepochs, nthreads, cuda):
     # Polish solutions with L-BFGS
     polish_fn = ray.remote(num_gpus=0.25 if cuda else 0)(polish)
     sorted_trials = sorted(trials, key=lambda trial: -trial.last_result.get('negative_loss', float('-inf')))
+    n_trials = min(N_TRIALS_TO_POLISH, len(trials))
+    sorted_trials = sorted_trials[:n_trials]
     polished_losses = ray.get([polish_fn.remote(trial) for trial in sorted_trials[:N_TRIALS_TO_POLISH]])
     for i in range(min(N_TRIALS_TO_POLISH, len(trials))):
         sorted_trials[i].last_result['polished_negative_loss'] = -polished_losses[i]
-    print(np.sort(losses)[:N_TRIALS_TO_POLISH])
-    print(np.sort(polished_losses))
+    sorted_polished_trials = sorted(sorted_trials, key=lambda trial: -trial.last_result['polished_negative_loss'])
+    print(np.array([-trial.last_result['negative_loss'] for trial in sorted_polished_trials]))
+    print(np.array([-trial.last_result['polished_negative_loss'] for trial in sorted_polished_trials]))
+    # print(np.sort(losses)[:N_TRIALS_TO_POLISH])
+    # print(np.sort(polished_losses))
 
     checkpoint_path = Path(result_dir) / experiment.name
     checkpoint_path.mkdir(parents=True, exist_ok=True)
@@ -273,4 +282,6 @@ def run(result_dir, nmaxepochs, nthreads, cuda):
         pickle.dump(trials, f)
 
     ex.add_artifact(str(checkpoint_path))
-    return min(losses + polished_losses)
+    if not min(losses + polished_losses) == -sorted_polished_trials[0].last_result['polished_negative_loss']:
+        print("BEST LOSS", min(losses + polished_losses), "BEST POLISHED", -sorted_polished_trials[0].last_result['polished_negative_loss'])
+    return size, target, model, sorted_polished_trials[0].last_result['training_iteration'], -sorted_polished_trials[0].last_result['polished_negative_loss']
