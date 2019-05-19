@@ -11,6 +11,8 @@ import torch
 from butterfly import Butterfly
 from butterfly.butterfly import ButterflyBmm
 
+from butterfly.butterfly_multiply import butterfly_ortho_mult_tied
+
 
 class ButterflyTest(unittest.TestCase):
 
@@ -46,6 +48,24 @@ class ButterflyTest(unittest.TestCase):
                                                     twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
                                                     self.assertTrue(np.allclose(twiddle_norm, 1),
                                                                     (twiddle_norm, device, (in_size, out_size), complex, tied_weight, ortho_init))
+
+    def test_butterfly_expansion(self):
+        batch_size = 1
+        device = 'cpu'
+        in_size, out_size = (16, 16)
+        expansion = 4
+        b = Butterfly(in_size, out_size, bias=False, tied_weight=True, param='odo', expansion=expansion, diag_init='normal').to(device)
+        input = torch.randn((batch_size, in_size), device=device)
+        output = b(input)
+        terms = []
+        for i in range(expansion):
+            temp = butterfly_ortho_mult_tied(b.twiddle[[i]], input.unsqueeze(1), False)
+            temp = temp * b.diag[i]
+            temp = butterfly_ortho_mult_tied(b.twiddle1[[i]], temp, True)
+            terms.append(temp)
+        total = sum(terms)
+        self.assertTrue(torch.allclose(output, total))
+
 
     def test_butterfly_bmm(self):
         batch_size = 10

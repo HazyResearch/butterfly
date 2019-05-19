@@ -319,7 +319,7 @@ class ButterflyBmm(Butterfly):
         batch = output.shape[0]
         output = output.view((batch, self.matrix_batch, self.nstack * self.in_size_extended) + (() if not self.complex else (2, )))
         out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
-        if (self.nstack * self.in_size_extended // out_size_extended >= 2):  # Average instead of just take the top rows
+        if (self.nstack * self.in_size_extended // out_size_extended >= 2):  # Sum instead of just take the top rows
             if not self.complex:
                 output = output.view(batch, self.matrix_batch, self.nstack * self.in_size_extended // out_size_extended, out_size_extended).sum(dim=2)
             else:
