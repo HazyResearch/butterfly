@@ -69,7 +69,6 @@ def get_dataset(config_dataset):
             normalize
         ] + permutation_transforms)
 
-        if 'transform' in config_dataset and config_dataset['transform'] == 'original':
             trainset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=True, transform=transforms.ToTensor())
             validset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=False, transform=transforms.ToTensor())
         elif 'transform' in config_dataset and config_dataset['transform'] == 'permute':
@@ -100,8 +99,8 @@ def get_dataset(config_dataset):
         # trainset = torch.utils.data.Subset(trainset, indices[:5000])
         validset = torch.utils.data.Subset(validset, indices[-5000:])
 
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=config_dataset['batch'], shuffle=True, num_workers=16)
-        validloader = torch.utils.data.DataLoader(validset, batch_size=config_dataset['batch'], shuffle=False, num_workers=16)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=config_dataset['batch'], shuffle=True, num_workers=4)
+        validloader = torch.utils.data.DataLoader(validset, batch_size=config_dataset['batch'], shuffle=False, num_workers=4)
         testloader = torch.utils.data.DataLoader(testset, batch_size=config_dataset['batch'], shuffle=False, num_workers=4)
 
         if config_dataset['name'] == 'PCIFAR10':
