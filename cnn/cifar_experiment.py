@@ -168,7 +168,7 @@ def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, 
         checkpoint_at_end=True,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
-        resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
+        resources_per_trial={'cpu': 2, 'gpu': 1 if cuda else 0},
         stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         config=config,
     )

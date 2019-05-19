@@ -32,9 +32,9 @@ def get_dataset(config_dataset):
         # trainset = torch.utils.data.Subset(trainset, indices[:5000])
         validset = torch.utils.data.Subset(validset, indices[-5000:])
 
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=4)
-        validloader = torch.utils.data.DataLoader(validset, batch_size=128, shuffle=False, num_workers=4)
-        testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=4)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=2)
+        validloader = torch.utils.data.DataLoader(validset, batch_size=128, shuffle=False, num_workers=2)
+        testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
         return trainloader, validloader, testloader
     else:
         assert False, 'Dataset not implemented'
