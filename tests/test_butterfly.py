@@ -22,13 +22,13 @@ class ButterflyTest(unittest.TestCase):
                     for tied_weight in [True, False]:
                         for increasing_stride in [True, False]:
                             for ortho_init in [False, True]:
-                                for param in ['regular'] if complex else ['regular', 'ortho', 'odo', 'obdobt', 'svd']:
-                                    for nblocks in [0, 1, 2, 3] if param in ['regular', 'ortho', 'odo', 'obdobt'] else [0]:
+                                for param in ['regular'] if complex else ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt', 'svd']:
+                                    for nblocks in [0, 1, 2, 3] if param in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt'] else [0]:
                                         for expansion in [1, 2]:
                                             for double in [False, True]:
                                                 if param in ['obdobt', 'svd'] and tied_weight:
                                                     continue
-                                                if nblocks > 0 and (tied_weight or complex or param not in ['regular', 'ortho', 'odo', 'obdobt']):
+                                                if nblocks > 0 and (tied_weight or complex or param not in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt']):
                                                     continue
                                                 b = Butterfly(in_size, out_size, True, complex, tied_weight, increasing_stride, ortho_init, param, nblocks=nblocks, expansion=expansion).to(device)
                                                 input = torch.randn((batch_size, in_size) + (() if not complex else (2,)), device=device)
@@ -53,13 +53,13 @@ class ButterflyTest(unittest.TestCase):
                     for tied_weight in [True, False]:
                         for increasing_stride in [True, False]:
                             for ortho_init in [False, True]:
-                                for param in ['regular'] if complex else ['regular', 'ortho', 'odo', 'obdobt', 'svd']:
-                                    for nblocks in [0, 1, 2, 3] if param in ['regular', 'ortho', 'odo', 'obdobt'] else [0]:
+                                for param in ['regular'] if complex else ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt', 'svd']:
+                                    for nblocks in [0, 1, 2, 3] if param in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt'] else [0]:
                                         for expansion in [1, 2]:
                                             for double in [False, True]:
                                                 if param in ['obdobt', 'svd'] and tied_weight:
                                                     continue
-                                                if nblocks > 0 and (tied_weight or complex or param not in ['regular', 'ortho', 'odo', 'obdobt']):
+                                                if nblocks > 0 and (tied_weight or complex or param not in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt']):
                                                     continue
                                                 b_bmm = ButterflyBmm(in_size, out_size, matrix_batch, True, complex, tied_weight, increasing_stride, ortho_init, param, expansion=expansion).to(device)
                                                 input = torch.randn((batch_size, matrix_batch, in_size) + (() if not complex else (2,)), device=device)
