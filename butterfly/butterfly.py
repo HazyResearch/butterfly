@@ -59,7 +59,7 @@ class Butterfly(nn.Module):
         self.tied_weight = tied_weight
         self.increasing_stride = increasing_stride
         self.ortho_init = ortho_init
-        assert param in ['regular', 'ortho', 'odo', 'obdobt', 'svd']
+        assert param in ['regular', 'ortho', 'odo', 'odr', 'obdobt', 'svd']
         self.param = param
         self.max_gain_per_factor = max_gain ** (1 / m)
         self.nblocks = nblocks
@@ -70,7 +70,7 @@ class Butterfly(nn.Module):
         self.diag_init = diag_init
         self.nstack *= self.expansion
         if nblocks > 0:
-            assert not tied_weight and not complex and param in ['regular', 'ortho', 'odo', 'obdobt'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
+            assert not tied_weight and not complex and param in ['regular', 'ortho', 'odo', 'odr', 'obdobt'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
         if tied_weight:
             twiddle_core_shape = (self.nstack, size - 1)
         else:
@@ -104,9 +104,12 @@ class Butterfly(nn.Module):
             if param == 'ortho':
                 assert not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
-            elif param == 'odo':
+            elif param == 'odo' or param == 'odr':
                 assert not complex
-                self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
+                if param == 'odo':
+                    self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
+                else:
+                    self.register_buffer('twiddle', torch.rand(twiddle_core_shape) * math.pi * 2)
                 self.twiddle1 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 if diag_init == 'normal':
                     self.diag = nn.Parameter(torch.randn(self.nstack, size) / math.sqrt(self.nstack))
@@ -169,7 +172,7 @@ class Butterfly(nn.Module):
                 output = butterfly_ortho_mult_tied(self.twiddle, output, self.increasing_stride)
             else:
                 output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
-        elif self.param == 'odo':
+        elif self.param == 'odo' or param == 'odr':
             diag = self.diag
             if self.diag_constraint == 'positive':
                 with torch.no_grad():  # Projected SGD
@@ -242,7 +245,7 @@ class Butterfly(nn.Module):
         s = 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, expansion={}, diag_init={}, double={}'.format(
             self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.expansion, self.diag_init, self.double
         )
-        if self.param == 'odo':
+        if self.param == 'odo' or self.param == 'odr':
             s += ', diag_constraint={}'.format('none' if self.diag_constraint is None else self.diag_constraint)
         return s
 
