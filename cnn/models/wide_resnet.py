@@ -114,5 +114,5 @@ if __name__ == '__main__':
 
     print(y.size())
 
-def WideResNet28(structure_type='B', **kwargs):
+def WideResNet28(structure_type=None, **kwargs):
     return Wide_ResNet(28, 2, 0.0, 10, structure_type=structure_type, **kwargs)
