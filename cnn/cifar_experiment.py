@@ -51,7 +51,7 @@ class TrainableModel(Trainable):
                                         {'params': unstructured_params}],
                                        lr=config['lr'], momentum=0.9, weight_decay=config['weight_decay'])
         # self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
-        self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[60, 120, 160], gamma=config['lr_decay_factor'])
+        self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=config['decay_milestones'], gamma=config['lr_decay_factor'])
 
     def _train_iteration(self):
         self.model.train()
@@ -129,6 +129,7 @@ def default_config():
     weight_decay = False  # Whether to use weight decay
     ntrials = 20  # Number of trials for hyperparameter tuning
     nmaxepochs = 100  # Maximum number of epochs
+    decay_milestones = [int(30 * nmaxepochs / 100), int(60 * nmaxepochs / 100), int(80 * nmaxepochs / 100)]
     result_dir = project_root + '/cnn/results'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
     smoke_test = False  # Finish quickly for testing
@@ -143,7 +144,7 @@ def sgd():
 
 
 @ex.capture
-def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, nmaxepochs, result_dir, cuda, smoke_test):
+def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, weight_decay, ntrials, nmaxepochs, decay_milestones, result_dir, cuda, smoke_test):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -155,6 +156,7 @@ def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, 
         # 'lr_decay_period': lr_decay_period,
         # 'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if weight_decay else 0.0,
         'weight_decay': 5e-4,
+        'decay_milestones': decay_milestones,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
@@ -168,7 +170,7 @@ def cifar10_experiment(model, model_args, optimizer, lr_decay, lr_decay_period, 
         checkpoint_at_end=True,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
-        resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
+        resources_per_trial={'cpu': 2, 'gpu': 1 if cuda else 0},
         stop={"training_iteration": 1 if smoke_test else nmaxepochs},
         config=config,
     )
@@ -184,9 +186,9 @@ def run(model, model_args, result_dir, nmaxepochs):
             ray.init(redis_address=address)
     except:
         ray.init()
-    # ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
-    # trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
-    trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
+    ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
+    trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
+    # trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     accuracy = [trial.last_result.get('mean_accuracy', float('-inf')) for trial in trials]
 
