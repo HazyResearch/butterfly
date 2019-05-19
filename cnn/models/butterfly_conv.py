@@ -50,6 +50,10 @@ class ButterflyConv2d(ButterflyBmm):
         self.fused_unfold = fused_unfold
         super().__init__(in_channels, out_channels, self.kernel_size[0] * self.kernel_size[1],
                          complex=False, **kwargs)
+        # Don't need bias for each of 9 matrices, only one bias is enough
+        if self.bias is not None:
+            self.bias_conv = nn.Parameter(self.bias[0].clone())
+            self.bias = None
 
     def forward(self, input):
         """
@@ -92,6 +96,8 @@ class ButterflyConv2d(ButterflyBmm):
             output = super().post_process(input, output)
         # combine matrix batches
         output = output.mean(dim=1)
+        if hasattr(self, 'bias_conv'):
+            output = output + self.bias_conv
         return output.view(batch, h_out * w_out, self.out_channels).transpose(1, 2).view(batch, self.out_channels, h_out, w_out)
 
 

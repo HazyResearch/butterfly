@@ -359,6 +359,18 @@ def bbt_mult_untied_torch(twiddle, input):
     return output
 
 
+def bbt_ortho_mult_tied(twiddle, input):
+    n = input.shape[2]
+    m = int(math.log2(n))
+    nblocks = twiddle.shape[1] // 2
+    assert nblocks * 2 == twiddle.shape[1], 'twiddle must have shape (nstack, nblocks * 2, n - 1)'
+    output = input
+    for t in twiddle.chunk(nblocks, dim=1):
+        output = butterfly_ortho_mult_tied(t[:, 0], output, False)
+        output = butterfly_ortho_mult_tied(t[:, 1], output, True)
+    return output
+
+
 class BbtOrthoMultUntied(torch.autograd.Function):
 
     @staticmethod

@@ -67,4 +67,25 @@ python cifar_experiment.py with ntrials=3 model=ShuffleNet optimizer=SGD nmaxepo
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=1 model_args.structure_type=LR optimizer=SGD nmaxepochs=200 && python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q
 
 # New parameterization, ODO with expansion
+# p100-template-1
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=1 model_args.structure_type=B model_args.param=odo model_args.expansion=6 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200 && python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B model_args.param=odo model_args.expansion=6 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-2
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=1 model_args.structure_type=B model_args.param=odo model_args.expansion=12 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200 && python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B model_args.param=odo model_args.expansion=12 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# dawn
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=1 model_args.structure_type=B model_args.tied_weight=False model_args.param=odo model_args.nblocks=1 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200 && python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B model_args.tied_weight=False model_args.param=odo model_args.nblocks=1 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200
+
+# Low-rank sweep for lower rank
+# dawn
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=1 model_args.structure_type=LR model_args.rank=\[0,0,0,1\] optimizer=SGD nmaxepochs=200
+# p100-template-3
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR model_args.rank=\[0,0,1,1\] optimizer=SGD nmaxepochs=200
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR model_args.rank=\[0,0,2,2\] optimizer=SGD nmaxepochs=200
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR model_args.rank=\[0,0,4,4\] optimizer=SGD nmaxepochs=200
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR model_args.rank=\[0,0,6,6\] optimizer=SGD nmaxepochs=200
+# p100-template-4
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B model_args.param=odo model_args.expansion=1 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B model_args.param=odo model_args.expansion=2 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B model_args.param=odo model_args.expansion=4 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200
+
+# dawn
+python cifar_experiment.py with ntrials=3 model=WideResNet28 optimizer=SGD
