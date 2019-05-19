@@ -105,7 +105,7 @@ class ResNet(nn.Module):
         self.butterfly_expansion = kwargs.pop('expansion', [0] * 4)
         self.rank = kwargs.pop('rank', [-1] * 4)
         if isinstance(self.butterfly_expansion, int):
-            sefl.butterfly_expansion = [self.butterfly_expansion] * 4
+            self.butterfly_expansion = [self.butterfly_expansion] * 4
         self.in_planes = 64
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
