@@ -123,7 +123,7 @@ class ButterflyConv2dBBT(nn.Module):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True,
-                 tied_weight=True, nblocks=1, ortho_init=False, param='regular', max_gain=10.0):
+                 tied_weight=True, nblocks=1, ortho_init=False, param='regular', max_gain=10.0, **kwargs):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -152,13 +152,13 @@ class ButterflyConv2dBBT(nn.Module):
                                        self.kernel_size[1], False, False,
                                        tied_weight, increasing_stride=False,
                                        ortho_init=ortho_init, param=param,
-                                       max_gain=max_gain_per_block))
+                                       max_gain=max_gain_per_block, **kwargs))
             layers.append(ButterflyBmm(out_channels, out_channels,
                                        self.kernel_size[0] *
                                        self.kernel_size[1], False, bias if i == nblocks - 1 else False,
                                        tied_weight, increasing_stride=True,
                                        ortho_init=ortho_init, param=param,
-                                       max_gain=max_gain_per_block))
+                                       max_gain=max_gain_per_block, **kwargs))
         self.layers = nn.Sequential(*layers)
 
     def forward(self, input):

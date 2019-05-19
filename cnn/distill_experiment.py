@@ -66,17 +66,19 @@ class TrainableModel(Trainable):
                     raise ValueError("Only convolutional layers currently supported.")
 
         # create butterfly for specific layer and train
-        if model_args['structure_type'] == 'B':
+        if model_args['structure_type'] == 'B' and (not bool(model_args['tied_weight']) or model_args['nblocks'] == 0):
             structured_layer = ButterflyConv2d(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
-                bias=False, tied_weight=bool(model_args['tied_weight']), ortho_init=True,
+                bias=False, tied_weight=bool(model_args['tied_weight']), ortho_init=bool(model_args['ortho_init']),
                 param=model_args['param'], nblocks=model_args['nblocks'], 
                 expansion=model_args['expansion'], diag_init=model_args['diag_init'])
-#        elif model_args['structure_type'] == 'BBT':
-#            structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
-#                kernel_size=kernel_size, stride=stride, padding=padding,
-#                bias=False, nblocks=model_args['nblocks'], tied_weight=False,
-#                ortho_init=True, param=model_args['param'])
+        elif model_args['structure_type'] == 'B' and model_args['nblocks'] > 0 and bool(model_args['tied_weight']):
+            structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
+                kernel_size=kernel_size, stride=stride, padding=padding,
+                bias=False, nblocks=model_args['nblocks'], tied_weight=True,
+                ortho_init=bool(model_args['ortho_init']), 
+                expansion=model_args['expansion'], diag_init=model_args['diag_init'],
+                param=model_args['param'])
         elif model_args['structure_type'] == 'LR':
             assert out_channels >= in_channels, "Out channels < in channels"
             if model_args['nblocks'] == 0:
@@ -101,7 +103,7 @@ class TrainableModel(Trainable):
         if config['optimizer'] == 'Adam':
             self.optimizer = optim.Adam(structured_layer.parameters(), lr=config['lr'])
         else:
-            self.optimizer = optim.SGD(structured_layer.parameters(), lr=config['lr'])
+            self.optimizer = optim.SGD(structured_layer.parameters(), lr=config['lr'], momentum=config['momentum'])
 
     def _train_iteration(self):
         self.model.train()
@@ -160,7 +162,8 @@ def default_config():
                   'param': 'regular',
                   'diag_init': 'one',
                   'expansion': 1,
-                  'tied_weight': 0}  # Arguments to be passed to the model, as a dictionary
+                  'tied_weight': 0,
+                  'ortho_init': 1}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'SGD'  # Which optimizer to use, either Adam or SGD
     ntrials = 100  # Number of trials for hyperparameter tuning
     nmaxepochs = 10  # Maximum number of epochs
@@ -174,23 +177,25 @@ def default_config():
     min_lr = 1e-4
     max_lr=1
     grace_period=2
+    momentum=0.9
 
 @ex.capture
 def distillation_experiment(model, model_args, optimizer,
-    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model, dataset, min_lr, max_lr):
+    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model, dataset, min_lr, max_lr, momentum):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(min_lr), math.log(max_lr)) if optimizer == 'Adam'
-                                           else random.uniform(math.log(2e-3), math.log(1e-0)))),
+                                           else random.uniform(math.log(min_lr), math.log(max_lr)))),
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
         'teacher_model': teacher_model,
         'train_dir': train_dir,
         'workers': workers,
-        'dataset': dataset
-     }
+        'dataset': dataset,
+        'momentum': momentum
+        }
     model_args_print = '_'.join([f'{key}_{value}' for key,value in model_args.items()])
     experiment = RayExperiment(
         name=f'{model}_{model_args_print}_{optimizer}',
