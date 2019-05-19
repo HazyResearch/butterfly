@@ -42,7 +42,7 @@ class wide_basic(nn.Module):
                                          bias=True, ortho_init=True, **kwargs)
         elif structure_type == 'LR':
             rank = kwargs.get('rank', 1)
-            self.conv2 = LowRankConv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False, rank=rank)
+            self.conv2 = LowRankConv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=True, rank=rank)
         else:
             self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=True)
 
@@ -53,7 +53,7 @@ class wide_basic(nn.Module):
                                         bias=True, ortho_init=True, **kwargs)
             elif structure_type == 'LR':
                 rank = kwargs.get('rank', 1)
-                conv = LowRankConv2d(in_planes, planes, kernel_size=1, stride=stride, bias=False, rank=rank)
+                conv = LowRankConv2d(in_planes, planes, kernel_size=1, stride=stride, bias=True, rank=rank)
             else:
                 conv = nn.Conv2d(in_planes, planes, kernel_size=1, stride=stride, bias=True)
             self.shortcut = nn.Sequential(
