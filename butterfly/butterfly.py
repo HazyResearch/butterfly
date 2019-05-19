@@ -1,6 +1,7 @@
 import math
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from .butterfly_multiply import butterfly_mult, butterfly_mult_untied
 from .butterfly_multiply import butterfly_ortho_mult_tied
@@ -172,7 +173,7 @@ class Butterfly(nn.Module):
                 output = butterfly_ortho_mult_tied(self.twiddle, output, self.increasing_stride)
             else:
                 output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
-        elif self.param == 'odo' or param == 'odr':
+        elif self.param == 'odo' or self.param == 'odr':
             diag = self.diag
             if self.diag_constraint == 'positive':
                 with torch.no_grad():  # Projected SGD
@@ -212,12 +213,11 @@ class Butterfly(nn.Module):
         else:  # Reshape to (N, in_size)
             output = input.view(-1, input.size(-1))
         if self.double:
-            output = torch.cat((output, torch.zeros_like(output)), dim=-1)
+            output = F.pad(output, (0, output.shape[-1]))
         batch = output.shape[0]
         if self.in_size != self.in_size_extended:  # Zero-pad
-            padded_shape = (batch, self.in_size_extended - self.in_size) + (() if not self.complex else (2, ))
-            output = torch.cat((output, torch.zeros(padded_shape, dtype=output.dtype, device=output.device)),
-                               dim=-1 if not self.complex else -2)
+            padding = (0, self.in_size_extended - self.in_size) if not self.complex else (0, 0, 0, self.in_size_extended - self.in_size)
+            output = F.pad(output, padding)
         output = output.unsqueeze(1).expand((batch, self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         return output
 
@@ -303,11 +303,10 @@ class ButterflyBmm(Butterfly):
         batch = input.shape[0]
         output = input
         if self.in_size != self.in_size_extended:  # Zero-pad
-            padded_shape = (batch, self.matrix_batch, self.in_size_extended - self.in_size) + (() if not self.complex else (2, ))
-            output = torch.cat((output, torch.zeros(padded_shape, dtype=output.dtype, device=output.device)),
-                               dim=-1 if not self.complex else -2)
+            padding = (0, self.in_size_extended - self.in_size) if not self.complex else (0, 0, 0, self.in_size_extended - self.in_size)
+            output = F.pad(output, padding)
         if self.double:
-            output = torch.cat((output, torch.zeros_like(output)), dim=-1)
+            output = F.pad(output, (0, output.shape[-1]))
         output = output.unsqueeze(2).expand((batch, self.matrix_batch, self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         output = output.reshape((batch, self.matrix_batch * self.nstack, self.in_size_extended) + (() if not self.complex else (2, )))
         return output
