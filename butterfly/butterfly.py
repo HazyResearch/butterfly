@@ -4,7 +4,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from .butterfly_multiply import butterfly_mult, butterfly_mult_untied
-from .butterfly_multiply import butterfly_ortho_mult_tied
+from .butterfly_multiply import butterfly_ortho_mult_tied, bbt_ortho_mult_tied
 from .butterfly_multiply import butterfly_ortho_mult_untied, butterfly_mult_untied_svd
 from .butterfly_multiply import bbt_mult_untied, bbt_ortho_mult_untied
 
@@ -71,9 +71,11 @@ class Butterfly(nn.Module):
         self.diag_init = diag_init
         self.nstack *= self.expansion
         if nblocks > 0:
-            assert not tied_weight and not complex and param in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
+            assert not complex, 'native BBT with complex is not supported, use two separate Butterflies (e.g. nn.Sequential)'
+            if param not in  ['odo', 'odr', 'opdo']:  # Special case, we implement tied weight ODO with nblocks
+                assert not tied_weight and param in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
         if tied_weight:
-            twiddle_core_shape = (self.nstack, size - 1)
+            twiddle_core_shape = (self.nstack, size - 1) if nblocks == 0 else (self.nstack, nblocks * 2, size - 1)
         else:
             twiddle_core_shape = (self.nstack, m, size // 2) if nblocks == 0 else (self.nstack, nblocks * 2 * m, size // 2)
         if param == 'regular':
@@ -186,14 +188,14 @@ class Butterfly(nn.Module):
             # if self.expansion > 1:
             #     output = output * self.diag_right
             if self.tied_weight:
-                output = butterfly_ortho_mult_tied(self.twiddle, output, False)
+                output = butterfly_ortho_mult_tied(self.twiddle, output, False) if self.nblocks == 0 else bbt_ortho_mult_tied(self.twiddle, output)
             else:
                 output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
             output = output * diag
             if self.param == 'opdo' and self.expansion > 1:
                 output = output.view(-1, self.expansion, output.shape[-1]).sum(dim=-2, keepdim=True).expand(-1, self.expansion, -1).reshape(output.shape)
             if self.tied_weight:
-                output = butterfly_ortho_mult_tied(self.twiddle1, output, True)
+                output = butterfly_ortho_mult_tied(self.twiddle1, output, True) if self.nblocks == 0 else bbt_ortho_mult_tied(self.twiddle1, output)
             else:
                 output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
             # if self.expansion > 1:
