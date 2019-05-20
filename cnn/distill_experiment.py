@@ -31,6 +31,7 @@ import models
 
 from models.butterfly_conv import ButterflyConv2d, ButterflyConv2dBBT
 from models.low_rank_conv import LowRankConv2d
+from models.sparse_conv import SparseConv2d
 
 class TrainableModel(Trainable):
     """Trainable object for a Pytorch model, to be used with Ray's Hyperband tuning.
@@ -70,26 +71,23 @@ class TrainableModel(Trainable):
             structured_layer = ButterflyConv2d(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, tied_weight=bool(model_args['tied_weight']), ortho_init=bool(model_args['ortho_init']),
-                param=model_args['param'], nblocks=model_args['nblocks'], 
+                param=model_args['param'], nblocks=model_args['nblocks'],
                 expansion=model_args['expansion'], diag_init=model_args['diag_init'])
-        #elif model_args['structure_type'] == 'B' and model_args['nblocks'] > 0 and bool(model_args['tied_weight']):
-        #    structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
-        #        kernel_size=kernel_size, stride=stride, padding=padding,
-       #         bias=False, nblocks=model_args['nblocks'], tied_weight=True,
-       #         ortho_init=bool(model_args['ortho_init']), 
-       #         expansion=model_args['expansion'], diag_init=model_args['diag_init'],
-       #         param=model_args['param'])
         elif model_args['structure_type'] == 'LR':
             assert out_channels >= in_channels, "Out channels < in channels"
-            rank = model_args['rank']
-            if rank == -1:
-                if model_args['nblocks'] == 0:
-                    rank = int(math.log2(out_channels))
-                else:
-                    rank = int(math.log2(out_channels)) * model_args['nblocks'] * 2
-            structured_layer =  LowRankConv2d(in_channels, out_channels,
+            rank = model_args.get('rank', int(math.log2(out_channels))
+                if model_args['nblocks'] == 0
+                else model_args['nblocks'] * 2 * int(math.log2(out_channels)))
+            structured_layer = LowRankConv2d(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, rank=rank)
+        elif model_args['structure_type'] == 'sparse':
+            structured_layer = SparseConv2d(nparams=model_args['nparams'],
+                layer=model_args['layer'], pretrained=config['pretrained'],
+                dataset=config['dataset'], model=config['teacher_model'],
+                device=device, in_channels=in_channels, out_channels=out_channels,
+                kernel_size=kernel_size, stride=stride, padding=padding,
+                bias=False)
 
         self.model = structured_layer.to(device)
 
@@ -165,8 +163,7 @@ def default_config():
                   'diag_init': 'one',
                   'expansion': 1,
                   'tied_weight': 0,
-                  'ortho_init': 1,
-                  'rank': -1}  # Arguments to be passed to the model, as a dictionary
+                  'ortho_init': 1}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'SGD'  # Which optimizer to use, either Adam or SGD
     ntrials = 100  # Number of trials for hyperparameter tuning
     nmaxepochs = 10  # Maximum number of epochs
@@ -181,10 +178,12 @@ def default_config():
     max_lr=1
     grace_period=2
     momentum=0.9
+    pretrained=None
 
 @ex.capture
 def distillation_experiment(model, model_args, optimizer,
-    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model, dataset, min_lr, max_lr, momentum):
+    ntrials, result_dir, train_dir, workers, cuda, smoke_test, teacher_model,
+    dataset, min_lr, max_lr, momentum, pretrained):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
@@ -197,7 +196,8 @@ def distillation_experiment(model, model_args, optimizer,
         'train_dir': train_dir,
         'workers': workers,
         'dataset': dataset,
-        'momentum': momentum
+        'momentum': momentum,
+        'pretrained': pretrained
         }
     model_args_print = '_'.join([f'{key}_{value}' for key,value in model_args.items()])
     experiment = RayExperiment(
