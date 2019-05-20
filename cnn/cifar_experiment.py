@@ -187,8 +187,8 @@ def run(model, model_args, result_dir, nmaxepochs):
     except:
         ray.init()
     ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
-    trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
-    # trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
+    # trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
+    trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     accuracy = [trial.last_result.get('mean_accuracy', float('-inf')) for trial in trials]
 
