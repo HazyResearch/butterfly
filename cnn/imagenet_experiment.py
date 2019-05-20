@@ -89,7 +89,7 @@ os.makedirs(args.save_dir, exist_ok=True)
 logging.basicConfig(
 level=logging.INFO,
 handlers=[
-    logging.FileHandler(f'{args.save_dir}/main_thread.log'),
+    logging.FileHandler(f'{args.save_dir}/main_thread.log', 'a'),
     logging.StreamHandler()
 ])
 logger = logging.getLogger()

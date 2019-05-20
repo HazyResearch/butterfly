@@ -6,6 +6,8 @@ name_to_model = {
     'ResNet18': lambda args: models.ResNet18(**args),
     'ResNet20Original': lambda args: models.resnet20original(),
     'MobileNet': lambda args: models.MobileNet(**args),
+    'ShuffleNet': lambda args: models.ShuffleNetG2(),
+    'WideResNet28': lambda args: models.WideResNet28(**args),
 }
 
 
