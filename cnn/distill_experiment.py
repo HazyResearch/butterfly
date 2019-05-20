@@ -66,25 +66,27 @@ class TrainableModel(Trainable):
                     raise ValueError("Only convolutional layers currently supported.")
 
         # create butterfly for specific layer and train
-        if model_args['structure_type'] == 'B' and (not bool(model_args['tied_weight']) or model_args['nblocks'] == 0):
+        if model_args['structure_type'] == 'B':
             structured_layer = ButterflyConv2d(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, tied_weight=bool(model_args['tied_weight']), ortho_init=bool(model_args['ortho_init']),
                 param=model_args['param'], nblocks=model_args['nblocks'], 
                 expansion=model_args['expansion'], diag_init=model_args['diag_init'])
-        elif model_args['structure_type'] == 'B' and model_args['nblocks'] > 0 and bool(model_args['tied_weight']):
-            structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
-                kernel_size=kernel_size, stride=stride, padding=padding,
-                bias=False, nblocks=model_args['nblocks'], tied_weight=True,
-                ortho_init=bool(model_args['ortho_init']), 
-                expansion=model_args['expansion'], diag_init=model_args['diag_init'],
-                param=model_args['param'])
+        #elif model_args['structure_type'] == 'B' and model_args['nblocks'] > 0 and bool(model_args['tied_weight']):
+        #    structured_layer = ButterflyConv2dBBT(in_channels, out_channels,
+        #        kernel_size=kernel_size, stride=stride, padding=padding,
+       #         bias=False, nblocks=model_args['nblocks'], tied_weight=True,
+       #         ortho_init=bool(model_args['ortho_init']), 
+       #         expansion=model_args['expansion'], diag_init=model_args['diag_init'],
+       #         param=model_args['param'])
         elif model_args['structure_type'] == 'LR':
             assert out_channels >= in_channels, "Out channels < in channels"
-            if model_args['nblocks'] == 0:
-                rank = int(math.log2(out_channels))
-            else:
-                rank = int(math.log2(out_channels)) * model_args['nblocks'] * 2
+            rank = model_args['rank']
+            if rank == -1:
+                if model_args['nblocks'] == 0:
+                    rank = int(math.log2(out_channels))
+                else:
+                    rank = int(math.log2(out_channels)) * model_args['nblocks'] * 2
             structured_layer =  LowRankConv2d(in_channels, out_channels,
                 kernel_size=kernel_size, stride=stride, padding=padding,
                 bias=False, rank=rank)
@@ -163,7 +165,8 @@ def default_config():
                   'diag_init': 'one',
                   'expansion': 1,
                   'tied_weight': 0,
-                  'ortho_init': 1}  # Arguments to be passed to the model, as a dictionary
+                  'ortho_init': 1,
+                  'rank': -1}  # Arguments to be passed to the model, as a dictionary
     optimizer = 'SGD'  # Which optimizer to use, either Adam or SGD
     ntrials = 100  # Number of trials for hyperparameter tuning
     nmaxepochs = 10  # Maximum number of epochs
