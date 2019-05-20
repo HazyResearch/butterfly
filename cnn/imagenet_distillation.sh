@@ -4,14 +4,23 @@ nmaxepochs=5
 max_lr=2e-1
 min_lr=5e-4
 
+layers=(
+    features.6.0.conv2
+    features.6.0.downsample.0
+    features.6.1.conv1
+    features.6.1.conv2
+)
+
+for rank in $(seq 2 2 10); do 
 #for nblocks in $(seq 0 2); do
 #    python distill_experiment.py with model_args.layer=features.6.0.conv1 max_lr=$max_lr min_lr=$min_lr ntrials=$ntrials nmaxepochs=$nmaxepochs optimizer=Adam model_args.structure_type=B model_args.nblocks=$nblocks dataset=imagenet teacher_model=resnet18 result_dir=$result_dir train_dir=/distillation/imagenet/activations
 
 #for nblocks in $(seq 0 2); do
  #   python distill_experiment.py with model_args.layer=features.6.0.conv1 max_lr=$max_lr min_lr=$min_lr ntrials=$ntrials nmaxepochs=$nmaxepochs optimizer=Adam model_args.structure_type=LR model_args.nblocks=$nblocks dataset=imagenet teacher_model=resnet18 result_dir=$result_dir train_dir=/distillation/imagenet/activations
 
-for rank in $(seq 2 2 10); do
-   python distill_experiment.py with model_args.layer=features.6.0.conv1 max_lr=$max_lr min_lr=$min_lr ntrials=$ntrials nmaxepochs=$nmaxepochs optimizer=Adam model_args.structure_type=LR model_args.rank=$rank dataset=imagenet teacher_model=resnet18 result_dir=$result_dir train_dir=/distillation/imagenet/activations
+for layer in "${layers[@]}"; do
+   python distill_experiment.py with model_args.layer=$layer max_lr=$max_lr min_lr=$min_lr ntrials=$ntrials nmaxepochs=$nmaxepochs optimizer=Adam model_args.structure_type=LR model_args.rank=$rank dataset=imagenet teacher_model=resnet18 result_dir=$result_dir train_dir=/distillation/imagenet/activations
+done 
 
 #for nblocks in $(seq 0 2); do
 #    python distill_experiment.py with model_args.param=odo model_args.layer=features.6.0.conv1 max_lr=$max_lr min_lr=$min_lr ntrials=$ntrials nmaxepochs=$nmaxepochs optimizer=Adam model_args.structure_type=B model_args.nblocks=$nblocks dataset=imagenet teacher_model=resnet18 result_dir=$result_dir train_dir=/distillation/imagenet/activations
