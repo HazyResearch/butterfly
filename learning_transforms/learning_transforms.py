@@ -211,8 +211,9 @@ def default_config():
     smoke_test = False  # Finish quickly for testing
 
 
+
 @ex.capture
-def transform_experiment(model, target, size, complex, param, lr_min, lr_max, ntrials, nsteps, nepochsvalid, result_dir, cuda, nthreads, smoke_test):
+def transform_experiment(model, target, size, complex, param, lr_min, lr_max, ntrials, nsteps, nepochsvalid, result_dir, cuda, nthreads, smoke_test, b):
     # assert model in ['B', 'BP', 'PBT', 'BPP', 'BPBP', 'BBT', 'BBB'], f'Model {model} not implemented'
     config={
         'model': model,
@@ -221,6 +222,7 @@ def transform_experiment(model, target, size, complex, param, lr_min, lr_max, nt
         'complex': complex,
         # 'share_logit': sample_from(lambda spec: np.random.choice((True, False), size=2)),
         'share_logit': True,
+        'bfargs': b,
         'param': param,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(5e-1)))),
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(lr_min), math.log(lr_max)))),
@@ -229,10 +231,11 @@ def transform_experiment(model, target, size, complex, param, lr_min, lr_max, nt
         'n_epochs_per_validation': nepochsvalid,
         'device': 'cuda' if cuda else 'cpu',
      }
+    b_args = '_'.join([k+':'+str(v) for k,v in b.items()])
     commit_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip().decode('utf-8')
     experiment = RayExperiment(
         # name=f'{commit_id}_{target}_factorization_{model}_{complex}_{size}_{param}',
-        name=f'{size}_{target}_{model}_c{complex}_{param}_{commit_id}',
+        name=f'{size}_{target}_{model}_{b_args}_c{complex}_{commit_id}',
         run=TrainableBP,
         local_dir=result_dir,
         num_samples=ntrials,
@@ -248,7 +251,7 @@ def transform_experiment(model, target, size, complex, param, lr_min, lr_max, nt
 
 
 @ex.automain
-def run(model, target, size, result_dir, nmaxepochs, nthreads, cuda):
+def run(model, target, size, result_dir, nmaxepochs, nthreads, cuda, b):
     experiment = transform_experiment()
     # We'll use multiple processes so disable MKL multithreading
     os.environ['MKL_NUM_THREADS'] = str(nthreads)
@@ -290,4 +293,4 @@ def run(model, target, size, result_dir, nmaxepochs, nthreads, cuda):
     ex.add_artifact(str(checkpoint_path))
     if not min(losses + polished_losses) == -sorted_polished_trials[0].last_result['polished_negative_loss']:
         print("BEST LOSS", min(losses + polished_losses), "BEST POLISHED", -sorted_polished_trials[0].last_result['polished_negative_loss'])
-    return size, target, model, sorted_polished_trials[0].last_result['training_iteration'], -sorted_polished_trials[0].last_result['polished_negative_loss']
+    return size, target, model, b, nparameters, niterations, -sorted_polished_trials[0].last_result['polished_negative_loss']
