@@ -51,28 +51,36 @@ class LeNet(nn.Module):
 
 class MLP(nn.Module):
     def __init__(self, method='linear', **kwargs):
+        super().__init__()
         if method == 'linear':
-            make_layer = lambda: nn.Linear(1024, 1024, bias=True)
+            make_layer = lambda name: self.add_module(name, nn.Linear(1024, 1024, bias=True))
         elif method == 'butterfly':
-            make_layer = lambda: Butterfly(1024, 1024, bias=True, **kwargs)
+            make_layer = lambda name: self.add_module(name, Butterfly(1024, 1024, bias=True, **kwargs))
             # self.fc   = Butterfly(1024, 1024, tied_weight=False, bias=False, param='regular', nblocks=0)
             # self.fc   = Butterfly(1024, 1024, tied_weight=False, bias=False, param='odo', nblocks=1)
         elif method == 'low-rank':
-            make_layer = lambda: nn.Sequential(nn.Linear(1024, kwargs['rank'], bias=False), nn.Linear(kwargs['rank'], 1024, bias=True))
+            make_layer = lambda name: self.add_module(name, nn.Sequential(nn.Linear(1024, kwargs['rank'], bias=False), nn.Linear(kwargs['rank'], 1024, bias=True)))
         elif method == 'toeplitz':
-            make_layer = lambda: sl.ToeplitzLikeC(layer_size=1024, bias=True, **kwargs)
+            make_layer = lambda name: self.add_module(name, sl.ToeplitzLikeC(layer_size=1024, bias=True, **kwargs))
         else: assert False, f"method {method} not supported"
 
-        self.fc10 = make_layer()
-        self.fc11 = make_layer()
-        self.fc12 = make_layer()
-        self.fc2 = make_layer()
+        # self.fc10 = make_layer()
+        # self.fc11 = make_layer()
+        # self.fc12 = make_layer()
+        # self.fc2 = make_layer()
+        make_layer('fc10')
+        make_layer('fc11')
+        make_layer('fc12')
+        make_layer('fc2')
+        make_layer('fc3')
         self.logits = nn.Linear(1024, 10)
 
     def forward(self, x):
-        x = self.fc10(x[:,0,:,:]) + self.fc11(x[:,1,:,:]) + self.fc12(x[:,2,:,:])
+        x = x.view(-1, 3, 1024)
+        x = self.fc10(x[:,0,:]) + self.fc11(x[:,1,:]) + self.fc12(x[:,2,:])
         x = F.relu(x)
         x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
         x = self.logits(x)
         return x
 
