@@ -10,6 +10,17 @@ from numpy.polynomial import legendre
 import scipy.linalg as LA
 from scipy.fftpack import dct, dst, fft2
 import scipy.sparse as sparse
+from scipy.linalg import hadamard
+import torch
+
+
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+# Add to $PYTHONPATH in addition to sys.path so that ray workers can see
+os.environ['PYTHONPATH'] = project_root + ":" + os.environ.get('PYTHONPATH', '')
+
+from butterfly import Butterfly
 
 # Copied from https://stackoverflow.com/questions/23869694/create-nxn-haar-matrix
 def haar_matrix(n, normalized=False):
@@ -62,6 +73,19 @@ def krylov_construct(A, v, m):
         K[i,1:] = subd*K[i-1,:-1]
     return K
 
+def toeplitz_like(G, H):
+    n = g.shape[0]
+    r = g.shape[1]
+    assert n == size and h.shape[0] == n and h.shape[1] == r
+    A1 = np.diag(np.ones(size-1), -1)
+    A1[0,n-1] = 1
+    A1_ = np.diag(np.ones(size-1), -1)
+    A1_[0,n-1] = -1
+    rank1s = [krylov_construct(A1, G[:,i], n) @ krylov_construct(A1_, H[:i], n).T for i in range(r)]
+    M = sum(ranks1s)
+    return M
+
+
 def named_target_matrix(name, size):
     """
     Parameter:
@@ -98,7 +122,6 @@ def named_target_matrix(name, size):
         return np.kron(matrix1d, matrix1d)
     elif name == 'b2':
         size_sr = int(math.sqrt(size))
-        import torch
         from butterfly import Block2x2DiagProduct
         b = Block2x2DiagProduct(size_sr)
         matrix1d = b(torch.eye(size_sr)).t().detach().numpy()
@@ -142,18 +165,44 @@ def named_target_matrix(name, size):
         M /= math.sqrt(size*r)
         return M
     elif name.startswith('sparse'):
-        r = int(name[6:])
+        s = int(name[6:])
         # 2rn parameters
         np.random.seed(0)
-        mask = sparse.random(size, size, density=2*r/size, data_rvs=np.ones)
-        M = np.random.randn(size, size) * mask
-        M /= math.sqrt(2*r)
+        mask = sparse.random(size, size, density=s/size, data_rvs=np.ones)
+        M = np.random.randn(size, size) * (mask.toarray())
+        M /= math.sqrt(s)
         return M
     elif name.startswith('toeplitz'):
         r = int(name[8:])
         G = np.random.randn(size, r) / math.sqrt(size*r)
         H = np.random.randn(size, r) / math.sqrt(size*r)
-        # M = 
+        M = toeplitz_like(G, H)
+        return M
+    elif name == 'fastfood':
+        n = size
+        S = np.random.randn(n)
+        G = np.random.randn(n)
+        B = np.random.randn(n)
+        # P = np.arange(n)
+        P = np.random.permutation(n)
+        H = hadamard(n)
+        # SHGPHB
+        # print(H)
+        # print((H*B)[P,:])
+        # print((H @ (G[:,np.newaxis] * (H * B)[P,:])))
+        F = S[:,np.newaxis] * (H @ (G[:,np.newaxis] * (H * B)[P,:])) / n
+        return F
+        # x = np.random.randn(batch_size,n)
+        # HB = hadamard_transform(B)
+        # PHBx = HBx[:, P]
+        # HGPHBx = hadamard_transform(G*PHBx)
+        # return S*HGPHBx
+    elif name == 'butterfly':
+        # n (log n+1) params in the hierarchy
+        b = Butterfly(in_size=size, out_size=size, bias=False, tied_weight=False, param='odo', nblocks=0)
+        M = b(torch.eye(size))
+        return M.cpu().detach().numpy()
+
     else:
         assert False, 'Target matrix name not recognized or implemented'
 
