@@ -32,7 +32,7 @@ from training import PytorchTrainable, TrainableMatrixFactorization
 from target_matrix import named_target_matrix
 
 
-N_LBFGS_STEPS = 50
+N_LBFGS_STEPS = 20
 N_TRIALS_TO_POLISH = 16
 
 
@@ -186,7 +186,7 @@ def polish(trial):
 
 ex = Experiment('Transform_factorization')
 ex.observers.append(FileStorageObserver.create('logs_new'))
-slack_config_path = Path('config/slack.json')  # Add webhook_url there for Slack notification
+slack_config_path = Path('../config/slack.json')  # Add webhook_url there for Slack notification
 if slack_config_path.exists():
     ex.observers.append(SlackObserver.from_config(str(slack_config_path)))
 
