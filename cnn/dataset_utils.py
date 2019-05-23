@@ -69,6 +69,7 @@ def get_dataset(config_dataset):
             normalize
         ] + permutation_transforms)
 
+        if 'transform' in config_dataset and config_dataset['transform'] == 'original':
             trainset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=True, transform=transforms.ToTensor())
             validset = torchvision.datasets.CIFAR10(root=project_root+'/data', train=True, download=False, transform=transforms.ToTensor())
         elif 'transform' in config_dataset and config_dataset['transform'] == 'permute':
