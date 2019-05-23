@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import models.resnet_imagenet as imagenet_models # only use imagenet models
 import models
+import numpy as np
 
 class SparseConv2d(nn.Conv2d):
     def __init__(self, nparams, layer, pretrained, dataset, model, device, **kwargs):
@@ -19,7 +20,7 @@ class SparseConv2d(nn.Conv2d):
         if dataset == 'imagenet':
             pretrained_model = imagenet_models.__dict__[model]()
         elif dataset == 'cifar10':
-            pretrained_model = models.__dict[model]()
+            pretrained_model = models.__dict__[model]()
 
         # create conv2d layer and copy weights
         pretrained_weight = self._get_pretrained_weight(pretrained_model, layer)
@@ -37,10 +38,10 @@ class SparseConv2d(nn.Conv2d):
         return weight
 
     def _sparse_projection(self):
-        flat_weight = self.weight.flatten()
+        flat_weight = self.weight.flatten().abs()
         mask = torch.zeros_like(self.weight)
         flat_mask = mask.view(-1)
-        # sort indices
+        # sort indices after taking absolute values
         flat_weight_indices = flat_weight.argsort(descending=True)[:self.nparams]
         # assign large magnitudes to 1
         flat_mask[flat_weight_indices] = 1
