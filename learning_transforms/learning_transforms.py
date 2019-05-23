@@ -140,6 +140,10 @@ class TrainableBP(TrainableMatrixFactorization):
 
         else:
             assert False, f"Model {config['model']} not implemented"
+
+        self.nparameters = sum(param.nelement() for param in self.model.parameters())
+        print("Parameters: ", self.nparameters)
+
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
         self.n_steps_per_epoch = config['n_steps_per_epoch']
         self.n_epochs_per_validation = config['n_epochs_per_validation']
@@ -259,6 +263,8 @@ def run(model, target, size, result_dir, nmaxepochs, nthreads, cuda):
     trials = run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True, early_stop_all_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     losses = [-trial.last_result.get('negative_loss', float('-inf')) for trial in trials]
+    nparameters = trials[0].last_result['nparameters']
+    niterations = trials[0].last_result['training_iteration']
     print(np.array(losses))
 
     # Polish solutions with L-BFGS
