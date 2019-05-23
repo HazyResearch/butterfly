@@ -87,18 +87,6 @@ class TrainableBP(TrainableMatrixFactorization):
                 Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=False),
                 Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
             )
-        elif config['model'].startswith('BBTe'):
-            e = int(config['model'][4:])
-            self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, expansion=e, tied_weight=True)
-        elif config['model'][0] == 'B' and (config['model'][1:]).isdigit():
-            depth = int(config['model'][1:])
-            param_type = config['param']
-            self.model = nn.Sequential(
-                *[
-                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
-                    for _ in range(depth)
-                ]
-            )
         elif config['model'][0] == 'T' and (config['model'][1:]).isdigit():
             depth = int(config['model'][1:])
             param_type = config['param']
@@ -120,13 +108,25 @@ class TrainableBP(TrainableMatrixFactorization):
                     for _ in range(depth)
                 ]
             )
-        elif config['model'][0:3] == 'ODO':
-            if (config['model'][3:]).isdigit():
-                width = int(config['model'][3:])
-                self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=False, param='odo', tied_weight=True, nblocks=0, expansion=width, diag_init='normal')
-            elif config['model'][3] == 'k':
-                k = int(config['model'][4:])
-                self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=False, param='odo', tide_weight=True, nblocks=k, diag_init='normal')
+        elif config['model'][0] == 'B' and (config['model'][1:]).isdigit():
+            depth = int(config['model'][1:])
+            param_type = config['param']
+            self.model = nn.Sequential(
+                *[
+                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
+                    for _ in range(depth)
+                ]
+            )
+        elif config['model'] == 'butterfly':
+            # e = int(config['model'][4:])
+            self.model = Butterfly(in_size=size, out_size=size, complex=complex, **config['bfargs'])
+        # elif config['model'][0:3] == 'ODO':
+        #     if (config['model'][3:]).isdigit():
+        #         width = int(config['model'][3:])
+        #         self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=False, param='odo', tied_weight=True, nblocks=0, expansion=width, diag_init='normal')
+        #     elif config['model'][3] == 'k':
+        #         k = int(config['model'][4:])
+        #         self.model = Butterfly(in_size=size, out_size=size, bias=False, complex=False, param='odo', tied_weight=True, nblocks=k, diag_init='normal')
 
         # non-butterfly transforms
         # elif config['model'][0:2] == 'TL' and (config['model'][2:]).isdigit():
