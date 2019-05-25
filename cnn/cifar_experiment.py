@@ -52,12 +52,12 @@ class TrainableModel(Trainable):
             self.optimizer = optim.Adam([{'params': structured_params, 'weight_decay': 0.0},
                                          {'params': unstructured_params}],
                                         lr=config['lr'], weight_decay=config['weight_decay'])
+            self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
         else:
             self.optimizer = optim.SGD([{'params': structured_params, 'weight_decay': 0.0},
                                         {'params': unstructured_params}],
                                        lr=config['lr'], momentum=0.9, weight_decay=config['weight_decay'])
-        # self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
-        self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=config['decay_milestones'], gamma=config['lr_decay_factor'])
+            self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=config['decay_milestones'], gamma=config['lr_decay_factor'])
         self.switch_ams = config['switch_ams']
         if self.switch_ams is not None:
             self.ams_optimizer = optim.Adam([{'params': structured_params, 'weight_decay': 0.0},
