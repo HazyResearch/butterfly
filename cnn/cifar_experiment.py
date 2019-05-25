@@ -135,6 +135,7 @@ def default_config():
     ntrials = 20  # Number of trials for hyperparameter tuning
     batch = 128
     nmaxepochs = 100  # Maximum number of epochs
+    grace_period = 25
     decay_milestones = [int(30 * nmaxepochs / 100), int(60 * nmaxepochs / 100), int(80 * nmaxepochs / 100)]
     result_dir = project_root + '/cnn/results'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
@@ -182,7 +183,7 @@ def cifar10_experiment(model, args, optimizer, lr_decay, lr_decay_period, weight
 
 
 @ex.automain
-def run(model, args, result_dir, nmaxepochs):
+def run(model, args, result_dir, nmaxepochs, grace_period):
     experiment = cifar10_experiment()
     try:
         with open('../config/redis_address', 'r') as f:
@@ -190,7 +191,8 @@ def run(model, args, result_dir, nmaxepochs):
             ray.init(redis_address=address)
     except:
         ray.init()
-    ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs)
+    if grace_period == -1: grace_period = nmaxepochs
+    ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs, grace_period=grace_period)
     trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
     # trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
     trials = [trial for trial in trials if trial.last_result is not None]
