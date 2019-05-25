@@ -82,10 +82,39 @@ python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structur
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR model_args.rank=\[0,0,2,2\] optimizer=SGD nmaxepochs=200
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR model_args.rank=\[0,0,4,4\] optimizer=SGD nmaxepochs=200
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR model_args.rank=\[0,0,6,6\] optimizer=SGD nmaxepochs=200
+# p100-template-1
+python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=LR model_args.rank=\[0,0,9,9\] optimizer=SGD nmaxepochs=200
 # p100-template-4
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B model_args.param=odo model_args.expansion=1 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B model_args.param=odo model_args.expansion=2 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200
 python cifar_experiment.py with ntrials=3 model=ResNet18 model_args.num_structured_layers=2 model_args.structure_type=B model_args.param=odo model_args.expansion=4 model_args.diag_init='normal' optimizer=SGD nmaxepochs=200
 
 # dawn
-python cifar_experiment.py with ntrials=3 model=WideResNet28 optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 optimizer=SGD
+# p100-template-3
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=LR model_args.rank=1 optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=LR model_args.rank=2 optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=LR model_args.rank=3 optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=LR model_args.rank=5 optimizer=SGD
+# p100-template-4
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=LR model_args.rank=9 optimizer=SGD
+
+# p100-template-3
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odo model_args.tied_weight=True model_args.expansion=1 model_args.diag_init=normal optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odo model_args.tied_weight=True model_args.expansion=2 model_args.diag_init=normal optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odo model_args.tied_weight=True model_args.expansion=3 model_args.diag_init=normal optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odo model_args.tied_weight=True model_args.expansion=6 model_args.diag_init=normal optimizer=SGD
+
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odr model_args.tied_weight=True model_args.expansion=1 model_args.diag_init=normal optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odr model_args.tied_weight=True model_args.expansion=2 model_args.diag_init=normal optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odr model_args.tied_weight=True model_args.expansion=3 model_args.diag_init=normal optimizer=SGD
+
+# p100-template-4
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=opdo model_args.tied_weight=True model_args.expansion=2 model_args.diag_init=normal optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=opdo model_args.tied_weight=True model_args.expansion=3 model_args.diag_init=normal optimizer=SGD
+
+# p100-template-4
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odo model_args.tied_weight=True model_args.nblocks=1 model_args.diag_init=normal optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odo model_args.tied_weight=True model_args.nblocks=2 model_args.diag_init=normal optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odo model_args.tied_weight=True model_args.nblocks=3 model_args.diag_init=normal optimizer=SGD
+# python cifar_experiment.py with ntrials=3 model=WideResNet28 model_args.structure_type=B model_args.param=odo model_args.tied_weight=True model_args.nblocks=6 model_args.diag_init=normal optimizer=SGD

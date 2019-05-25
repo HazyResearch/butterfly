@@ -259,8 +259,8 @@ def run(model, args, result_dir, nmaxepochs, use_hyperband, grace_period):
             ray.init(redis_address=address)
     except:
         ray.init()
-    if grace_period == -1: grace_period = nmaxepochs
     if use_hyperband:
+        if grace_period == -1: grace_period = nmaxepochs
         ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs, grace_period=grace_period)
         trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
     else:
