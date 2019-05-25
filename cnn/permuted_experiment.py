@@ -51,6 +51,7 @@ class TrainableModel(Trainable):
             # self.model.permute = model_utils.get_model(checkpoint['model']['args'])
             self.model.permute.load_state_dict(checkpoint['model']['state'])
         self.model.to(self.device)
+        self.nparameters = sum(param.nelement() for param in self.model.parameters())
 
         self.train_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
         permutation_params = filter(lambda p: hasattr(p, '_is_perm_param') and p._is_perm_param, self.model.parameters())
@@ -259,7 +260,7 @@ class TrainableModel(Trainable):
         self.scheduler.optimizer = self.optimizer
 
 
-ex = Experiment('Cifar10_experiment')
+ex = Experiment('Permutation_experiment')
 ex.observers.append(FileStorageObserver.create('logs'))
 slack_config_path = Path('../config/slack.json')  # Add webhook_url there for Slack notification
 if slack_config_path.exists():
@@ -282,9 +283,6 @@ def default_config():
     pwd_max = 5e-4
     ntrials = 20  # Number of trials for hyperparameter tuning
     nmaxepochs = 200  # Maximum number of epochs
-    result_dir = project_root + '/cnn/results'  # Directory to store results
-    cuda = torch.cuda.is_available()  # Whether to use GPU
-    smoke_test = False  # Finish quickly for testing
     unsupervised = False
     batch = 128
     tv_norm = 2
@@ -298,6 +296,9 @@ def default_config():
     temp_max = None
     restore_perm = None
     resume_pth = None
+    result_dir = project_root + '/cnn/results'  # Directory to store results
+    cuda = torch.cuda.is_available()  # Whether to use GPU
+    smoke_test = False  # Finish quickly for testing
 
 
 @ex.named_config
