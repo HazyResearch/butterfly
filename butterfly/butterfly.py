@@ -44,7 +44,7 @@ class Butterfly(nn.Module):
 
     def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
                  increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
-                 nblocks=0, diag_constraint=None, expansion=1, diag_init='one', double=False):
+                 nblocks=0, diag_constraint=None, expansion=1, diag_init='normal', double=False, diag_bookends=False):
         super().__init__()
         self.double = double
         if double:
@@ -69,6 +69,7 @@ class Butterfly(nn.Module):
         self.max_gain = max_gain
         self.expansion = expansion
         self.diag_init = diag_init
+        self.diag_bookends = diag_bookends
         self.nstack *= self.expansion
         if nblocks > 0:
             assert not complex, 'native BBT with complex is not supported, use two separate Butterflies (e.g. nn.Sequential)'
@@ -104,6 +105,14 @@ class Butterfly(nn.Module):
                                                              torch.stack((C, D), dim=-2)), dim=-3))
         else:
             assert not complex, 'orthogonal/svd parameterization is only implemented for real, not complex'
+            if diag_init == 'normal':
+                self.diag_gen = torch.randn # lambda s, n: torch.randn(s, n)
+            elif diag_init == 'one':
+                self.diag_gen = torch.ones
+            elif diag_init == 'bernoulli':
+                self.diag_gen = lambda shape: (torch.rand(shape) >= 0.5).float() * 2 - 1
+            else: assert False, f"diag_init type {diag_init} not supported"
+
             if param == 'ortho':
                 assert not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
@@ -114,26 +123,31 @@ class Butterfly(nn.Module):
                 else:
                     self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 self.twiddle1 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
-                if diag_init == 'normal':
-                    self.diag = nn.Parameter(torch.randn(self.nstack, size) / math.sqrt(self.nstack))
-                else:
-                    self.diag = nn.Parameter(torch.ones(self.nstack, size) / math.sqrt(self.nstack))
                 self.twiddle1._is_structured = True
+                # if diag_init == 'normal':
+                #     self.diag = nn.Parameter(torch.randn(self.nstack, size) / math.sqrt(self.nstack))
+                # else:
+                #     self.diag = nn.Parameter(torch.ones(self.nstack, size) / math.sqrt(self.nstack))
+                # self.diag = diag_gen(self.nstack, size) / math.sqrt(self.nstack)
+                self.diag = nn.Parameter(self.diag_gen(self.nstack, size) / math.sqrt(self.nstack))
                 self.diag._is_structured = True
-                # if self.expansion > 1:  # Extra diagonals on the left and right
-                #     self.diag_left = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
-                #     self.diag_right = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
-                #     self.diag_left._is_structured = True
-                #     self.diag_right._is_structured = True
+                if self.diag_bookends:  # Extra diagonals on the left and right
+                    # self.diag_left = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
+                    # self.diag_right = nn.Parameter((torch.rand(self.nstack, size) >= 0.5).float() * 2 - 1)
+                    self.diag_l = nn.Parameter(self.diag_gen(self.nstack, size))
+                    self.diag_r = nn.Parameter(self.diag_gen(self.nstack, size))
+                    self.diag_l._is_structured = True
+                    self.diag_r._is_structured = True
             elif param == 'obdobt':
                 assert not tied_weight and not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 self.twiddle1 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
-                if diag_init == 'normal':
-                    self.diag = nn.Parameter(torch.randn(twiddle_core_shape[0], self.nstack, size))
-                else:
-                    self.diag = nn.Parameter(torch.ones(twiddle_core_shape[0], self.nstack, size))
                 self.twiddle1._is_structured = True
+                # if diag_init == 'normal':
+                #     self.diag = nn.Parameter(torch.randn(twiddle_core_shape[0], self.nstack, size))
+                # else:
+                #     self.diag = nn.Parameter(torch.ones(twiddle_core_shape[0], self.nstack, size))
+                self.diag = nn.Parameter(self.diag_gen(twiddle_core_shape[0], self.nstack, size))
                 self.diag._is_structured = True
             elif param == 'svd':
                 assert not tied_weight, 'svd parameterization is only implemented for non-tied weight'
@@ -191,8 +205,8 @@ class Butterfly(nn.Module):
                     diag.clamp_(min=1 / self.max_gain, max=self.max_gain)
             elif self.diag_constraint == 'square':
                 diag = diag * diag
-            # if self.expansion > 1:
-            #     output = output * self.diag_right
+            if self.diag_bookends:
+                output = output * self.diag_r
             if self.tied_weight:
                 output = butterfly_ortho_mult_tied(self.twiddle, output, False) if self.nblocks == 0 else bbt_ortho_mult_tied(self.twiddle, output)
             else:
@@ -204,8 +218,8 @@ class Butterfly(nn.Module):
                 output = butterfly_ortho_mult_tied(self.twiddle1, output, True) if self.nblocks == 0 else bbt_ortho_mult_tied(self.twiddle1, output)
             else:
                 output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
-            # if self.expansion > 1:
-            #     output = output * self.diag_left
+            if self.diag_bookends:
+                output = output * self.diag_l
         elif self.param == 'obdobt':
             for t, t1, d in zip(self.twiddle.split(self.m, dim=1), self.twiddle1.split(self.m, dim=1), self.diag):
                 output = butterfly_ortho_mult_untied(t, output, False)
