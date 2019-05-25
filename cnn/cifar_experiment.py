@@ -58,17 +58,20 @@ class TrainableModel(Trainable):
             self.optimizer = optim.Adam([{'params': structured_params, 'weight_decay': 0.0},
                                          {'params': unstructured_params}],
                                         lr=config['lr'], weight_decay=config['weight_decay'])
-            self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
         else:
             self.optimizer = optim.SGD([{'params': structured_params, 'weight_decay': 0.0},
                                         {'params': unstructured_params}],
                                        lr=config['lr'], momentum=0.9, weight_decay=config['weight_decay'])
-            self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=config['decay_milestones'], gamma=config['lr_decay_factor'])
+        # scheduler
+        if config['lr_decay']['milestones'] is not None:
+            self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=config['lr_decay']['milestones'], gamma=config['lr_decay']['factor'])
+        else:
+            self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay']['period'], gamma=config['lr_decay']['factor'])
         self.switch_ams = config['switch_ams']
-        if self.switch_ams is not None:
-            self.ams_optimizer = optim.Adam([{'params': structured_params, 'weight_decay': 0.0},
-                                         {'params': unstructured_params}],
-                                        lr=config['lr'], weight_decay=config['weight_decay'])
+        # if self.switch_ams is not None:
+        #     self.ams_optimizer = optim.Adam([{'params': structured_params, 'weight_decay': 0.0},
+        #                                  {'params': unstructured_params}],
+        #                                 lr=config['lr'], weight_decay=config['weight_decay'])
 
     def _train_iteration(self): #TODO report train loss and acc
         self.model.train()
@@ -167,43 +170,61 @@ def default_config():
     dataset = 'CIFAR10'
     model = 'LeNet'  # Name of model, see model_utils.py
     args = {}  # Arguments to be passed to the model, as a dictionary
-    optimizer = 'Adam'  # Which optimizer to use, either Adam or SGD
+    optimizer = 'SGD'  # Which optimizer to use, either Adam or SGD
+    nmaxepochs = 200  # Maximum number of epochs
     use_hyperband = False
-    lr = {'min': 1e-4, 'max': 1e-2}
-    lr_decay = False  # Whether to use learning rate decay
+    lr = {'grid': [0.025, 0.05, 0.1, 0.2]}
+    lr_decay = {'factor': 0.2, 'period': None, 'milestones': [int(30 * nmaxepochs / 100), int(60 * nmaxepochs / 100), int(80 * nmaxepochs / 100)]}
+    # lr_decay = True  # Whether to use learning rate decay
     lr_decay_period = 25  # Period of learning rate decay
     weight_decay = False  # Whether to use weight decay
     ntrials = 20  # Number of trials for hyperparameter tuning
     batch = 128
-    nmaxepochs = 100  # Maximum number of epochs
     grace_period = 25
-    decay_milestones = [int(30 * nmaxepochs / 100), int(60 * nmaxepochs / 100), int(80 * nmaxepochs / 100)]
+    # decay_milestones = [int(30 * nmaxepochs / 100), int(60 * nmaxepochs / 100), int(80 * nmaxepochs / 100)]
     resume_pth = None
     result_dir = project_root + '/cnn/results'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
     smoke_test = False  # Finish quickly for testing
 
+@ex.named_config
+def adam():
+    optimizer = 'Adam'  # Which optimizer to use, either Adam or SGD
+    use_hyperband = True
+    lr = {'min': 1e-4, 'max': 1e-2, 'grid': None}
+    # lr_decay = False  # Whether to use learning rate decay
+    lr_decay = None # {'factor': 0.2, 'period': 25, 'milestones': [int(30 * nmaxepochs / 100), int(60 * nmaxepochs / 100), int(80 * nmaxepochs / 100)]}}
+    lr_decay_period = 25  # Period of learning rate decay
+    weight_decay = False  # Whether to use weight decay
+    grace_period = 100
 
 @ex.named_config
 def sgd():
+    # abbreviated sgd schedule for resnet
     optimizer = 'SGD'  # Which optimizer to use, either Adam or SGD
-    lr = {'min': 2e-3, 'max': 1e-0}
-    lr_decay = True  # Whether to use learning rate decay
-    lr_decay_period = 25  # Period of learning rate decay
+    use_hyperband = True
+    lr = {'min': 2e-2, 'max': 2e-1, 'grid': None}
+    lr_decay = {'factor': 0.2, 'period': 25, 'milestones': None}
+    # lr_decay = True  # Whether to use learning rate decay
+    # lr_decay_period = 25  # Period of learning rate decay
     weight_decay = True  # Whether to use weight decay
+    nmaxepochs = 100
 
 
 @ex.capture
-def cifar10_experiment(dataset, model, args, optimizer, use_hyperband, lr, lr_decay, lr_decay_period, weight_decay, ntrials, nmaxepochs, decay_milestones, result_dir, cuda, smoke_test, batch):
+def cifar10_experiment(dataset, model, args, optimizer, use_hyperband, lr, lr_decay, weight_decay, ntrials, nmaxepochs, batch, resume_pth, result_dir, cuda, smoke_test):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
+    if lr_decay is None:
+        lr_decay = {'factor': 1.0, 'period': 1000, 'milestones': None}
     config={
         'optimizer': optimizer,
         'switch_ams': int(0.5 * nmaxepochs) if optimizer == 'Adam' else None,
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(lr['min']), math.log(lr['max'])))) if use_hyperband else grid_search([0.025, 0.05, 0.1, 0.2]),
-        'lr_decay_factor': 0.2 if lr_decay else 1.0,
-        'lr_decay_period': lr_decay_period if lr_decay else 10000,
+        'lr': grid_search(lr['grid']) if lr['grid'] is not None else sample_from(lambda spec: math.exp(random.uniform(math.log(lr['min']), math.log(lr['max'])))),
+        # 'lr_decay_factor': 0.2 if lr_decay else 1.0,
+        # 'lr_decay_period': lr_decay_period if lr_decay else 10000,
+        # 'decay_milestones': decay_milestones,
+        'lr_decay' : lr_decay,
         'weight_decay': 5e-4 if weight_decay else 0.0,
-        'decay_milestones': decay_milestones,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': args},
