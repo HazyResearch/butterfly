@@ -33,6 +33,8 @@ class TrainableModel(Trainable):
     """
 
     def _setup(self, config):
+        self.config = config
+
         device = config['device']
         self.device = device
         torch.manual_seed(config['seed'])
@@ -56,6 +58,11 @@ class TrainableModel(Trainable):
                                        lr=config['lr'], momentum=0.9, weight_decay=config['weight_decay'])
         # self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=config['lr_decay_period'], gamma=config['lr_decay_factor'])
         self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=config['decay_milestones'], gamma=config['lr_decay_factor'])
+        self.switch_ams = config['switch_ams']
+        if self.switch_ams is not None:
+            self.ams_optimizer = optim.Adam([{'params': structured_params, 'weight_decay': 0.0},
+                                         {'params': unstructured_params}],
+                                        lr=config['lr'], weight_decay=config['weight_decay'])
 
     def _train_iteration(self):
         self.model.train()
@@ -95,6 +102,16 @@ class TrainableModel(Trainable):
         return {"nparams": self.nparameters, "mean_loss": valid_loss, "mean_accuracy": valid_accuracy, "test_loss": test_loss, "test_accuracy": test_accuracy}
 
     def _train(self):
+        if self.switch_ams is not None and self._iteration == self.switch_ams:
+            print("Switching to AMSGrad")
+            structured_params = filter(lambda p: hasattr(p, '_is_structured') and p._is_structured, self.model.parameters())
+            unstructured_params = filter(lambda p: not (hasattr(p, '_is_structured') and p._is_structured), self.model.parameters())
+            self.optimizer = optim.Adam([{'params': structured_params, 'weight_decay': 0.0},
+                                         {'params': unstructured_params}],
+                                        lr=self.config['lr'], weight_decay=self.config['weight_decay'], amsgrad=True)
+            # self.optimizer = self.ams_optimizer
+            # for group in self.optimizer.param_groups:
+            #     group['amsgrad'] = True
         self.scheduler.step()
         self._train_iteration()
         return self._test()
@@ -155,7 +172,8 @@ def cifar10_experiment(model, args, optimizer, lr_decay, lr_decay_period, weight
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'optimizer': optimizer,
-        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-4), math.log(5e-3)) if optimizer == 'Adam'
+        'switch_ams': int(0.5 * nmaxepochs) if optimizer == 'Adam' else None,
+        'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-2)) if optimizer == 'Adam'
                                            else random.uniform(math.log(2e-3), math.log(1e-0)))),
         # 'lr': grid_search([0.025, 0.05, 0.1, 0.2]),
         'lr_decay_factor': 0.2 if lr_decay else 1.0,
