@@ -212,8 +212,6 @@ class TensorPermutation(nn.Module):
 
         if method == 'linear':
             self.perm_type = LinearPermutation
-        elif method == 'sinkhorn':
-            self.perm_type = SinkhornPermutation
         elif method == 'butterfly':
             self.perm_type = ButterflyPermutation
         elif method == 'identity':
@@ -344,107 +342,6 @@ class LinearPermutation(Permutation):
     # def sample_soft_perm(self, sample_shape=()):
     #     return self.W.view(*([1]*len(sample_shape)), size, size)
 
-class SinkhornPermutation(Permutation):
-    def __init__(self, size, stochastic=False, temp=1.0, samples=1):
-        super().__init__()
-        self.size = size
-        self.stochastic = stochastic
-        self.samples = samples
-        if self.stochastic:
-            self.mean_temp = 1.0
-            self.sample_temp = temp
-            self.generate_fn = self.sample_soft_perm # add this attr for efficiency (avoid casing in every call to generate())
-        else:
-            self.mean_temp = temp
-            self.generate_fn = self.mean_perm
-            # no sample_temp; soft perm shouldn't be called in the non-stochastic case
-        self.hard_temp = 0.02
-        self.hard_iters = int(1./self.hard_temp)
-
-        # set sinkhorn iterations based on temperature
-        self.sinkhorn_iters = 20 + int(1./temp)
-        self.log_alpha = nn.Parameter(add_gumbel_noise(torch.zeros(size, size)))
-        # nn.init.kaiming_uniform_(self.log_alpha)
-        self.log_alpha.is_perm_param = True
-        # TODO: test effect of random initialization
-
-    def generate_perm(self):
-        """ Generate (a batch of) permutations for training """
-        # TODO add the extra dimension even with mean for consistency
-        return self.generate_fn(self)
-
-    def mean_perm(self):
-        """
-        Treat log_alpha as a soft permutation itself
-        Note that if l is viewed as a distribution over hard permutations, then
-          - sinkhorn(l, tau=1.0) is the mean of this distribution
-          - sinkhorn(l, tau->0) is the max likelihood of this distribution
-        """
-        return sinkhorn(self.log_alpha, temp=self.mean_temp, n_iters=self.sinkhorn_iters)
-
-    def mle_perm(self):
-        # TODO needs refactor
-        return sinkhorn(self.log_alpha, temp=self.hard_temp, n_iters=self.hard_iters)
-
-    def sample_perm(self, sample_shape=()):
-        if self.stochastic:
-            return self.sample_soft_perm()
-        else:
-            return self.sample_hard_perm()
-
-    def sample_soft_perm(self, sample_shape=()):
-        # TODO design: in case we want to sample differently for each elem of batch
-        # sample_shape = (self.samples, 1, 1)
-        sample_shape = (self.samples,)
-        log_alpha_noise = add_gumbel_noise(self.log_alpha, sample_shape)
-        soft_perms = sinkhorn(log_alpha_noise, self.sample_temp, n_iters=self.sinkhorn_iters)
-        return soft_perms
-
-    def sample_hard_perm(self, sample_shape=()):
-        sample_shape = (self.samples,)
-        log_alpha_noise = add_gumbel_noise(self.log_alpha, sample_shape)
-        soft_perms = sinkhorn(log_alpha_noise, self.hard_temp, n_iters=self.hard_iters)
-
-
-def sinkhorn(log_alpha, temp=1.0, n_iters=20):
-    """
-    Performs incomplete Sinkhorn normalization
-
-    log_alpha: a tensor with shape ending in (n, n)
-    n_iters: number of sinkhorn iterations (in practice, as little as 20
-    iterations are needed to achieve decent convergence for N~100)
-
-    Returns:
-    A 3D tensor of close-to-doubly-stochastic matrices over the last two dimensions
-    """
-    log_alpha = log_alpha / temp
-    for _ in range(n_iters):
-        log_alpha = log_alpha - torch.logsumexp(log_alpha, dim=-2, keepdim=True)
-        log_alpha = log_alpha - torch.logsumexp(log_alpha, dim=-1, keepdim=True)
-    return torch.exp(log_alpha)
-
-def sample_gumbel(shape, device=torch.device('cpu')):
-    eps = 1e-10
-    U = torch.rand(shape, dtype=torch.float, device=device)
-    return -torch.log(eps - torch.log(U + eps))
-
-def add_gumbel_noise(log_alpha, sample_shape=()):
-    """
-    Args:
-    log_alpha: shape (N, N)
-    temp: temperature parameter, a float.
-    sample_shape: represents shape of independent draws
-
-    Returns:
-    log_alpha_noise: a tensor of shape [sample_shape + (N, N)]
-    """
-    # batch = log_alpha.size(0)
-    n = log_alpha.size(-1)
-    # noise = sample_gumbel(sample_shape + log_alpha.shape)
-    # log_alpha_noise = log_alpha + noise.to(log_alpha.device)
-    noise = sample_gumbel(sample_shape + log_alpha.shape, device=log_alpha.device)
-    log_alpha_noise = log_alpha + noise
-    return log_alpha_noise
 
 
 class ButterflyPermutation(Permutation):
@@ -502,7 +399,7 @@ class ButterflyPermutation(Permutation):
             self.twiddle = nn.Parameter(init)
         elif self.param == 'logit':
             # self.twiddle = nn.Parameter(torch.rand(self.twiddle_core_shape)*2-1)
-            init = sample_gumbel(self.twiddle_core_shape) - sample_gumbel(self.twiddle_core_shape)
+            init = perm.sample_gumbel(self.twiddle_core_shape) - perm.sample_gumbel(self.twiddle_core_shape)
             # init_temp = random.uniform(0.2, 0.4)
             # init_temp = random.uniform(0.5, )
             init_temp = 1.0 / self.depth
@@ -617,15 +514,15 @@ class ButterflyPermutation(Permutation):
             # assert torch.all(self.twiddle == self.twiddle), "NANS FOUND"
             # logits = torch.stack((self.twiddle, torch.zeros_like(self.twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
             # assert torch.all(logits == logits), "NANS FOUND"
-            # logits_noise = add_gumbel_noise(logits, sample_shape)
+            # logits_noise = perm.add_gumbel_noise(logits, sample_shape)
             # assert torch.all(logits_noise == logits_noise), "NANS FOUND"
             # sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
             # assert torch.all(sample_twiddle == sample_twiddle), "NANS FOUND"
             logits = torch.stack((self.twiddle, torch.zeros_like(self.twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
             shape = logits.size()
-            # noise = sample_gumbel((logits.size(0), self.samples)+logits.size()[2:])
+            # noise = perm.sample_gumbel((logits.size(0), self.samples)+logits.size()[2:])
             # logits_noise = logits + noise.to(logits.device) # (d, s, log n, n/2, 2)
-            noise = sample_gumbel((logits.size(0), self.samples)+logits.size()[2:], device=logits.device)
+            noise = perm.sample_gumbel((logits.size(0), self.samples)+logits.size()[2:], device=logits.device)
             logits_noise = logits + noise # (d, s, log n, n/2, 2)
             sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # (depth, s, log n, n/2)
             perms = self.compute_perm(sample_twiddle, self.strides, squeeze=False)
@@ -636,7 +533,7 @@ class ButterflyPermutation(Permutation):
             if self.sample_method == 'gumbel':
                 # TODO: Can't take log!! multiply by exponential instead
                 logits = torch.stack((torch.log(_twiddle), torch.log(1.-_twiddle)), dim=-1) # (depth, 1, log n, n/2, 2)
-                logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
+                logits_noise = perm.add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
                 sample_twiddle = torch.softmax(logits_noise / self.sample_temp, dim=-1)[..., 0] # shape (s, depth, 1, log n, n/2)
             elif self.sample_method == 'uniform':
                 r = torch.rand(_twiddle.size())
@@ -670,7 +567,7 @@ class ButterflyPermutation(Permutation):
         return perms
 
         # logits = torch.stack((torch.log(tw), torch.zeros_like(tw)), dim=-1) # (depth, 1, log n, n/2, 2)
-        # logits_noise = add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
+        # logits_noise = perm.add_gumbel_noise(logits, sample_shape) # alternate way of doing this: sample one uniform parameter instead of two gumbel
         # logits_noise = logits_noise[..., 0] - logits_noise[..., 1]
         # sample_twiddle = torch.where(logits_noise>0, torch.tensor(1.0, device=_twiddle.device), torch.tensor(0.0, device=_twiddle.device)) # shape (s, depth, 1, log n, n/2)
         # return sample_twiddle

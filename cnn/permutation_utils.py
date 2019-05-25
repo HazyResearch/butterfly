@@ -266,3 +266,26 @@ def tv_kernel(x, norm=2, p=1, reduction='mean'):
     elif reduction == 'mean':
         return torch.sum(v) / v.size(0)
     else: assert False, f"perm.tv: reduction {reduction} not supported."
+
+def sample_gumbel(shape, device=torch.device('cpu')):
+    eps = 1e-10
+    U = torch.rand(shape, dtype=torch.float, device=device)
+    return -torch.log(eps - torch.log(U + eps))
+
+def add_gumbel_noise(log_alpha, sample_shape=()):
+    """
+    Args:
+    log_alpha: shape (N, N)
+    temp: temperature parameter, a float.
+    sample_shape: represents shape of independent draws
+
+    Returns:
+    log_alpha_noise: a tensor of shape [sample_shape + (N, N)]
+    """
+    # batch = log_alpha.size(0)
+    n = log_alpha.size(-1)
+    # noise = sample_gumbel(sample_shape + log_alpha.shape)
+    # log_alpha_noise = log_alpha + noise.to(log_alpha.device)
+    noise = sample_gumbel(sample_shape + log_alpha.shape, device=log_alpha.device)
+    log_alpha_noise = log_alpha + noise
+    return log_alpha_noise

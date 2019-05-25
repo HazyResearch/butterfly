@@ -26,7 +26,7 @@ from ray.tune.schedulers import AsyncHyperBandScheduler
 
 
 import model_utils
-import dataset_utils
+import pdataset_utils as dataset_utils
 import permutation_utils as perm
 
 
@@ -53,7 +53,7 @@ class TrainableModel(Trainable):
         self.model.to(self.device)
         self.nparameters = sum(param.nelement() for param in self.model.parameters())
 
-        self.train_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
+        self.train_loader, self.valid_loader, self.test_loader = dataset_utils.get_dataset(config['dataset'])
         permutation_params = filter(lambda p: hasattr(p, '_is_perm_param') and p._is_perm_param, self.model.parameters())
         unstructured_params = filter(lambda p: not (hasattr(p, '_is_perm_param') and p._is_perm_param), self.model.parameters())
         if config['optimizer'] == 'Adam':
@@ -123,7 +123,7 @@ class TrainableModel(Trainable):
             mean_loss = 0.0
             mle_loss  = 0.0
         with torch.no_grad():
-            for data, target in self.test_loader:
+            for data, target in self.valid_loader:
                 data, target = data.to(self.device), target.to(self.device)
                 output = self.model(data)
                 total_samples += output.size(0)
@@ -141,23 +141,23 @@ class TrainableModel(Trainable):
                     correct += (pred == target.data.view_as(pred)).long().cpu().sum().item()
 
             if self.unsupervised:
-                true = self.test_loader.true_permutation[0]
+                true = self.valid_loader.true_permutation[0]
                 p = self.model.get_permutations() # (rank, sample, n, n)
                 # p0 = p[0]
                 # elements = p0[..., torch.arange(len(true)), true]
                 # print("max in true perm elements", elements.max(dim=-1)[0])
                 # print(p0)
                 sample_ent = perm.entropy(p, reduction='mean')
-                sample_nll = perm.dist(p, self.test_loader.true_permutation, fn='nll')
-                # sample_was = perm.dist(p, self.test_loader.true_permutation, fn='was')
-                sample_was1, sample_was2 = perm.dist(p, self.test_loader.true_permutation, fn='was')
+                sample_nll = perm.dist(p, self.valid_loader.true_permutation, fn='nll')
+                # sample_was = perm.dist(p, self.valid_loader.true_permutation, fn='was')
+                sample_was1, sample_was2 = perm.dist(p, self.valid_loader.true_permutation, fn='was')
 
                 mean = self.model.get_permutations(perm='mean') # (rank, n, n)
                 # print("MEAN PERMUTATION", mean)
                 mean_ent = perm.entropy(mean, reduction='mean')
-                mean_nll = perm.dist(mean, self.test_loader.true_permutation, fn='nll')
-                # mean_was = perm.dist(mean, self.test_loader.true_permutation, fn='was')
-                mean_was1, mean_was2 = perm.dist(mean, self.test_loader.true_permutation, fn='was')
+                mean_nll = perm.dist(mean, self.valid_loader.true_permutation, fn='nll')
+                # mean_was = perm.dist(mean, self.valid_loader.true_permutation, fn='was')
+                mean_was1, mean_was2 = perm.dist(mean, self.valid_loader.true_permutation, fn='was')
                 mean_was1_abs, mean_was2_abs = torch.abs(682.-mean_was1), torch.abs(682.-mean_was2)
                 unif = torch.ones_like(mean) / mean.size(-1)
                 # mean_unif_dist = nn.functional.mse_loss(mean, unif, reduction='sum')
@@ -165,9 +165,9 @@ class TrainableModel(Trainable):
 
                 mle = self.model.get_permutations(perm='mle') # (rank, n, n)
                 # mle_ent = perm.entropy(mle, reduction='mean')
-                # mle_nll = perm.dist(mle, self.test_loader.true_permutation, fn='nll')
-                # mle_was = perm.dist(mle, self.test_loader.true_permutation, fn='was')
-                mle_was1, mle_was2 = perm.dist(mle, self.test_loader.true_permutation, fn='was')
+                # mle_nll = perm.dist(mle, self.valid_loader.true_permutation, fn='nll')
+                # mle_was = perm.dist(mle, self.valid_loader.true_permutation, fn='was')
+                mle_was1, mle_was2 = perm.dist(mle, self.valid_loader.true_permutation, fn='was')
 
                 H = self.model.entropy(p=self.entropy_p)
 
@@ -200,8 +200,8 @@ class TrainableModel(Trainable):
                     "neg_ent": -H.item(),
                 }
 
-        # test_loss = test_loss / len(self.test_loader.dataset)
-        # accuracy = correct / len(self.test_loader.dataset)
+        # test_loss = test_loss / len(self.valid_loader.dataset)
+        # accuracy = correct / len(self.valid_loader.dataset)
         test_loss = test_loss / total_samples
         accuracy = correct / total_samples
         return {"mean_loss": test_loss, "mean_accuracy": accuracy}
