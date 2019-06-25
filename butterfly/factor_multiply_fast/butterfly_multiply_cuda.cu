@@ -106,7 +106,7 @@ __global__ void butterfly_multiply_untied_forward_fast_cuda_kernel(const CudaAcs
     __syncthreads();
     constexpr int log_nwarps = max_const(log_n - 5, 0);  // Take max to avoid compiler's warning
     // int id = (threadIdx.x % (1 << log_nwarps)) * warpSize + threadIdx.x / (1 << log_nwarps);
-    int id = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + threadIdx.x >> log_nwarps;;
+    int id = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
     #pragma unroll
     for (int item = 0; item < items_per_thread; item++) {
       input_val[item] = s_input[id + item * n];
