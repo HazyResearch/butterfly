@@ -22,6 +22,7 @@ from butterfly.butterfly_multiply import butterfly_mult_conv2d_svd_torch, butter
 # from factor_multiply import butterfly_multiply_untied_eval
 
 from factor_multiply_fast import butterfly_multiply_untied_forward_fast
+from factor_multiply_fast import butterfly_multiply_untied_forward_backward_fast
 
 def twiddle_normal_to_fast_format(twiddle):
     """Convert twiddle stored in the normal format to the fast format.
@@ -464,20 +465,21 @@ class ButterflyMultTest(unittest.TestCase):
                             continue
                         scaling = 1 / math.sqrt(2) if not complex else 1 / 2
                         twiddle = torch.randn((nstack, m, n // 2, 2, 2) + (() if not complex else (2, )), requires_grad=True, device=device) * scaling
-                        # twiddle = torch.arange(2 * n, dtype=torch.float, device=device).reshape(n // 2, 2, 2).unsqueeze(0).repeat(m, 1, 1, 1).unsqueeze(0)
+                        # twiddle = torch.arange(2 * n, dtype=torch.float, device=device, requires_grad=True).reshape(n // 2, 2, 2).unsqueeze(0).repeat(m, 1, 1, 1).unsqueeze(0)
                         twiddle_fast = twiddle_normal_to_fast_format(twiddle)
                         input = torch.randn((batch_size, nstack, n) + (() if not complex else (2, )), requires_grad=True, device=twiddle.device)
-                        # input = torch.arange(n, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(1).expand(batch_size, -1, -1)
+                        # input = torch.arange(n, dtype=torch.float, device=device, requires_grad=True).unsqueeze(0).unsqueeze(1).expand(batch_size, -1, -1)
                         output = butterfly_multiply_untied_forward_fast(twiddle_fast, input)
                         # output_old = butterfly_mult_untied_torch(twiddle, input)
                         output_old = butterfly_mult_untied(twiddle, input)
                         self.assertTrue(torch.allclose(output, output_old, rtol=self.rtol, atol=self.atol),
                                         ((output - output_old).abs().max().item(), device, complex, increasing_stride))
-                        # grad = torch.randn_like(output_torch)
-                        # d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input), grad, retain_graph=True)
-                        # d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
-                        # self.assertTrue(torch.allclose(d_input, d_input_torch, rtol=self.rtol, atol=self.atol),
-                        #                 ((d_input - d_input_torch).abs().max().item(), device, complex, increasing_stride))
+                        grad = torch.randn_like(output)
+                        d_twiddle, d_input = butterfly_multiply_untied_forward_backward_fast(twiddle_fast, input, grad)
+                        # d_twiddle, d_input = torch.autograd.grad(output, (twiddle_fast, input), grad, retain_graph=True)
+                        d_twiddle_old, d_input_old = torch.autograd.grad(output_old, (twiddle, input), grad, retain_graph=True)
+                        self.assertTrue(torch.allclose(d_input, d_input_old, rtol=self.rtol, atol=self.atol),
+                                        ((d_input - d_input_old).abs().max().item(), device, complex, increasing_stride))
                         # # if device == 'cuda' and batch_size > 1024 and not complex and increasing_stride:
                         # #     print((d_twiddle - d_twiddle_torch).abs().mean(dim=(0, 2, 3, 4)))
                         # #     print(((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().mean(dim=(0, 2, 3, 4)))
@@ -486,10 +488,11 @@ class ButterflyMultTest(unittest.TestCase):
                         # #     print(d_twiddle_torch.flatten()[i])
                         # #     print(d_twiddle.flatten()[i-5:i+5])
                         # #     print(d_twiddle_torch.flatten()[i-5:i+5])
-                        # self.assertTrue(torch.allclose(d_twiddle, d_twiddle_torch, rtol=self.rtol * (10 if batch_size > 1024 else 1),
-                        #                                atol=self.atol * (10 if batch_size > 1024 else 1)),
-                        #                 (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(),
-                        #                  (batch_size, n), device, complex, increasing_stride))
+                        d_twiddle_old = twiddle_normal_to_fast_format(d_twiddle_old)
+                        self.assertTrue(torch.allclose(d_twiddle, d_twiddle_old, rtol=self.rtol * (10 if batch_size > 1024 else 1),
+                                                       atol=self.atol * (10 if batch_size > 1024 else 1)),
+                                        (((d_twiddle - d_twiddle_old) / d_twiddle_old).abs().max().item(),
+                                         (batch_size, n), device, complex, increasing_stride))
 
 
 if __name__ == "__main__":
