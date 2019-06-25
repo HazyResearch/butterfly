@@ -59,17 +59,34 @@ thrust::pair<scalar_t, scalar_t> mult2x2(scalar_t a, scalar_t b, scalar_t c,
   return thrust::make_pair(a * x + b * y, c * x + d * y);
 }
 
+template <int items_per_thread, typename scalar_t>
+__device__ __forceinline__ void block_exchange(scalar_t *temp_storage,
+                                               scalar_t values[items_per_thread],
+                                               int old_idx,
+                                               int new_idx,
+                                               int nthreads) {
+  #pragma unroll
+  for (int item = 0; item < items_per_thread; item++) {
+    temp_storage[old_idx + item * nthreads] = values[item];
+  }
+  __syncthreads();
+  #pragma unroll
+  for (int item = 0; item < items_per_thread; item++) {
+    values[item] = temp_storage[new_idx + item * nthreads];
+  }
+}
+
 template <int nsteps, int items_per_thread, typename scalar_t>
 __device__ __forceinline__ void b_untied_forward(const CudaAcsr<scalar_t, 4> twiddle_a,
                                                  scalar_t input_val[items_per_thread],
                                                  int log_min_stride,
-                                                 int id) {
+                                                 int idx) {
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   #pragma unroll
   for (int i = 0; i < nsteps; i++) {
     int log_stride = i + log_min_stride;
-    const scalar_t twiddle_val[2] = {twiddle_a[s][log_stride][0][id],
-                                     twiddle_a[s][log_stride][1][id]};
+    const scalar_t twiddle_val[2] = {twiddle_a[s][log_stride][0][idx],
+                                     twiddle_a[s][log_stride][1][idx]};
     int lane_mask = 1 << i;
     #pragma unroll
     for (int item = 0; item < items_per_thread; item++) {
@@ -89,36 +106,19 @@ __global__ void butterfly_multiply_untied_forward_fast_cuda_kernel(const CudaAcs
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   constexpr int n = 1 << log_n;
   __shared__ scalar_t s_input[n * items_per_thread];
-  load_input(s_input);
   scalar_t input_val[items_per_thread];
-  #pragma unroll
-  for (int item = 0; item < items_per_thread; item++) {
-    input_val[item] = s_input[threadIdx.x + item * n];
-  }
+  load_input(input_val, threadIdx.x);
   b_untied_forward<min_const(log_n, 5), items_per_thread>(twiddle_a, input_val, 0, threadIdx.x);
-  #pragma unroll
-  for (int item = 0; item < items_per_thread; item++) {
-    s_input[threadIdx.x + item * n] = input_val[item];
-  }
-  __syncwarp();
   if (log_n > 5) {
-    // Transpose
-    __syncthreads();
     constexpr int log_nwarps = max_const(log_n - 5, 1);  // Take max to avoid compiler's warning
-    // int id = (threadIdx.x % (1 << log_nwarps)) * warpSize + threadIdx.x / (1 << log_nwarps);
-    int id = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
-    #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      input_val[item] = s_input[id + item * n];
-    }
-    b_untied_forward<log_n - 5, items_per_thread>(twiddle_a, input_val, 5, id);
-    #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      s_input[id + item * n] = input_val[item];
-    }
-    __syncthreads();
+    // int new_idx = (threadIdx.x % (1 << log_nwarps)) * warpSize + threadIdx.x / (1 << log_nwarps);
+    const int new_idx = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
+    block_exchange<items_per_thread>(s_input, input_val, threadIdx.x, new_idx, n);
+    b_untied_forward<log_n - 5, items_per_thread>(twiddle_a, input_val, 5, new_idx);
+    // Don't need __syncthreads() before block_exchange because threads are writing to the same indices.
+    block_exchange<items_per_thread>(s_input, input_val, new_idx, threadIdx.x, n);
   }
-  save_output(s_input);
+  save_output(input_val, threadIdx.x);
 }
 
 
@@ -136,24 +136,24 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
     auto output_a = output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
     dim3 block(n);
     dim3 grid(div_up(batch_size, ITEMS_PER_THREAD), 1, nstack);
-    auto load_input = [batch_size, n, input_a] __device__ (scalar_t* s_input) {
-      for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    auto load_input = [batch_size, n, input_a] __device__ (scalar_t* input_val, int idx) {
+      for (int i = idx; i < n; i += blockDim.x) {
         const int s = blockIdx.z;
         #pragma unroll
         for (int item = 0; item < ITEMS_PER_THREAD; item++){
           const int b = blockIdx.x * ITEMS_PER_THREAD + item;
-          s_input[i + item * n] = b < batch_size ? input_a[b][s][i] : 0;
+          input_val[item] = b < batch_size ? input_a[b][s][i] : 0;
         }
       }
     };
-    auto save_output = [batch_size, n, output_a] __device__ (scalar_t* s_input) mutable {
-      for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    auto save_output = [batch_size, n, output_a] __device__ (scalar_t* output_val, int idx) mutable {
+      for (int i = idx; i < n; i += blockDim.x) {
         const int s = blockIdx.z;
         #pragma unroll
         for (int item = 0; item < ITEMS_PER_THREAD; item++){
           const int b = blockIdx.x * ITEMS_PER_THREAD + item;
           if (b < batch_size) {
-            output_a[b][s][i] = s_input[i + item * n];
+            output_a[b][s][i] = output_val[item];
           }
         }
       }
@@ -240,7 +240,7 @@ __device__ __forceinline__ void b_untied_forward_backward(const CudaAcsr<scalar_
         + __shfl_xor_sync(FULL_MASK, twiddle_val[i][1] * grad_val[item], lane_mask);
     }
     // if (id >= 9999) {
-    if (id >= 0) {
+    if (true) {
       atomicAdd(&d_twiddle_a[s][log_stride][0][id], d_twiddle_val[0]);
       atomicAdd(&d_twiddle_a[s][log_stride][1][id], d_twiddle_val[1]);
     }
@@ -259,71 +259,28 @@ __global__ void butterfly_multiply_untied_forward_backward_fast_cuda_kernel(cons
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   constexpr int n = 1 << log_n;
   __shared__ scalar_t s_input[n * items_per_thread];
-  load_input(s_input);
+  scalar_t* s_grad = &s_input[0]; // Reusing the same storage as s_input
   scalar_t input_val[items_per_thread];
   scalar_t grad_val[items_per_thread];
-  #pragma unroll
-  for (int item = 0; item < items_per_thread; item++) {
-    input_val[item] = s_input[threadIdx.x + item * n];
-  }
-  scalar_t* s_grad = &s_input[0]; // Reusing the same storage as s_input
-  if (log_n <= 5) {
-    load_grad(s_grad);
-    #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      grad_val[item] = s_grad[threadIdx.x + item * n];
-    }
-    b_untied_forward_backward<min_const(log_n, 5), items_per_thread>(twiddle_a, d_twiddle_a, input_val,
-                                                                     grad_val, 0, threadIdx.x);
-  } else {
+  if (log_n > 5) {
+    load_input(input_val, threadIdx.x);
     b_untied_forward<min_const(log_n, 5), items_per_thread>(twiddle_a, input_val, 0, threadIdx.x);
-    // Transpose
-    #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      s_input[threadIdx.x + item * n] = input_val[item];
-    }
-    __syncthreads();
     constexpr int log_nwarps = max_const(log_n - 5, 1);  // Take max to avoid compiler's warning
-    // int id = (threadIdx.x % (1 << log_nwarps)) * warpSize + threadIdx.x / (1 << log_nwarps);
-    int id = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
-    #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      input_val[item] = s_input[id + item * n];
-    }
-    __syncthreads();
-    load_grad(s_grad);
-    __syncthreads();
-    #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      grad_val[item] = s_grad[id + item * n];
-    }
+    // const int new_idx = (threadIdx.x % (1 << log_nwarps)) * warpSize + threadIdx.x / (1 << log_nwarps);
+    const int new_idx = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
+    block_exchange<items_per_thread>(s_input, input_val, threadIdx.x, new_idx, n);
+    load_grad(grad_val, new_idx);
     b_untied_forward_backward<log_nwarps, items_per_thread>(twiddle_a, d_twiddle_a, input_val,
-                                                            grad_val, 5, id);
-    #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      s_grad[id + item * n] = grad_val[item];
-    }
-    __syncthreads();
-    #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      grad_val[item] = s_grad[threadIdx.x + item * n];
-    }
-    // __syncthreads();  // Don't need sync here because each thread is writing to the same index
-    load_input(s_input);
-    #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      input_val[item] = s_input[threadIdx.x + item * n];
-    }
-    b_untied_forward_backward<5, items_per_thread>(twiddle_a, d_twiddle_a, input_val,
-                                                   grad_val, 0, threadIdx.x);
-    // __syncthreads();  // Don't need to sync there because each thread is writing to the same index
+                                                            grad_val, 5, new_idx);
+    // Don't need __syncthreads() before block_exchange because threads are writing to the same indices.
+    block_exchange<items_per_thread>(s_grad, grad_val, new_idx, threadIdx.x, n);
+  } else {
+    load_grad(grad_val, threadIdx.x);
   }
-
-  #pragma unroll
-  for (int item = 0; item < items_per_thread; item++) {
-    s_grad[threadIdx.x + item * n] = grad_val[item];
-  }
-  save_d_input(s_grad);
+  load_input(input_val, threadIdx.x);
+  b_untied_forward_backward<min_const(log_n, 5), items_per_thread>(twiddle_a, d_twiddle_a, input_val,
+                                                                   grad_val, 0, threadIdx.x);
+  save_d_input(grad_val, threadIdx.x);
 }
 
 
@@ -345,34 +302,34 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
     auto d_input_a = d_input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
     dim3 block(n);
     dim3 grid(div_up(batch_size, ITEMS_PER_THREAD), 1, nstack);
-    auto load_input = [batch_size, n, input_a] __device__ (scalar_t* s_input) {
-      for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    auto load_input = [batch_size, n, input_a] __device__ (scalar_t* input_val, int idx) {
+      for (int i = idx; i < n; i += blockDim.x) {
         const int s = blockIdx.z;
         #pragma unroll
         for (int item = 0; item < ITEMS_PER_THREAD; item++){
           const int b = blockIdx.x * ITEMS_PER_THREAD + item;
-          s_input[i + item * n] = b < batch_size ? input_a[b][s][i] : 0;
+          input_val[item] = b < batch_size ? input_a[b][s][i] : 0;
         }
       }
     };
-    auto load_grad = [batch_size, n, grad_a] __device__ (scalar_t* s_grad) {
-      for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    auto load_grad = [batch_size, n, grad_a] __device__ (scalar_t* grad_val, int idx) {
+      for (int i = idx; i < n; i += blockDim.x) {
         const int s = blockIdx.z;
         #pragma unroll
         for (int item = 0; item < ITEMS_PER_THREAD; item++){
           const int b = blockIdx.x * ITEMS_PER_THREAD + item;
-          s_grad[i + item * n] = b < batch_size ? grad_a[b][s][i] : 0;
+          grad_val[item] = b < batch_size ? grad_a[b][s][i] : 0;
         }
       }
     };
-    auto save_d_input = [batch_size, n, d_input_a] __device__ (scalar_t* s_grad) mutable {
-      for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    auto save_d_input = [batch_size, n, d_input_a] __device__ (scalar_t* grad_val, int idx) mutable {
+      for (int i = idx; i < n; i += blockDim.x) {
         const int s = blockIdx.z;
         #pragma unroll
         for (int item = 0; item < ITEMS_PER_THREAD; item++){
           const int b = blockIdx.x * ITEMS_PER_THREAD + item;
           if (b < batch_size) {
-            d_input_a[b][s][i] = s_grad[i + item * n];
+            d_input_a[b][s][i] = grad_val[item];
           }
         }
       }
