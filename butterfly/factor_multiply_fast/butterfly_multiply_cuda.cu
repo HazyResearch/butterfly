@@ -17,13 +17,15 @@
 // static constexpr int WORK_PER_THREAD = 16;
 // static constexpr int ELEMENTARY_SIZE = MAX_BLOCK_SIZE / 2;
 // static constexpr int MAX_N_FACTORS = 10;
-static constexpr int ITEMS_PER_THREAD = 4;
+static constexpr int ITEMS_PER_THREAD_FORWARD = 4;
+static constexpr int ITEMS_PER_THREAD_BACKWARD = 16;
 
 template <typename T, size_t N>
 using CudaAcsr = at::PackedTensorAccessor<T, N, at::RestrictPtrTraits, int32_t>;
 
 constexpr __host__ __device__ int min_const(int x, int y) { return x <= y ? x : y; }
 constexpr __host__ __device__ int max_const(int x, int y) { return x >= y ? x : y; }
+constexpr __host__ __device__ int div_up_const(int a, int b) { return (a + b - 1) / b; }
 
 // __host__ __device__ static inline int64_t div_up(int64_t a, int64_t b) {
 //   return (a + b - 1) / b;
@@ -59,20 +61,27 @@ thrust::pair<scalar_t, scalar_t> mult2x2(scalar_t a, scalar_t b, scalar_t c,
   return thrust::make_pair(a * x + b * y, c * x + d * y);
 }
 
-template <int items_per_thread, typename scalar_t>
+template <int items_per_thread, int smem_per_thread=items_per_thread, typename scalar_t>
 __device__ __forceinline__ void block_exchange(scalar_t *temp_storage,
                                                scalar_t values[items_per_thread],
                                                int old_idx,
                                                int new_idx,
                                                int nthreads) {
+  constexpr int nsteps = div_up_const(items_per_thread, smem_per_thread);
   #pragma unroll
-  for (int item = 0; item < items_per_thread; item++) {
-    temp_storage[old_idx + item * nthreads] = values[item];
-  }
-  __syncthreads();
-  #pragma unroll
-  for (int item = 0; item < items_per_thread; item++) {
-    values[item] = temp_storage[new_idx + item * nthreads];
+  for (int i = 0; i < nsteps; i++) {
+    if (i > 0) {
+      __syncthreads();
+    }
+    #pragma unroll
+    for (int item = 0; (item < smem_per_thread) && (i * smem_per_thread + item < items_per_thread); item++) {
+      temp_storage[old_idx + item * nthreads] = values[i * smem_per_thread + item];
+    }
+    __syncthreads();
+    #pragma unroll
+    for (int item = 0; (item < smem_per_thread) && (i * smem_per_thread + item < items_per_thread); item++) {
+      values[i * smem_per_thread + item] = temp_storage[new_idx + item * nthreads];
+    }
   }
 }
 
@@ -96,16 +105,18 @@ __device__ __forceinline__ void b_untied_forward(const CudaAcsr<scalar_t, 4> twi
   }
 }
 
-
-template <int log_n, int items_per_thread, typename scalar_t, typename Function0, typename Function1>
-C10_LAUNCH_BOUNDS_2(1 << log_n, 1)
+template <int log_n, int items_per_thread, int max_smem_per_thread=items_per_thread, int min_blocks_per_mp=1,
+            typename scalar_t, typename Function0, typename Function1>
+C10_LAUNCH_BOUNDS_2(1 << log_n, min_blocks_per_mp)
 __global__ void butterfly_multiply_untied_forward_fast_cuda_kernel(const CudaAcsr<scalar_t, 4> twiddle_a,
                                                                    Function0 load_input,
                                                                    Function1 save_output,
                                                                    int batch_size) {
+  constexpr int smem_per_thread = min_const(min_const(max_smem_per_thread, items_per_thread),
+                                            48 * (1 << (10 - log_n)) / (min_blocks_per_mp * sizeof(scalar_t)));
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   constexpr int n = 1 << log_n;
-  __shared__ scalar_t s_input[n * items_per_thread];
+  __shared__ scalar_t s_input[n * smem_per_thread];
   scalar_t input_val[items_per_thread];
   load_input(input_val, threadIdx.x);
   b_untied_forward<min_const(log_n, 5), items_per_thread>(twiddle_a, input_val, 0, threadIdx.x);
@@ -113,14 +124,13 @@ __global__ void butterfly_multiply_untied_forward_fast_cuda_kernel(const CudaAcs
     constexpr int log_nwarps = max_const(log_n - 5, 1);  // Take max to avoid compiler's warning
     // int new_idx = (threadIdx.x % (1 << log_nwarps)) * warpSize + threadIdx.x / (1 << log_nwarps);
     const int new_idx = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
-    block_exchange<items_per_thread>(s_input, input_val, threadIdx.x, new_idx, n);
+    block_exchange<items_per_thread, smem_per_thread>(s_input, input_val, threadIdx.x, new_idx, n);
     b_untied_forward<log_n - 5, items_per_thread>(twiddle_a, input_val, 5, new_idx);
     // Don't need __syncthreads() before block_exchange because threads are writing to the same indices.
-    block_exchange<items_per_thread>(s_input, input_val, new_idx, threadIdx.x, n);
+    block_exchange<items_per_thread, smem_per_thread>(s_input, input_val, new_idx, threadIdx.x, n);
   }
   save_output(input_val, threadIdx.x);
 }
-
 
 void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
                                                  const at::Tensor &input,
@@ -135,13 +145,13 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
     const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
     auto output_a = output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
     dim3 block(n);
-    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD), 1, nstack);
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD), 1, nstack);
     auto load_input = [batch_size, n, input_a] __device__ (scalar_t* input_val, int idx) {
       for (int i = idx; i < n; i += blockDim.x) {
         const int s = blockIdx.z;
         #pragma unroll
-        for (int item = 0; item < ITEMS_PER_THREAD; item++){
-          const int b = blockIdx.x * ITEMS_PER_THREAD + item;
+        for (int item = 0; item < ITEMS_PER_THREAD_FORWARD; item++){
+          const int b = blockIdx.x * ITEMS_PER_THREAD_FORWARD + item;
           input_val[item] = b < batch_size ? input_a[b][s][i] : 0;
         }
       }
@@ -150,8 +160,8 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
       for (int i = idx; i < n; i += blockDim.x) {
         const int s = blockIdx.z;
         #pragma unroll
-        for (int item = 0; item < ITEMS_PER_THREAD; item++){
-          const int b = blockIdx.x * ITEMS_PER_THREAD + item;
+        for (int item = 0; item < ITEMS_PER_THREAD_FORWARD; item++){
+          const int b = blockIdx.x * ITEMS_PER_THREAD_FORWARD + item;
           if (b < batch_size) {
             output_a[b][s][i] = output_val[item];
           }
@@ -162,34 +172,34 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
     switch (log_n)
       {
       case 1:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<1, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<1, ITEMS_PER_THREAD_FORWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, save_output, batch_size); break;
       case 2:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<2, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<2, ITEMS_PER_THREAD_FORWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, save_output, batch_size); break;
       case 3:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<3, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<3, ITEMS_PER_THREAD_FORWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, save_output, batch_size); break;
       case 4:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<4, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<4, ITEMS_PER_THREAD_FORWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, save_output, batch_size); break;
       case 5:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<5, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<5, ITEMS_PER_THREAD_FORWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, save_output, batch_size); break;
       case 6:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<6, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<6, ITEMS_PER_THREAD_FORWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, save_output, batch_size); break;
       case 7:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<7, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<7, ITEMS_PER_THREAD_FORWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, save_output, batch_size); break;
       case 8:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<8, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<8, ITEMS_PER_THREAD_FORWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, save_output, batch_size); break;
       case 9:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<9, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<9, ITEMS_PER_THREAD_FORWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, save_output, batch_size); break;
       case 10:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<10, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<10, ITEMS_PER_THREAD_FORWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, save_output, batch_size); break;
       }
   });
@@ -247,18 +257,20 @@ __device__ __forceinline__ void b_untied_forward_backward(const CudaAcsr<scalar_
   }
 }
 
-template <int log_n, int items_per_thread, typename scalar_t,
-            typename Function0, typename Function1, typename Function2>
-C10_LAUNCH_BOUNDS_2(1 << log_n, 1)
+template <int log_n, int items_per_thread, int max_smem_per_thread=items_per_thread, int min_blocks_per_mp=1,
+            typename scalar_t, typename Function0, typename Function1, typename Function2>
+C10_LAUNCH_BOUNDS_2(1 << log_n, min_blocks_per_mp)
 __global__ void butterfly_multiply_untied_forward_backward_fast_cuda_kernel(const CudaAcsr<scalar_t, 4> twiddle_a,
                                                                             Function0 load_input,
                                                                             Function1 load_grad,
                                                                             CudaAcsr<scalar_t, 4> d_twiddle_a,
                                                                             Function2 save_d_input,
                                                                             int batch_size) {
+  constexpr int smem_per_thread = min_const(min_const(max_smem_per_thread, items_per_thread),
+                                            48 * (1 << (10 - log_n)) / (min_blocks_per_mp * sizeof(scalar_t)));
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   constexpr int n = 1 << log_n;
-  __shared__ scalar_t s_input[n * items_per_thread];
+  __shared__ scalar_t s_input[n * smem_per_thread];
   scalar_t* s_grad = &s_input[0]; // Reusing the same storage as s_input
   scalar_t input_val[items_per_thread];
   scalar_t grad_val[items_per_thread];
@@ -268,12 +280,12 @@ __global__ void butterfly_multiply_untied_forward_backward_fast_cuda_kernel(cons
     constexpr int log_nwarps = max_const(log_n - 5, 1);  // Take max to avoid compiler's warning
     // const int new_idx = (threadIdx.x % (1 << log_nwarps)) * warpSize + threadIdx.x / (1 << log_nwarps);
     const int new_idx = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
-    block_exchange<items_per_thread>(s_input, input_val, threadIdx.x, new_idx, n);
+    block_exchange<items_per_thread, smem_per_thread>(s_input, input_val, threadIdx.x, new_idx, n);
     load_grad(grad_val, new_idx);
     b_untied_forward_backward<log_nwarps, items_per_thread>(twiddle_a, d_twiddle_a, input_val,
                                                             grad_val, 5, new_idx);
     // Don't need __syncthreads() before block_exchange because threads are writing to the same indices.
-    block_exchange<items_per_thread>(s_grad, grad_val, new_idx, threadIdx.x, n);
+    block_exchange<items_per_thread, smem_per_thread>(s_grad, grad_val, new_idx, threadIdx.x, n);
   } else {
     load_grad(grad_val, threadIdx.x);
   }
@@ -282,7 +294,6 @@ __global__ void butterfly_multiply_untied_forward_backward_fast_cuda_kernel(cons
                                                                    grad_val, 0, threadIdx.x);
   save_d_input(grad_val, threadIdx.x);
 }
-
 
 void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle,
                                                           const at::Tensor &input,
@@ -301,13 +312,13 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
     auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
     auto d_input_a = d_input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
     dim3 block(n);
-    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD), 1, nstack);
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD), 1, nstack);
     auto load_input = [batch_size, n, input_a] __device__ (scalar_t* input_val, int idx) {
       for (int i = idx; i < n; i += blockDim.x) {
         const int s = blockIdx.z;
         #pragma unroll
-        for (int item = 0; item < ITEMS_PER_THREAD; item++){
-          const int b = blockIdx.x * ITEMS_PER_THREAD + item;
+        for (int item = 0; item < ITEMS_PER_THREAD_BACKWARD; item++){
+          const int b = blockIdx.x * ITEMS_PER_THREAD_BACKWARD + item;
           input_val[item] = b < batch_size ? input_a[b][s][i] : 0;
         }
       }
@@ -316,8 +327,8 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
       for (int i = idx; i < n; i += blockDim.x) {
         const int s = blockIdx.z;
         #pragma unroll
-        for (int item = 0; item < ITEMS_PER_THREAD; item++){
-          const int b = blockIdx.x * ITEMS_PER_THREAD + item;
+        for (int item = 0; item < ITEMS_PER_THREAD_BACKWARD; item++){
+          const int b = blockIdx.x * ITEMS_PER_THREAD_BACKWARD + item;
           grad_val[item] = b < batch_size ? grad_a[b][s][i] : 0;
         }
       }
@@ -326,8 +337,8 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
       for (int i = idx; i < n; i += blockDim.x) {
         const int s = blockIdx.z;
         #pragma unroll
-        for (int item = 0; item < ITEMS_PER_THREAD; item++){
-          const int b = blockIdx.x * ITEMS_PER_THREAD + item;
+        for (int item = 0; item < ITEMS_PER_THREAD_BACKWARD; item++){
+          const int b = blockIdx.x * ITEMS_PER_THREAD_BACKWARD + item;
           if (b < batch_size) {
             d_input_a[b][s][i] = grad_val[item];
           }
@@ -338,34 +349,34 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
     switch (log_n)
       {
       case 1:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<1, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<1, ITEMS_PER_THREAD_BACKWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       case 2:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<2, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<2, ITEMS_PER_THREAD_BACKWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       case 3:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<3, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<3, ITEMS_PER_THREAD_BACKWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       case 4:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<4, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<4, ITEMS_PER_THREAD_BACKWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       case 5:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<5, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<5, ITEMS_PER_THREAD_BACKWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       case 6:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<6, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<6, ITEMS_PER_THREAD_BACKWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       case 7:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<7, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<7, ITEMS_PER_THREAD_BACKWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       case 8:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<8, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<8, ITEMS_PER_THREAD_BACKWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       case 9:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<9, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<9, ITEMS_PER_THREAD_BACKWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       case 10:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<10, ITEMS_PER_THREAD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<10, ITEMS_PER_THREAD_BACKWARD>
           <<<grid, block, 0, stream>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       }
   });
