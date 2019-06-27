@@ -13,6 +13,8 @@
 
 #define FULL_MASK 0xffffffff
 
+static constexpr int SMEM_PER_MP = 64 * (1 << 10);
+static constexpr int MAX_SMEM_PER_BLOCK = 48 * (1 << 10);
 // static constexpr int MAX_BLOCK_SIZE = 1024;
 // static constexpr int WORK_PER_THREAD = 16;
 // static constexpr int ELEMENTARY_SIZE = MAX_BLOCK_SIZE / 2;
@@ -24,6 +26,7 @@ template <typename T, size_t N>
 using CudaAcsr = at::PackedTensorAccessor<T, N, at::RestrictPtrTraits, int32_t>;
 
 constexpr __host__ __device__ int min_const(int x, int y) { return x <= y ? x : y; }
+constexpr __host__ __device__ int min_const(int x, int y, int z) { return min_const(min_const(x, y), z); }
 constexpr __host__ __device__ int max_const(int x, int y) { return x >= y ? x : y; }
 constexpr __host__ __device__ int div_up_const(int a, int b) { return (a + b - 1) / b; }
 
@@ -93,10 +96,10 @@ __device__ __forceinline__ void b_untied_forward(const CudaAcsr<scalar_t, 4> twi
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   #pragma unroll
   for (int i = 0; i < nsteps; i++) {
+    int lane_mask = 1 << i;
     int log_stride = i + log_min_stride;
     const scalar_t twiddle_val[2] = {twiddle_a[s][log_stride][0][idx],
                                      twiddle_a[s][log_stride][1][idx]};
-    int lane_mask = 1 << i;
     #pragma unroll
     for (int item = 0; item < items_per_thread; item++) {
       scalar_t input_val_other = __shfl_xor_sync(FULL_MASK, input_val[item], lane_mask);
@@ -105,18 +108,18 @@ __device__ __forceinline__ void b_untied_forward(const CudaAcsr<scalar_t, 4> twi
   }
 }
 
-template <int log_n, int items_per_thread, int max_smem_per_thread=items_per_thread, int min_blocks_per_mp=1,
+template <int log_n, int items_per_thread, int min_blocks_per_mp=1, int max_smem_per_thread=items_per_thread,
             typename scalar_t, typename Function0, typename Function1>
 C10_LAUNCH_BOUNDS_2(1 << log_n, min_blocks_per_mp)
 __global__ void butterfly_multiply_untied_forward_fast_cuda_kernel(const CudaAcsr<scalar_t, 4> twiddle_a,
                                                                    Function0 load_input,
                                                                    Function1 save_output,
                                                                    int batch_size) {
-  constexpr int smem_per_thread = min_const(min_const(max_smem_per_thread, items_per_thread),
-                                            48 * (1 << (10 - log_n)) / (min_blocks_per_mp * sizeof(scalar_t)));
-  const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   constexpr int n = 1 << log_n;
-  __shared__ scalar_t s_input[n * smem_per_thread];
+  constexpr int smem_limit = min_const(SMEM_PER_MP / min_blocks_per_mp, MAX_SMEM_PER_BLOCK);
+  constexpr int smem_per_thread = min_const(max_smem_per_thread, items_per_thread,
+                                            smem_limit / (n * sizeof(scalar_t)));
+  __shared__ scalar_t temp_storage[n * smem_per_thread];
   scalar_t input_val[items_per_thread];
   load_input(input_val, threadIdx.x);
   b_untied_forward<min_const(log_n, 5), items_per_thread>(twiddle_a, input_val, 0, threadIdx.x);
@@ -124,10 +127,10 @@ __global__ void butterfly_multiply_untied_forward_fast_cuda_kernel(const CudaAcs
     constexpr int log_nwarps = max_const(log_n - 5, 1);  // Take max to avoid compiler's warning
     // int new_idx = (threadIdx.x % (1 << log_nwarps)) * warpSize + threadIdx.x / (1 << log_nwarps);
     const int new_idx = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
-    block_exchange<items_per_thread, smem_per_thread>(s_input, input_val, threadIdx.x, new_idx, n);
+    block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val, threadIdx.x, new_idx, n);
     b_untied_forward<log_n - 5, items_per_thread>(twiddle_a, input_val, 5, new_idx);
     // Don't need __syncthreads() before block_exchange because threads are writing to the same indices.
-    block_exchange<items_per_thread, smem_per_thread>(s_input, input_val, new_idx, threadIdx.x, n);
+    block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val, new_idx, threadIdx.x, n);
   }
   save_output(input_val, threadIdx.x);
 }
@@ -208,56 +211,69 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
      cudaGetLastError());
 }
 
-template <int nsteps, int items_per_thread, typename scalar_t>
+template <int nsteps, int items_per_thread,
+            int reg_storage_per_thread=items_per_thread, typename scalar_t>
 __device__ __forceinline__ void b_untied_forward_backward(const CudaAcsr<scalar_t, 4> twiddle_a,
                                                           CudaAcsr<scalar_t, 4> d_twiddle_a,
                                                           scalar_t input_val[items_per_thread],
                                                           scalar_t grad_val[items_per_thread],
                                                           int log_min_stride,
                                                           int id) {
+  constexpr int nslices = div_up_const(items_per_thread, reg_storage_per_thread);
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
-  scalar_t input_val_storage[nsteps][items_per_thread];
   scalar_t twiddle_val[nsteps][2];
+  scalar_t d_twiddle_val[nsteps][2] = {0};
+  scalar_t input_val_storage[nsteps][items_per_thread];
   #pragma unroll
-  for (int item = 0; item < items_per_thread; item++) {
-    input_val_storage[0][item] = input_val[item];
-  }
-  #pragma unroll
-  for (int i = 0; i < nsteps; i++) {
-    int lane_mask = 1 << i;
-    int log_stride = i + log_min_stride;
-    twiddle_val[i][0] = twiddle_a[s][log_stride][0][id];
-    twiddle_val[i][1] = twiddle_a[s][log_stride][1][id];
-    if (i < nsteps - 1) {  // Don't need input for the last step
-      #pragma unroll
-      for (int item = 0; item < items_per_thread; item++) {
-        scalar_t input_val_other = __shfl_xor_sync(FULL_MASK, input_val_storage[i][item], lane_mask);
-        input_val_storage[i + 1][item] = twiddle_val[i][0] * input_val_storage[i][item] + twiddle_val[i][1] * input_val_other;
+  for (int i = 0; i < nslices; i++) {
+    #pragma unroll
+    for (int item = 0; (item < reg_storage_per_thread) && (i * reg_storage_per_thread + item < items_per_thread); item++) {
+      input_val_storage[0][item] = input_val[i * reg_storage_per_thread + item];
+    }
+    #pragma unroll
+    for (int step = 0; step < nsteps; step++) {
+      int lane_mask = 1 << step;
+      int log_stride = step + log_min_stride;
+      if (i == 0) {
+        twiddle_val[step][0] = twiddle_a[s][log_stride][0][id];
+        twiddle_val[step][1] = twiddle_a[s][log_stride][1][id];
+      }
+      if (step < nsteps - 1) {  // Don't need input for the last step
+        #pragma unroll
+        for (int item = 0; (item < reg_storage_per_thread) && (i * reg_storage_per_thread + item < items_per_thread); item++) {
+          scalar_t input_val_other = __shfl_xor_sync(FULL_MASK, input_val_storage[step][item], lane_mask);
+          input_val_storage[step + 1][item] = twiddle_val[step][0] * input_val_storage[step][item]
+            + twiddle_val[step][1] * input_val_other;
+        }
       }
     }
-  }
-  #pragma unroll
-  for (int i = nsteps - 1; i >= 0; i--) {
-    int lane_mask = 1 << i;
-    int log_stride = i + log_min_stride;
-    scalar_t d_twiddle_val[2] = {0, 0};
     #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      d_twiddle_val[0] += grad_val[item] * input_val_storage[i][item];
-      scalar_t input_val_other = __shfl_xor_sync(FULL_MASK, input_val_storage[i][item], lane_mask);
-      d_twiddle_val[1] += grad_val[item] * input_val_other;
-      grad_val[item] = twiddle_val[i][0] * grad_val[item]
-        + __shfl_xor_sync(FULL_MASK, twiddle_val[i][1] * grad_val[item], lane_mask);
-    }
-    // if (id >= 9999) {
-    if (true) {
-      atomicAdd(&d_twiddle_a[s][log_stride][0][id], d_twiddle_val[0]);
-      atomicAdd(&d_twiddle_a[s][log_stride][1][id], d_twiddle_val[1]);
+    for (int step = nsteps - 1; step >= 0; step--) {
+      int lane_mask = 1 << step;
+      int log_stride = step + log_min_stride;
+      #pragma unroll
+      for (int item = 0; (item < reg_storage_per_thread) && (i * reg_storage_per_thread + item < items_per_thread); item++) {
+        int item_offset = i * reg_storage_per_thread + item;
+        d_twiddle_val[step][0] += grad_val[item_offset] * input_val_storage[step][item];
+        scalar_t input_val_other = __shfl_xor_sync(FULL_MASK, input_val_storage[step][item], lane_mask);
+        d_twiddle_val[step][1] += grad_val[item_offset] * input_val_other;
+        grad_val[item_offset] = twiddle_val[step][0] * grad_val[item_offset]
+          + __shfl_xor_sync(FULL_MASK, twiddle_val[step][1] * grad_val[item_offset], lane_mask);
+      }
+      if (i == nslices - 1) {
+        // if (id >= 9999) {
+        // if (threadIdx.x < 128) {
+        if (true) {
+          atomicAdd(&d_twiddle_a[s][log_stride][0][id], d_twiddle_val[step][0]);
+          atomicAdd(&d_twiddle_a[s][log_stride][1][id], d_twiddle_val[step][1]);
+        }
+      }
     }
   }
 }
 
-template <int log_n, int items_per_thread, int max_smem_per_thread=items_per_thread, int min_blocks_per_mp=1,
+template <int log_n, int items_per_thread, int max_reg_storage_per_thread=items_per_thread,
+            int min_blocks_per_mp=1, int max_smem_per_thread=items_per_thread,
             typename scalar_t, typename Function0, typename Function1, typename Function2>
 C10_LAUNCH_BOUNDS_2(1 << log_n, min_blocks_per_mp)
 __global__ void butterfly_multiply_untied_forward_backward_fast_cuda_kernel(const CudaAcsr<scalar_t, 4> twiddle_a,
@@ -266,12 +282,12 @@ __global__ void butterfly_multiply_untied_forward_backward_fast_cuda_kernel(cons
                                                                             CudaAcsr<scalar_t, 4> d_twiddle_a,
                                                                             Function2 save_d_input,
                                                                             int batch_size) {
-  constexpr int smem_per_thread = min_const(min_const(max_smem_per_thread, items_per_thread),
-                                            48 * (1 << (10 - log_n)) / (min_blocks_per_mp * sizeof(scalar_t)));
-  const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   constexpr int n = 1 << log_n;
-  __shared__ scalar_t s_input[n * smem_per_thread];
-  scalar_t* s_grad = &s_input[0]; // Reusing the same storage as s_input
+  constexpr int smem_limit = min_const(SMEM_PER_MP / min_blocks_per_mp, MAX_SMEM_PER_BLOCK);
+  constexpr int smem_per_thread = min_const(max_smem_per_thread, items_per_thread,
+                                            smem_limit / (n * sizeof(scalar_t)));
+  constexpr int reg_storage_per_thread = min_const(max_reg_storage_per_thread, items_per_thread);
+  __shared__ scalar_t temp_storage[n * smem_per_thread];
   scalar_t input_val[items_per_thread];
   scalar_t grad_val[items_per_thread];
   if (log_n > 5) {
@@ -280,18 +296,18 @@ __global__ void butterfly_multiply_untied_forward_backward_fast_cuda_kernel(cons
     constexpr int log_nwarps = max_const(log_n - 5, 1);  // Take max to avoid compiler's warning
     // const int new_idx = (threadIdx.x % (1 << log_nwarps)) * warpSize + threadIdx.x / (1 << log_nwarps);
     const int new_idx = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
-    block_exchange<items_per_thread, smem_per_thread>(s_input, input_val, threadIdx.x, new_idx, n);
+    block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val, threadIdx.x, new_idx, n);
     load_grad(grad_val, new_idx);
-    b_untied_forward_backward<log_nwarps, items_per_thread>(twiddle_a, d_twiddle_a, input_val,
-                                                            grad_val, 5, new_idx);
+    b_untied_forward_backward<log_nwarps, items_per_thread, reg_storage_per_thread>
+      (twiddle_a, d_twiddle_a, input_val, grad_val, 5, new_idx);
     // Don't need __syncthreads() before block_exchange because threads are writing to the same indices.
-    block_exchange<items_per_thread, smem_per_thread>(s_grad, grad_val, new_idx, threadIdx.x, n);
+    block_exchange<items_per_thread, smem_per_thread>(temp_storage, grad_val, new_idx, threadIdx.x, n);
   } else {
     load_grad(grad_val, threadIdx.x);
   }
   load_input(input_val, threadIdx.x);
-  b_untied_forward_backward<min_const(log_n, 5), items_per_thread>(twiddle_a, d_twiddle_a, input_val,
-                                                                   grad_val, 0, threadIdx.x);
+  b_untied_forward_backward<min_const(log_n, 5), items_per_thread, reg_storage_per_thread>
+    (twiddle_a, d_twiddle_a, input_val, grad_val, 0, threadIdx.x);
   save_d_input(grad_val, threadIdx.x);
 }
 
