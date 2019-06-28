@@ -19,8 +19,8 @@ static constexpr int MAX_SMEM_PER_BLOCK = 48 * (1 << 10);
 // static constexpr int WORK_PER_THREAD = 16;
 // static constexpr int ELEMENTARY_SIZE = MAX_BLOCK_SIZE / 2;
 // static constexpr int MAX_N_FACTORS = 10;
-static constexpr int ITEMS_PER_THREAD_FORWARD = 4;
-static constexpr int ITEMS_PER_THREAD_BACKWARD = 16;
+static constexpr int ITEMS_PER_THREAD_FORWARD[14] = {4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4};
+static constexpr int ITEMS_PER_THREAD_BACKWARD[14] = {16, 16, 16, 16, 16, 16, 16, 16, 16, 4, 1, 1, 1, 1};
 
 template <typename T, size_t N>
 using CudaAcsr = at::PackedTensorAccessor<T, N, at::RestrictPtrTraits, int32_t>;
@@ -192,39 +192,39 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
     const auto input_reader = InputReader<scalar_t>(input);
     auto output_writer = OutputWriter<scalar_t>(output);
     dim3 block(n);
-    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD), 1, nstack);
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD[log_n - 1]), 1, nstack);
     auto stream = at::cuda::getCurrentCUDAStream();
     switch (log_n)
       {
       case 1:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<1, ITEMS_PER_THREAD_FORWARD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<1, ITEMS_PER_THREAD_FORWARD[0]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size); break;
       case 2:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<2, ITEMS_PER_THREAD_FORWARD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<2, ITEMS_PER_THREAD_FORWARD[1]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size); break;
       case 3:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<3, ITEMS_PER_THREAD_FORWARD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<3, ITEMS_PER_THREAD_FORWARD[2]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size); break;
       case 4:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<4, ITEMS_PER_THREAD_FORWARD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<4, ITEMS_PER_THREAD_FORWARD[3]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size); break;
       case 5:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<5, ITEMS_PER_THREAD_FORWARD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<5, ITEMS_PER_THREAD_FORWARD[4]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size); break;
       case 6:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<6, ITEMS_PER_THREAD_FORWARD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<6, ITEMS_PER_THREAD_FORWARD[5]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size); break;
       case 7:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<7, ITEMS_PER_THREAD_FORWARD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<7, ITEMS_PER_THREAD_FORWARD[6]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size); break;
       case 8:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<8, ITEMS_PER_THREAD_FORWARD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<8, ITEMS_PER_THREAD_FORWARD[7]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size); break;
       case 9:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<9, ITEMS_PER_THREAD_FORWARD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<9, ITEMS_PER_THREAD_FORWARD[8]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size); break;
       case 10:
-        butterfly_multiply_untied_forward_fast_cuda_kernel<10, ITEMS_PER_THREAD_FORWARD>
+        butterfly_multiply_untied_forward_fast_cuda_kernel<10, ITEMS_PER_THREAD_FORWARD[9]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size); break;
       }
   });
@@ -350,39 +350,39 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
     auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
     auto d_input_writer = OutputWriter<scalar_t>(d_input);
     dim3 block(n);
-    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD), 1, nstack);
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD[log_n - 1]), 1, nstack);
     auto stream = at::cuda::getCurrentCUDAStream();
     switch (log_n)
       {
       case 1:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<1, ITEMS_PER_THREAD_BACKWARD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<1, ITEMS_PER_THREAD_BACKWARD[0]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       case 2:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<2, ITEMS_PER_THREAD_BACKWARD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<2, ITEMS_PER_THREAD_BACKWARD[1]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       case 3:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<3, ITEMS_PER_THREAD_BACKWARD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<3, ITEMS_PER_THREAD_BACKWARD[2]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       case 4:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<4, ITEMS_PER_THREAD_BACKWARD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<4, ITEMS_PER_THREAD_BACKWARD[3]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       case 5:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<5, ITEMS_PER_THREAD_BACKWARD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<5, ITEMS_PER_THREAD_BACKWARD[4]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       case 6:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<6, ITEMS_PER_THREAD_BACKWARD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<6, ITEMS_PER_THREAD_BACKWARD[5]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       case 7:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<7, ITEMS_PER_THREAD_BACKWARD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<7, ITEMS_PER_THREAD_BACKWARD[6]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       case 8:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<8, ITEMS_PER_THREAD_BACKWARD, 1, 3>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<8, ITEMS_PER_THREAD_BACKWARD[7]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       case 9:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<9, ITEMS_PER_THREAD_BACKWARD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<9, ITEMS_PER_THREAD_BACKWARD[8]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       case 10:
-        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<10, ITEMS_PER_THREAD_BACKWARD>
+        butterfly_multiply_untied_forward_backward_fast_cuda_kernel<10, ITEMS_PER_THREAD_BACKWARD[9]>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       }
   });
