@@ -66,18 +66,20 @@ struct InputReader {
       batch_size(input.size(0)),
       n(input.size(2)) {}
 
-  template<int items_per_thread>
-  __device__ __forceinline__ void load(scalar_t* input_val, int idx) {
-    // for (int i = idx; i < n; i += blockDim.x) {
-      int i = idx;
+  template<int items_per_thread, int mult_per_warp=1>
+  __device__ __forceinline__ void load(scalar_t input_val[mult_per_warp][items_per_thread],
+                                       int idx) {
+    #pragma unroll
+    for (int mult = 0; mult < mult_per_warp; mult++) {
+      int i = mult * warpSize + idx;
       const int s = blockIdx.z;
       #pragma unroll
       for (int item = 0; item < items_per_thread; item++){
         const int b = blockIdx.x * items_per_thread + item;
-        input_val[item] = b < batch_size ? input_a[b][s][i] : 0;
+        input_val[mult][item] = b < batch_size ? input_a[b][s][i] : 0;
       }
     }
-  // }
+  }
 
 };
 
@@ -91,20 +93,22 @@ struct OutputWriter {
       batch_size(output.size(0)),
       n(output.size(2)) {}
 
-  template<int items_per_thread>
-  __device__ __forceinline__ void save(scalar_t* output_val, int idx) {
-    // for (int i = idx; i < n; i += blockDim.x) {
-      int i = idx;
+  template<int items_per_thread, int mult_per_warp=1>
+  __device__ __forceinline__ void save(scalar_t output_val[mult_per_warp][items_per_thread],
+                                       int idx) {
+    #pragma unroll
+    for (int mult = 0; mult < mult_per_warp; mult++) {
+      int i = mult * warpSize + idx;
       const int s = blockIdx.z;
       #pragma unroll
       for (int item = 0; item < items_per_thread; item++){
         const int b = blockIdx.x * items_per_thread + item;
         if (b < batch_size) {
-          output_a[b][s][i] = output_val[item];
+          output_a[b][s][i] = output_val[mult][item];
         }
       }
     }
-  // }
+  }
 
 };
 
@@ -132,22 +136,49 @@ __device__ __forceinline__ void block_exchange(scalar_t *temp_storage,
   }
 }
 
-template <int nsteps, bool increasing_stride, int items_per_thread, typename scalar_t>
+template <int nsteps, bool increasing_stride, int items_per_thread,
+            int mult_per_warp=1, typename scalar_t>
 __device__ __forceinline__ void b_untied_forward(const CudaAcsr<scalar_t, 4> twiddle_a,
-                                                 scalar_t input_val[items_per_thread],
+                                                 scalar_t input_val[mult_per_warp][items_per_thread],
                                                  int twiddle_idx_start,
                                                  int idx) {
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   #pragma unroll
   for (int step = 0; step < nsteps; step++) {
-    int lane_mask = increasing_stride ? (1 << step) : (1 << (nsteps - 1 - step));
-    int twiddle_idx = step + twiddle_idx_start;
-    const scalar_t twiddle_val[2] = {twiddle_a[s][twiddle_idx][0][idx],
-                                     twiddle_a[s][twiddle_idx][1][idx]};
-    #pragma unroll
-    for (int item = 0; item < items_per_thread; item++) {
-      scalar_t input_val_other = __shfl_xor_sync(FULL_MASK, input_val[item], lane_mask);
-      input_val[item] = twiddle_val[0] * input_val[item] + twiddle_val[1] * input_val_other;
+    int log_stride = increasing_stride ? step : nsteps - 1 - step;
+    int twiddle_idx = twiddle_idx_start + step;
+    if (log_stride < 5) {
+      int lane_mask = 1 << log_stride;
+      #pragma unroll
+      for (int mult = 0; mult < mult_per_warp; mult++) {
+        // TODO: make num thread per warp an input argument
+        const scalar_t twiddle_val[2] = {twiddle_a[s][twiddle_idx][0][mult * warpSize + idx],
+                                         twiddle_a[s][twiddle_idx][1][mult * warpSize + idx]};
+        #pragma unroll
+        for (int item = 0; item < items_per_thread; item++) {
+          scalar_t input_val_other = __shfl_xor_sync(FULL_MASK, input_val[mult][item], lane_mask);
+          input_val[mult][item] = twiddle_val[0] * input_val[mult][item] + twiddle_val[1] * input_val_other;
+        }
+      }
+    } else {
+      int mult_stride = 1 << (log_stride - 5);
+      #pragma unroll
+      for (int i = 0; i < mult_per_warp / 2; i++) {
+        int low_order_bits = i & (mult_stride - 1);  // int low_order_bits = i % mult_stride;
+        int mult = 2 * (i - low_order_bits) + low_order_bits;
+        const scalar_t twiddle_val[2][2]
+          = {{twiddle_a[s][twiddle_idx][0][mult * warpSize + idx],
+              twiddle_a[s][twiddle_idx][1][mult * warpSize + idx]},
+             {twiddle_a[s][twiddle_idx][0][(mult + mult_stride) * warpSize + idx],
+              twiddle_a[s][twiddle_idx][1][(mult + mult_stride) * warpSize + idx]}};
+        #pragma unroll
+        for (int item = 0; item < items_per_thread; item++) {
+          scalar_t inputs[2] = {input_val[mult][item], input_val[mult + mult_stride][item]};
+          input_val[mult][item] = twiddle_val[0][0] * inputs[0] + twiddle_val[0][1] * inputs[1];
+          // The order of twiddle[1] is swapped by design
+          input_val[mult + mult_stride][item] = twiddle_val[1][1] * inputs[0] + twiddle_val[1][0] * inputs[1];
+        }
+      }
     }
   }
 }
@@ -164,7 +195,16 @@ __global__ void butterfly_multiply_untied_forward_fast_cuda_kernel(const CudaAcs
   constexpr int smem_per_thread = min_const(max_smem_per_thread, items_per_thread,
                                             smem_limit / (n * sizeof(scalar_t)));
   __shared__ scalar_t temp_storage[n * smem_per_thread];
-  scalar_t input_val[items_per_thread];
+  if (log_n == 6) {
+    scalar_t input_val[2][items_per_thread];
+    input_reader.load<items_per_thread, 2>(input_val, threadIdx.x);
+    b_untied_forward<min_const(log_n, 6), increasing_stride, items_per_thread, 2>
+    // b_untied_forward<min_const(log_n, 5), increasing_stride, items_per_thread, 2>
+      (twiddle_a, input_val, 0, threadIdx.x);
+    output_writer.save<items_per_thread, 2>(input_val, threadIdx.x);
+    return;
+  }
+  scalar_t input_val[1][items_per_thread];
   input_reader.load<items_per_thread>(input_val, threadIdx.x);
   if (log_n <= 5) {
     b_untied_forward<min_const(log_n, 5), increasing_stride, items_per_thread>
@@ -175,14 +215,14 @@ __global__ void butterfly_multiply_untied_forward_fast_cuda_kernel(const CudaAcs
     const int new_idx = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
     if (increasing_stride) {
       b_untied_forward<min_const(log_n, 5), true, items_per_thread>(twiddle_a, input_val, 0, threadIdx.x);
-      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val, threadIdx.x, new_idx, n);
+      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val[0], threadIdx.x, new_idx, n);
       b_untied_forward<log_n - 5, true, items_per_thread>(twiddle_a, input_val, 5, new_idx);
       // Don't need __syncthreads() before block_exchange because threads are writing to the same indices.
-      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val, new_idx, threadIdx.x, n);
+      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val[0], new_idx, threadIdx.x, n);
     } else {
-      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val, threadIdx.x, new_idx, n);
+      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val[0], threadIdx.x, new_idx, n);
       b_untied_forward<log_n - 5, false, items_per_thread>(twiddle_a, input_val, 0, new_idx);
-      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val, new_idx, threadIdx.x, n);
+      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val[0], new_idx, threadIdx.x, n);
       b_untied_forward<min_const(log_n, 5), false, items_per_thread>(twiddle_a, input_val, log_n - 5, threadIdx.x);
     }
   }
@@ -200,9 +240,10 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_fast_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
-    const auto input_reader = InputReader<scalar_t>(input);
-    auto output_writer = OutputWriter<scalar_t>(output);
-    dim3 block(n);
+    const InputReader<scalar_t> input_reader(input);
+    OutputWriter<scalar_t> output_writer(output);
+    // dim3 block(n);
+    dim3 block(log_n == 6 ? 32 : n);
     dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD[log_n - 1]), 1, nstack);
     auto stream = at::cuda::getCurrentCUDAStream();
     switch (log_n)
@@ -342,40 +383,40 @@ __global__ void butterfly_multiply_untied_forward_backward_fast_cuda_kernel(cons
                                             smem_limit / (n * sizeof(scalar_t)));
   constexpr int reg_storage_per_thread = min_const(max_reg_storage_per_thread, items_per_thread);
   __shared__ scalar_t temp_storage[n * smem_per_thread];
-  scalar_t input_val[items_per_thread];
-  scalar_t grad_val[items_per_thread];
+  scalar_t input_val[1][items_per_thread];
+  scalar_t grad_val[1][items_per_thread];
   input_reader.load<items_per_thread>(input_val, threadIdx.x);
   if (log_n <= 5) {
     grad_reader.load<items_per_thread>(grad_val, threadIdx.x);
     b_untied_forward_backward<min_const(log_n, 5), increasing_stride, items_per_thread, reg_storage_per_thread>
-      (twiddle_a, d_twiddle_a, input_val, grad_val, 0, threadIdx.x);
+      (twiddle_a, d_twiddle_a, input_val[0], grad_val[0], 0, threadIdx.x);
   } else {
     constexpr int log_nwarps = max_const(log_n - 5, 1);  // Take max to avoid compiler's warning
     // const int new_idx = (threadIdx.x % (1 << log_nwarps)) * warpSize + threadIdx.x / (1 << log_nwarps);
     const int new_idx = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
     if (increasing_stride) {
       b_untied_forward<min_const(log_n, 5), true, items_per_thread>(twiddle_a, input_val, 0, threadIdx.x);
-      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val, threadIdx.x, new_idx, n);
+      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val[0], threadIdx.x, new_idx, n);
       grad_reader.load<items_per_thread>(grad_val, new_idx);
       b_untied_forward_backward<log_nwarps, true, items_per_thread, reg_storage_per_thread>
-        (twiddle_a, d_twiddle_a, input_val, grad_val, 5, new_idx);
+        (twiddle_a, d_twiddle_a, input_val[0], grad_val[0], 5, new_idx);
       // Don't need __syncthreads() before block_exchange because threads are writing to the same indices.
-      block_exchange<items_per_thread, smem_per_thread>(temp_storage, grad_val, new_idx, threadIdx.x, n);
+      block_exchange<items_per_thread, smem_per_thread>(temp_storage, grad_val[0], new_idx, threadIdx.x, n);
       input_reader.load<items_per_thread>(input_val, threadIdx.x);
       b_untied_forward_backward<min_const(log_n, 5), true, items_per_thread, reg_storage_per_thread>
-        (twiddle_a, d_twiddle_a, input_val, grad_val, 0, threadIdx.x);
+        (twiddle_a, d_twiddle_a, input_val[0], grad_val[0], 0, threadIdx.x);
     } else {
-      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val, threadIdx.x, new_idx, n);
+      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val[0], threadIdx.x, new_idx, n);
       b_untied_forward<log_nwarps, false, items_per_thread>(twiddle_a, input_val, 0, new_idx);
-      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val, new_idx, threadIdx.x, n);
+      block_exchange<items_per_thread, smem_per_thread>(temp_storage, input_val[0], new_idx, threadIdx.x, n);
       grad_reader.load<items_per_thread>(grad_val, threadIdx.x);
       b_untied_forward_backward<min_const(log_n, 5), false, items_per_thread, reg_storage_per_thread>
-        (twiddle_a, d_twiddle_a, input_val, grad_val, log_nwarps, threadIdx.x);
-      block_exchange<items_per_thread, smem_per_thread>(temp_storage, grad_val, threadIdx.x, new_idx, n);
+        (twiddle_a, d_twiddle_a, input_val[0], grad_val[0], log_nwarps, threadIdx.x);
+      block_exchange<items_per_thread, smem_per_thread>(temp_storage, grad_val[0], threadIdx.x, new_idx, n);
       input_reader.load<items_per_thread>(input_val, new_idx);
       b_untied_forward_backward<log_nwarps, false, items_per_thread, reg_storage_per_thread>
-        (twiddle_a, d_twiddle_a, input_val, grad_val, 0, new_idx);
-      block_exchange<items_per_thread, smem_per_thread>(temp_storage, grad_val, new_idx, threadIdx.x, n);
+        (twiddle_a, d_twiddle_a, input_val[0], grad_val[0], 0, new_idx);
+      block_exchange<items_per_thread, smem_per_thread>(temp_storage, grad_val[0], new_idx, threadIdx.x, n);
     }
   }
   d_input_writer.save<items_per_thread>(grad_val, threadIdx.x);
@@ -394,10 +435,10 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_backward_fast_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
-    const auto input_reader = InputReader<scalar_t>(input);
-    const auto grad_reader = InputReader<scalar_t>(grad);
+    const InputReader<scalar_t> input_reader(input);
+    const InputReader<scalar_t> grad_reader(grad);
     auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
-    auto d_input_writer = OutputWriter<scalar_t>(d_input);
+    OutputWriter<scalar_t> d_input_writer(d_input);
     dim3 block(n);
     dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD[log_n - 1]), 1, nstack);
     auto stream = at::cuda::getCurrentCUDAStream();
