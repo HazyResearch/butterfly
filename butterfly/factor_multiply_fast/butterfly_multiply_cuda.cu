@@ -306,7 +306,8 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
 }
 
 template <int nsteps, bool increasing_stride, int items_per_thread,
-            int reg_storage_per_thread=items_per_thread, typename scalar_t>
+            int reg_storage_per_thread=items_per_thread,
+            typename scalar_t, typename accscalar_t=at::acc_type<scalar_t, true>>
 __device__ __forceinline__ void b_untied_forward_backward(const CudaAcsr<scalar_t, 4> twiddle_a,
                                                           CudaAcsr<scalar_t, 4> d_twiddle_a,
                                                           scalar_t input_val[items_per_thread],
@@ -316,7 +317,7 @@ __device__ __forceinline__ void b_untied_forward_backward(const CudaAcsr<scalar_
   constexpr int nslices = div_up_const(items_per_thread, reg_storage_per_thread);
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   scalar_t twiddle_val[nsteps][2];
-  scalar_t d_twiddle_val[nsteps][2] = {0};
+  accscalar_t d_twiddle_val[nsteps][2] = {0};
   scalar_t input_val_storage[nsteps][items_per_thread];
   #pragma unroll
   for (int i = 0; i < nslices; i++) {
@@ -433,7 +434,6 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
   const int n = input.size(2);
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_backward_fast_cuda", [&] {
-    using accscalar_t = at::acc_type<scalar_t, true>;
     const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
     const InputReader<scalar_t> input_reader(input);
     const InputReader<scalar_t> grad_reader(grad);
