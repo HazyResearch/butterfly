@@ -7,22 +7,23 @@
 
 void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
                                                  const at::Tensor &input,
-                                                 at::Tensor &output);
+                                                 at::Tensor &output,
+                                                 bool increasing_stride);
 void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle,
                                                           const at::Tensor &input,
                                                           const at::Tensor &grad,
                                                           at::Tensor &d_twiddle,
-                                                          at::Tensor &d_input);
+                                                          at::Tensor &d_input,
+                                                          bool increasing_stride);
 
 at::Tensor butterfly_multiply_untied_forward_fast(const at::Tensor &twiddle,
-                                                  const at::Tensor &input) {
+                                                  const at::Tensor &input,
+                                                  bool increasing_stride) {
   /* Parameters:
          twiddle: (nstack, log n, n/2, 2, 2) if real or (nstack, log n, n/2, 2, 2, 2) if complex
          input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
          increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
              decreasing stride (e.g., n/2, n/4, ..., 1).
-             Note that this only changes the order of multiplication, not how twiddle is stored.
-             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Returns:
          output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
   */
@@ -46,20 +47,19 @@ at::Tensor butterfly_multiply_untied_forward_fast(const at::Tensor &twiddle,
            "log n, 2, n) (nstack, log n, 2, n, 2)");
   auto output = torch::empty_like(input);
   AT_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_fast: only supports CUDA");
-  butterfly_multiply_untied_forward_fast_cuda(twiddle, input, output);
+  butterfly_multiply_untied_forward_fast_cuda(twiddle, input, output, increasing_stride);
   return output;
 }
 
 std::vector<at::Tensor> butterfly_multiply_untied_forward_backward_fast(const at::Tensor &twiddle,
                                                                         const at::Tensor &input,
-                                                                        const at::Tensor &grad) {
+                                                                        const at::Tensor &grad,
+                                                                        bool increasing_stride) {
   /* Parameters:
          twiddle: (nstack, log n, n/2, 2, 2) if real or (nstack, log n, n/2, 2, 2, 2) if complex
          input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
          increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
              decreasing stride (e.g., n/2, n/4, ..., 1).
-             Note that this only changes the order of multiplication, not how twiddle is stored.
-             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
      Returns:
          output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
   */
@@ -91,7 +91,8 @@ std::vector<at::Tensor> butterfly_multiply_untied_forward_backward_fast(const at
   auto d_twiddle = torch::zeros_like(twiddle);
   AT_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_backward_fast: only supports CUDA");
   butterfly_multiply_untied_forward_backward_fast_cuda(twiddle, input, grad,
-                                                       d_twiddle, d_input);
+                                                       d_twiddle, d_input,
+                                                       increasing_stride);
   return {d_twiddle, d_input} ;
 }
 

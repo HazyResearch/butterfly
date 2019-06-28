@@ -459,23 +459,25 @@ class ButterflyMultTest(unittest.TestCase):
             for device in ['cuda']:
                 # for complex in [False, True]:
                 for complex in [False]:
-                    # for increasing_stride in [True, False]:
-                    for increasing_stride in [True]:
+                    for increasing_stride in [True, False]:
                         if batch_size > 1024 and (device == 'cpu' or complex):
                             continue
                         scaling = 1 / math.sqrt(2) if not complex else 1 / 2
                         twiddle = torch.randn((nstack, m, n // 2, 2, 2) + (() if not complex else (2, )), requires_grad=True, device=device) * scaling
                         # twiddle = torch.arange(2 * n, dtype=torch.float, device=device, requires_grad=True).reshape(n // 2, 2, 2).unsqueeze(0).repeat(m, 1, 1, 1).unsqueeze(0)
                         twiddle_fast = twiddle_normal_to_fast_format(twiddle)
+                        if not increasing_stride:
+                            twiddle_fast = twiddle_fast.flip(1)
                         input = torch.randn((batch_size, nstack, n) + (() if not complex else (2, )), requires_grad=True, device=twiddle.device)
                         # input = torch.arange(n, dtype=torch.float, device=device, requires_grad=True).unsqueeze(0).unsqueeze(1).expand(batch_size, -1, -1)
-                        output = butterfly_multiply_untied_forward_fast(twiddle_fast, input)
+                        output = butterfly_multiply_untied_forward_fast(twiddle_fast, input, increasing_stride)
                         # output_old = butterfly_mult_untied_torch(twiddle, input)
-                        output_old = butterfly_mult_untied(twiddle, input)
+                        output_old = butterfly_mult_untied(twiddle, input, increasing_stride)
                         self.assertTrue(torch.allclose(output, output_old, rtol=self.rtol, atol=self.atol),
                                         ((output - output_old).abs().max().item(), device, complex, increasing_stride))
                         grad = torch.randn_like(output)
-                        d_twiddle, d_input = butterfly_multiply_untied_forward_backward_fast(twiddle_fast, input, grad)
+                        d_twiddle, d_input = butterfly_multiply_untied_forward_backward_fast(twiddle_fast, input,
+                                                                                             grad, increasing_stride)
                         # d_twiddle, d_input = torch.autograd.grad(output, (twiddle_fast, input), grad, retain_graph=True)
                         d_twiddle_old, d_input_old = torch.autograd.grad(output_old, (twiddle, input), grad, retain_graph=True)
                         self.assertTrue(torch.allclose(d_input, d_input_old, rtol=self.rtol, atol=self.atol),
@@ -489,6 +491,8 @@ class ButterflyMultTest(unittest.TestCase):
                         # #     print(d_twiddle.flatten()[i-5:i+5])
                         # #     print(d_twiddle_torch.flatten()[i-5:i+5])
                         d_twiddle_old = twiddle_normal_to_fast_format(d_twiddle_old)
+                        if not increasing_stride:
+                            d_twiddle_old = d_twiddle_old.flip(1)
                         self.assertTrue(torch.allclose(d_twiddle, d_twiddle_old, rtol=self.rtol * (10 if batch_size > 1024 else 1),
                                                        atol=self.atol * (10 if batch_size > 1024 else 1)),
                                         (((d_twiddle - d_twiddle_old) / d_twiddle_old).abs().max().item(),
