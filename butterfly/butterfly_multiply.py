@@ -128,7 +128,7 @@ def butterfly_mult_untied_torch(twiddle, input, increasing_stride=True, return_i
     batch_size, nstack, n = input.shape[:3]
     m = int(math.log2(n))
     assert n == 1 << m, "size must be a power of 2"
-    assert twiddle.shape == (nstack, m, n // 2, 2, 2) if input.dim() == 2 else (nstack, m, n // 2, 2, 2, 2)
+    assert twiddle.shape == (nstack, m, n // 2, 2, 2) if input.dim() == 3 else (nstack, m, n // 2, 2, 2, 2)
     if input.dim() == 3:  # real
         output = input.contiguous()
         intermediates = [output]

@@ -10,17 +10,17 @@ from torch.utils.dlpack import to_dlpack, from_dlpack
 # For now, it seems that the overhead of converting to cupy makes the cupy
 # version slower than the torch version. So I'll just disable cupy.
 
-# # Check if cupy is available
-# if torch.cuda.is_available():
-#     use_cupy = True
-#     try:
-#         import cupy as cp
-#     except:
-#         use_cupy = False
-#         print("Cupy isn't installed or isn't working properly. Will use Pytorch's complex multiply, which is slower.")
-# else:
-#     use_cupy = False
-use_cupy = False
+# Check if cupy is available
+if torch.cuda.is_available():
+    use_cupy = True
+    try:
+        import cupy as cp
+    except:
+        use_cupy = False
+        print("Cupy isn't installed or isn't working properly. Will use Pytorch's complex multiply, which is slower.")
+else:
+    use_cupy = False
+# use_cupy = False
 
 
 def torch2numpy(X):

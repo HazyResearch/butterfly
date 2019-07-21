@@ -106,4 +106,4 @@ class TrainableMatrixFactorization(TrainableFixedData):
         loss = loss.item()
         if (self._iteration + 1) % self.n_epochs_per_validation == 0:
             loss = min(loss, self.polish(N_LBFGS_STEPS_VALIDATION, save_to_self_model=False))
-        return {'negative_loss': -loss}
+        return {'negative_loss': -loss, 'mean_loss': loss, 'nparameters': self.nparameters}
