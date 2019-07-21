@@ -452,14 +452,15 @@ class ButterflyMultTest(unittest.TestCase):
     def test_butterfly_untied_fast(self):
         # for batch_size, n in [(10, 4096), (8192, 256)]:  # Test size smaller than 1024 and large batch size for race conditions
         # for batch_size, n in [(8192, 32)]:
-        for batch_size, n in [(2048, 256)]:
+        for batch_size, n in [(2048, 2**14)]:
             m = int(math.log2(n))
             nstack = 1
             # for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
             for device in ['cuda']:
                 # for complex in [False, True]:
                 for complex in [False]:
-                    for increasing_stride in [True, False]:
+                    # for increasing_stride in [True, False]:
+                    for increasing_stride in [True]:
                         if batch_size > 1024 and (device == 'cpu' or complex):
                             continue
                         scaling = 1 / math.sqrt(2) if not complex else 1 / 2
@@ -475,6 +476,8 @@ class ButterflyMultTest(unittest.TestCase):
                         output_old = butterfly_mult_untied(twiddle, input, increasing_stride)
                         self.assertTrue(torch.allclose(output, output_old, rtol=self.rtol, atol=self.atol),
                                         ((output - output_old).abs().max().item(), device, complex, increasing_stride))
+                        if n > 1024:
+                            continue
                         grad = torch.randn_like(output)
                         d_twiddle, d_input = butterfly_multiply_untied_forward_backward_fast(twiddle_fast, input,
                                                                                              grad, increasing_stride)

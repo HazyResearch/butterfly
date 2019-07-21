@@ -30,8 +30,8 @@ at::Tensor butterfly_multiply_untied_forward_fast(const at::Tensor &twiddle,
   // const auto batch_size = input.size(0);
   const auto nstack = input.size(1);
   const auto n = input.size(2);
-  AT_CHECK(n <= 1024,
-           "butterfly_multiply_untied_forward_fast: only supports n <= 1024");
+  AT_CHECK(n <= 16384,
+           "butterfly_multiply_untied_forward_fast: only supports n <= 16384");
   const int log_n = int(log2((double)n));
   AT_CHECK((twiddle.dim() == 4 && input.dim() == 3),
            "butterfly_multiply_untied_forward_fast: twiddle and input must have "
