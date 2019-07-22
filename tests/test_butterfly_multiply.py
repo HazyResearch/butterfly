@@ -23,6 +23,8 @@ from butterfly.butterfly_multiply import butterfly_mult_conv2d_svd_torch, butter
 
 from factor_multiply_fast import butterfly_multiply_untied_forward_fast
 from factor_multiply_fast import butterfly_multiply_untied_forward_backward_fast
+from factor_multiply_fast import butterfly_ortho_multiply_untied_forward_fast
+from factor_multiply_fast import butterfly_ortho_multiply_untied_backward_fast
 
 def twiddle_normal_to_fast_format(twiddle):
     """Convert twiddle stored in the normal format to the fast format.
@@ -452,15 +454,15 @@ class ButterflyMultTest(unittest.TestCase):
     def test_butterfly_untied_fast(self):
         # for batch_size, n in [(10, 4096), (8192, 256)]:  # Test size smaller than 1024 and large batch size for race conditions
         # for batch_size, n in [(8192, 32)]:
-        for batch_size, n in [(2048, 2**14)]:
+        for batch_size, n in [(2048, 1024)]:
             m = int(math.log2(n))
             nstack = 1
             # for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
             for device in ['cuda']:
                 # for complex in [False, True]:
                 for complex in [False]:
-                    # for increasing_stride in [True, False]:
-                    for increasing_stride in [True]:
+                    for increasing_stride in [True, False]:
+                    # for increasing_stride in [True]:
                         if batch_size > 1024 and (device == 'cpu' or complex):
                             continue
                         scaling = 1 / math.sqrt(2) if not complex else 1 / 2
@@ -476,7 +478,7 @@ class ButterflyMultTest(unittest.TestCase):
                         output_old = butterfly_mult_untied(twiddle, input, increasing_stride)
                         self.assertTrue(torch.allclose(output, output_old, rtol=self.rtol, atol=self.atol),
                                         ((output - output_old).abs().max().item(), device, complex, increasing_stride))
-                        if n > 1024:
+                        if n > 4096:
                             continue
                         grad = torch.randn_like(output)
                         d_twiddle, d_input = butterfly_multiply_untied_forward_backward_fast(twiddle_fast, input,
@@ -500,6 +502,49 @@ class ButterflyMultTest(unittest.TestCase):
                                                        atol=self.atol * (10 if batch_size > 1024 else 1)),
                                         (((d_twiddle - d_twiddle_old) / d_twiddle_old).abs().max().item(),
                                          (batch_size, n), device, complex, increasing_stride))
+
+    def test_butterfly_ortho_untied_fast(self):
+        for batch_size, n in [(2048, 1024)]:
+            m = int(math.log2(n))
+            nstack = 1
+            # for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+            for device in ['cuda']:
+                for increasing_stride in [True, False]:
+                    if batch_size > 1024 and (device == 'cpu'):
+                        continue
+                    twiddle = torch.rand((nstack, m, n // 2), requires_grad=True, device=device) * 2 * math.pi
+                    # twiddle = torch.ones((nstack, m, n // 2), requires_grad=True, device=device) * 2 * math.pi * 0.3
+                    twiddle_fast = twiddle if increasing_stride else twiddle.flip(1)
+                    input = torch.randn((batch_size, nstack, n) + (()),
+                                        requires_grad=True, device=twiddle.device)
+                    twiddle_fast_cos, twiddle_fast_sin = twiddle_fast.cos(), twiddle_fast.sin()
+                    output = butterfly_ortho_multiply_untied_forward_fast(twiddle_fast_cos, twiddle_fast_sin, input, increasing_stride)
+                    # output_old = butterfly_ortho_mult_untied_torch(twiddle, input)
+                    output_old = butterfly_ortho_mult_untied(twiddle, input, increasing_stride)
+                    self.assertTrue(torch.allclose(output, output_old, rtol=self.rtol, atol=self.atol),
+                                    ((output - output_old).abs().max().item(), device, increasing_stride))
+                    grad = torch.randn_like(output)
+                    d_twiddle, d_input = butterfly_ortho_multiply_untied_backward_fast(twiddle_fast_cos, twiddle_fast_sin,
+                                                                                       output, grad, increasing_stride)
+                    # d_twiddle, d_input = torch.autograd.grad(output, (twiddle_fast, input), grad, retain_graph=True)
+                    d_twiddle_old, d_input_old = torch.autograd.grad(output_old, (twiddle, input), grad, retain_graph=True)
+                    self.assertTrue(torch.allclose(d_input, d_input_old, rtol=self.rtol, atol=self.atol),
+                                    ((d_input - d_input_old).abs().max().item(), device, increasing_stride))
+                    # # if device == 'cuda' and batch_size > 1024 and and increasing_stride:
+                    # #     print((d_twiddle - d_twiddle_torch).abs().mean(dim=(0, 2, 3, 4)))
+                    # #     print(((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().mean(dim=(0, 2, 3, 4)))
+                    # #     i = ((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().argmax()
+                    # #     print(d_twiddle.flatten()[i])
+                    # #     print(d_twiddle_torch.flatten()[i])
+                    # #     print(d_twiddle.flatten()[i-5:i+5])
+                    # #     print(d_twiddle_torch.flatten()[i-5:i+5])
+                    if not increasing_stride:
+                        d_twiddle_old = d_twiddle_old.flip(1)
+                    self.assertTrue(torch.allclose(d_twiddle, d_twiddle_old, rtol=self.rtol * (10 if batch_size > 1024 else 1),
+                                                   atol=self.atol * (10 if batch_size > 1024 else 1)),
+                                    (((d_twiddle - d_twiddle_old) / d_twiddle_old).abs().max().item(),
+                                     (batch_size, n), device, increasing_stride))
+
 
 
 if __name__ == "__main__":
