@@ -221,7 +221,7 @@ def vector_to_butterfly_factors(x, n, transpose=False):
     num_neg, num_pos = np.count_nonzero(last_factors < 0), np.count_nonzero(last_factors > 0)
     if num_neg > num_pos: last_factors *= -1
 
-    butterfly = Butterfly(n, n, bias=False, tied_weight=False, increasing_stride=not transpose)
+    butterfly = Butterfly(n, n, bias=False, tied_weight=False, increasing_stride=transpose)
     weight = butterfly.twiddle.data[0]
     w_flat = weight.view(weight.size(0), -1)
     for i, factor in enumerate(w_flat):
