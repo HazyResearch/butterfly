@@ -286,17 +286,25 @@ __device__ __forceinline__ void b_untied_forward_backward(const CudaAcsr<scalar_
                                                           int twiddle_idx_start,
                                                           int input_idx) {
   constexpr int nslices = div_up_const(items_per_thread, reg_storage_per_thread);
+  static_assert(nslices == 1, "nslices not 1");
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
   scalar_t twiddle_val[nsteps][mult_per_warp][2];
   accscalar_t d_twiddle_val[nsteps][mult_per_warp][2] = {0};
-  scalar_t input_val_storage[nsteps][mult_per_warp][items_per_thread];
-  #pragma unroll
-  for (int i = 0; i < nslices; i++) {
+  scalar_t input_val_storage[nsteps][mult_per_warp][reg_storage_per_thread];
+  // Strange bug: if I use the for loop with #pragma unroll (even though nslices=1)
+  // the result is wrong for n = 4096, batch_size >= 8, increasing_stride=False,
+  // items_per_thread=8 (not 1, 2, or 4).
+  // For now I'm disabling slicing (i.e. reg_storage_per_thread=items_per_thread always).
+  // #pragma unroll
+  // for (int slice = 0; slice < nslices; slice++) {
+  {
+    constexpr int slice = 0;
+    assert(slice == 0);
     #pragma unroll
     for (int mult = 0; mult < mult_per_warp; mult++) {
       #pragma unroll
-      for (int item = 0; (item < reg_storage_per_thread) && (i * reg_storage_per_thread + item < items_per_thread); item++) {
-        input_val_storage[0][mult][item] = input_val[mult][i * reg_storage_per_thread + item];
+      for (int item = 0; (item < reg_storage_per_thread) && (slice * reg_storage_per_thread + item < items_per_thread); item++) {
+        input_val_storage[0][mult][item] = input_val[mult][slice * reg_storage_per_thread + item];
       }
     }
     #pragma unroll
@@ -306,13 +314,13 @@ __device__ __forceinline__ void b_untied_forward_backward(const CudaAcsr<scalar_
       int twiddle_idx = step + twiddle_idx_start;
       #pragma unroll
       for (int mult = 0; mult < mult_per_warp; mult++) {
-        if (i == 0) {
+        if (slice == 0) {
           twiddle_val[step][mult][0] = twiddle_a[s][twiddle_idx][0][mult * warpSize + input_idx];
           twiddle_val[step][mult][1] = twiddle_a[s][twiddle_idx][1][mult * warpSize + input_idx];
         }
         if (step < nsteps - 1) {  // Don't need input for the last step
           #pragma unroll
-          for (int item = 0; (item < reg_storage_per_thread) && (i * reg_storage_per_thread + item < items_per_thread); item++) {
+          for (int item = 0; (item < reg_storage_per_thread) && (slice * reg_storage_per_thread + item < items_per_thread); item++) {
             scalar_t input_val_other = log_stride < 5 ?
                 __shfl_xor_sync(FULL_MASK, input_val_storage[step][mult][item], lane_mask)
               : input_val_storage[step][mult ^ (1 << (log_stride - 5))][item];
@@ -330,8 +338,8 @@ __device__ __forceinline__ void b_untied_forward_backward(const CudaAcsr<scalar_
       #pragma unroll
       for (int mult = 0; mult < mult_per_warp; mult++) {
         #pragma unroll
-        for (int item = 0; (item < reg_storage_per_thread) && (i * reg_storage_per_thread + item < items_per_thread); item++) {
-          int item_offset = i * reg_storage_per_thread + item;
+        for (int item = 0; (item < reg_storage_per_thread) && (slice * reg_storage_per_thread + item < items_per_thread); item++) {
+          int item_offset = slice * reg_storage_per_thread + item;
           d_twiddle_val[step][mult][0] += grad_val[mult][item_offset] * input_val_storage[step][mult][item];
           scalar_t input_val_other = log_stride < 5 ?
               __shfl_xor_sync(FULL_MASK, input_val_storage[step][mult][item], lane_mask)
@@ -342,13 +350,9 @@ __device__ __forceinline__ void b_untied_forward_backward(const CudaAcsr<scalar_
               + __shfl_xor_sync(FULL_MASK, twiddle_val[step][mult][1] * grad_val[mult][item_offset], lane_mask);
           }
         }
-        if (i == nslices - 1) {
-          // if (input_idx >= 9999) {
-          // if (threadIdx.x < 128) {
-          if (true) {
-            atomicAdd(&d_twiddle_a[s][twiddle_idx][0][mult * warpSize + input_idx], d_twiddle_val[step][mult][0]);
-            atomicAdd(&d_twiddle_a[s][twiddle_idx][1][mult * warpSize + input_idx], d_twiddle_val[step][mult][1]);
-          }
+        if (slice == nslices - 1) {
+          atomicAdd(&d_twiddle_a[s][twiddle_idx][0][mult * warpSize + input_idx], d_twiddle_val[step][mult][0]);
+          atomicAdd(&d_twiddle_a[s][twiddle_idx][1][mult * warpSize + input_idx], d_twiddle_val[step][mult][1]);
         }
       }
       if (log_stride >= 5) {
@@ -358,8 +362,8 @@ __device__ __forceinline__ void b_untied_forward_backward(const CudaAcsr<scalar_
           int low_order_bits = m & (mult_stride - 1);  // int low_order_bits = m % mult_stride;
           int mult = 2 * (m - low_order_bits) + low_order_bits;
           #pragma unroll
-          for (int item = 0; (item < reg_storage_per_thread) && (i * reg_storage_per_thread + item < items_per_thread); item++) {
-            int item_offset = i * reg_storage_per_thread + item;
+          for (int item = 0; (item < reg_storage_per_thread) && (slice * reg_storage_per_thread + item < items_per_thread); item++) {
+            int item_offset = slice * reg_storage_per_thread + item;
             scalar_t grads[2] = {grad_val[mult][item_offset], grad_val[mult + mult_stride][item_offset]};
             // The order of twiddle[1] is swapped by design
             grad_val[mult][item_offset] = twiddle_val[step][mult][0] * grads[0]
