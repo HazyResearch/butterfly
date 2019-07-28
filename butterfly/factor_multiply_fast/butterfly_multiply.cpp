@@ -15,6 +15,14 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
                                                           at::Tensor &d_twiddle,
                                                           at::Tensor &d_input,
                                                           bool increasing_stride);
+void butterfly_bbs_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
+                                                     const at::Tensor &input,
+                                                     at::Tensor &output);
+void butterfly_bbs_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle,
+                                                              const at::Tensor &input,
+                                                              const at::Tensor &grad,
+                                                              at::Tensor &d_twiddle,
+                                                              at::Tensor &d_input);
 void butterfly_ortho_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle_cos,
                                                        const at::Tensor &twiddle_sin,
                                                        const at::Tensor &input,
@@ -22,7 +30,7 @@ void butterfly_ortho_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle
                                                        bool increasing_stride);
 void butterfly_ortho_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_cos,
                                                         const at::Tensor &twiddle_sin,
-                                                        const at::Tensor &input,
+                                                        const at::Tensor &output,
                                                         const at::Tensor &grad,
                                                         at::Tensor &d_twiddle,
                                                         at::Tensor &d_input,
@@ -35,7 +43,7 @@ void butterfly_odo_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle_c
 void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_cos,
                                                       const at::Tensor &twiddle_sin,
                                                       const at::Tensor &diagonal,
-                                                      const at::Tensor &input,
+                                                      const at::Tensor &output,
                                                       const at::Tensor &grad,
                                                       at::Tensor &d_twiddle,
                                                       at::Tensor &d_diagonal,
@@ -118,6 +126,81 @@ std::vector<at::Tensor> butterfly_multiply_untied_forward_backward_fast(const at
   butterfly_multiply_untied_forward_backward_fast_cuda(twiddle, input, grad,
                                                        d_twiddle, d_input,
                                                        increasing_stride);
+  return {d_twiddle, d_input} ;
+}
+
+at::Tensor butterfly_bbs_multiply_untied_forward_fast(const at::Tensor &twiddle,
+                                                      const at::Tensor &input) {
+  /* Parameters:
+         twiddle: (nstack, nblocks * 2 * log n, 2, n)
+         input: (batch_size, nstack, n)
+     Returns:
+         output: (batch_size, nstack, n)
+  */
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
+  const int log_n = int(log2((double)n));
+  AT_CHECK(1 << log_n == n, "butterfly_bbs_multiply_untied_forward_fast: n must be a power of 2");
+  AT_CHECK(n <= 16384,
+           "butterfly_bbs_multiply_untied_forward_fast: only supports n <= 16384");
+  const int nblocks = twiddle.size(1) / (2 * log_n);
+  AT_CHECK((twiddle.dim() == 4 && input.dim() == 3),
+           "butterfly_bbs_multiply_untied_forward_fast: twiddle and input must have "
+           "dimension 3,3");
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(input);
+  AT_CHECK(twiddle.device() == input.device(),
+           "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(),
+           ")");
+  AT_CHECK(twiddle.sizes() ==
+               torch::IntArrayRef({nstack, nblocks * 2 * log_n, 2, n}),
+           "butterfly_bbs_multiply_untied_forward_fast: twiddle must have "
+           "shape (nstack, nblocks * 2 * log n, 2, n)");
+  auto output = torch::empty_like(input);
+  AT_CHECK(input.is_cuda(), "butterfly_bbs_multiply_untied_forward_fast: only supports CUDA");
+  butterfly_bbs_multiply_untied_forward_fast_cuda(twiddle, input, output);
+  return output;
+}
+
+std::vector<at::Tensor> butterfly_bbs_multiply_untied_forward_backward_fast(const at::Tensor &twiddle,
+                                                                            const at::Tensor &input,
+                                                                            const at::Tensor &grad) {
+  /* Parameters:
+         twiddle: (nstack, nblocks * 2 * log n, 2, n)
+         diagonal: (nstack, nblocks, n)
+         input: (batch_size, nstack, n)
+     Returns:
+         input: (batch_size, nstack, n)
+  */
+  const auto batch_size = input.size(0);
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
+  const int log_n = int(log2((double)n));
+  AT_CHECK(1 << log_n == n, "butterfly_bbs_multiply_untied_forward_backward_fast: n must be a power of 2");
+  AT_CHECK(n <= 4096,
+           "butterfly_bbs_multiply_untied_forward_backward_fast: only supports n <= 4096");
+  const int nblocks = twiddle.size(1) / (2 * log_n);
+  AT_CHECK((twiddle.dim() == 4 && input.dim() == 3 && grad.dim() == 3),
+           "butterfly_bbs_multiply_untied_forward_backward_fast: twiddle, input, "
+           "and grad must have dimension 4,3,3");
+  CHECK_DEVICE(twiddle);
+  CHECK_DEVICE(input);
+  CHECK_DEVICE(grad);
+  AT_CHECK(
+      twiddle.device() == input.device() && twiddle.device() == grad.device(),
+      "device of twiddle (", twiddle.device(), ") must match device of input (",
+      input.device(), ") and grad (", grad.device(), ")");
+  AT_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, 2, n}),
+           "butterfly_bbs_multiply_untied_forward_backward_fast: twiddle must have shape (nstack, "
+           "nblocks * 2 * log n, 2, n)");
+  AT_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
+           "butterfly_bbs_multiply_untied_backward: grad must have shape "
+           "(batch_size, nstack, n)");
+  auto d_input = torch::empty_like(input);
+  auto d_twiddle = torch::zeros_like(twiddle);
+  AT_CHECK(input.is_cuda(), "butterfly_bbs_multiply_untied_forward_backward_fast: only supports CUDA");
+  butterfly_bbs_multiply_untied_forward_backward_fast_cuda(twiddle, input, grad,
+                                                           d_twiddle, d_input);
   return {d_twiddle, d_input} ;
 }
 
@@ -317,6 +400,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_multiply_untied_forward_backward_fast",
         &butterfly_multiply_untied_forward_backward_fast,
         "Butterfly multiply untied forward backward fast");
+  m.def("butterfly_bbs_multiply_untied_forward_fast",
+        &butterfly_bbs_multiply_untied_forward_fast,
+        "Butterfly_Bbs multiply untied forward fast");
+  m.def("butterfly_bbs_multiply_untied_forward_backward_fast",
+        &butterfly_bbs_multiply_untied_forward_backward_fast,
+        "Butterfly_Bbs multiply untied forward_backward fast");
   m.def("butterfly_ortho_multiply_untied_forward_fast",
         &butterfly_ortho_multiply_untied_forward_fast,
         "Butterfly_Ortho multiply untied forward fast");

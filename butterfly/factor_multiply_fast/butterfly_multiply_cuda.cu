@@ -65,11 +65,9 @@ template<typename scalar_t>
 struct InputReader {
   const CudaAcsr<scalar_t, 3> input_a;
   const int batch_size;
-  const int n;
   InputReader(const at::Tensor input):
     input_a(input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>()),
-      batch_size(input.size(0)),
-      n(input.size(2)) {}
+      batch_size(input.size(0)) {}
 
   template<int items_per_thread, int mult_per_warp=1>
   __device__ __forceinline__ void load(scalar_t input_val[mult_per_warp][items_per_thread],
@@ -92,11 +90,9 @@ template<typename scalar_t>
 struct OutputWriter {
   CudaAcsr<scalar_t, 3> output_a;
   const int batch_size;
-  const int n;
   OutputWriter(at::Tensor output):
     output_a(output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>()),
-      batch_size(output.size(0)),
-      n(output.size(2)) {}
+      batch_size(output.size(0)) {}
 
   template<int items_per_thread, int mult_per_warp=1>
   __device__ __forceinline__ void save(scalar_t output_val[mult_per_warp][items_per_thread],
@@ -111,6 +107,44 @@ struct OutputWriter {
         if (b < batch_size) {
           output_a[b][s][i] = output_val[mult][item];
         }
+      }
+    }
+  }
+
+};
+
+template<typename scalar_t>
+struct IntermediateStorage {
+  CudaAcsr<scalar_t, 4> storage_a;
+  IntermediateStorage(const at::Tensor storage):
+    storage_a(storage.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>()) {}
+
+  template<int items_per_thread, int mult_per_warp=1>
+  __device__ __forceinline__ void save(scalar_t output_val[mult_per_warp][items_per_thread],
+                                       int idx, int step) {
+    #pragma unroll
+    for (int mult = 0; mult < mult_per_warp; mult++) {
+      int i = mult * warpSize + idx;
+      const int s = blockIdx.z;
+      #pragma unroll
+      for (int item = 0; item < items_per_thread; item++){
+        const int b = blockIdx.x * items_per_thread + item;
+        storage_a[step][b][s][i] = output_val[mult][item];
+      }
+    }
+  }
+
+  template<int items_per_thread, int mult_per_warp=1>
+  __device__ __forceinline__ void load(scalar_t input_val[mult_per_warp][items_per_thread],
+                                       int idx, int step) {
+    #pragma unroll
+    for (int mult = 0; mult < mult_per_warp; mult++) {
+      int i = mult * warpSize + idx;
+      const int s = blockIdx.z;
+      #pragma unroll
+      for (int item = 0; item < items_per_thread; item++){
+        const int b = blockIdx.x * items_per_thread + item;
+        input_val[mult][item] = storage_a[step][b][s][i];
       }
     }
   }
@@ -477,6 +511,227 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
   #undef CASE_LOG_N
   AT_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_forward_backward_fast_cuda failed with error code ",
+     cudaGetLastError());
+}
+
+template <int log_n, int items_per_thread=ITEMS_PER_THREAD_FORWARD[log_n - 1],
+            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_FORWARD[log_n - 1],
+            int max_smem_per_thread=items_per_thread, typename scalar_t>
+// C10_LAUNCH_BOUNDS_2 supposedly takes min(1 << log_n, 1024)
+// https://github.com/pytorch/pytorch/blob/v1.1.0/c10/macros/Macros.h
+// However, it doesn't seem to work correctly so I have to take min explicitly.
+C10_LAUNCH_BOUNDS_2(MIN_MACRO(1 << log_n, MAX_BLOCK_SIZE), min_blocks_per_mp)
+__global__ void butterfly_bbs_multiply_untied_forward_fast_cuda_kernel(const CudaAcsr<scalar_t, 4> twiddle_a,
+                                                                       InputReader<scalar_t> input_reader,
+                                                                       OutputWriter<scalar_t> output_writer,
+                                                                       int batch_size,
+                                                                       int nblocks) {
+  constexpr int n = 1 << log_n;
+  constexpr int nthreads = min_const(n, MAX_BLOCK_SIZE);
+  constexpr int smem_limit = min_const(SMEM_PER_MP / min_blocks_per_mp, MAX_SMEM_PER_BLOCK);
+  constexpr int smem_per_thread = min_const(max_smem_per_thread, items_per_thread,
+                                            smem_limit / (nthreads * sizeof(scalar_t)));
+  constexpr int mult_per_warp = n / nthreads;
+  scalar_t input_val[mult_per_warp][items_per_thread];
+  // const int input_idx_1 = (threadIdx.x % warpSize) + mult_per_warp * warpSize * (threadIdx.x / warpSize);
+  const int input_idx_1 = (threadIdx.x & ((1 << 5) - 1)) + mult_per_warp * warpSize * (threadIdx.x >> 5);
+  input_reader.load<items_per_thread, mult_per_warp>(input_val, input_idx_1);
+  if (log_n <= 5) {
+    for (int block = 0; block < nblocks; block++) {
+      b_untied_forward<min_const(log_n, 5), false, items_per_thread>
+        (twiddle_a, input_val, block * 2 * log_n, input_idx_1);
+      b_untied_forward<min_const(log_n, 5), true, items_per_thread>
+        (twiddle_a, input_val, (block * 2 + 1) * log_n, input_idx_1);
+    }
+  } else {
+    __shared__ scalar_t temp_storage[nthreads * smem_per_thread];
+    constexpr int nsteps_1 = log_n <= 10 ? 5 : log_n - 5;
+    constexpr int nsteps_2 = max_const(log_n - nsteps_1, 1);  // Take max to avoid compiler's warning
+    constexpr int log_nwarps = min_const(max_const(log_n - 5, 1), 5);  // Take max to avoid compiler's warning
+    const int input_idx_2 = ((threadIdx.x & ((1 << log_nwarps) - 1)) << nsteps_1) + (threadIdx.x >> log_nwarps);
+    const int thread_idx_2 = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
+    block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, threadIdx.x, thread_idx_2, nthreads);
+    for (int block = 0; block < nblocks; block++) {
+      b_untied_forward<nsteps_2, false, items_per_thread, mult_per_warp>
+        (twiddle_a, input_val, block * 2 * log_n, input_idx_2);
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, thread_idx_2, threadIdx.x, nthreads);
+      b_untied_forward<nsteps_1, false, items_per_thread, mult_per_warp>
+        (twiddle_a, input_val, block * 2 * log_n + nsteps_2, input_idx_1);
+      b_untied_forward<nsteps_1, true, items_per_thread, mult_per_warp>
+        (twiddle_a, input_val, (block * 2 + 1) * log_n, input_idx_1);
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, threadIdx.x, thread_idx_2, nthreads);
+      b_untied_forward<nsteps_2, true, items_per_thread, mult_per_warp>
+        (twiddle_a, input_val, (block * 2 + 1) * log_n + nsteps_1, input_idx_2);
+    }
+    block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, thread_idx_2, threadIdx.x, nthreads);
+  }
+  output_writer.save<items_per_thread, mult_per_warp>(input_val, input_idx_1);
+}
+
+void butterfly_bbs_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
+                                                     const at::Tensor &input,
+                                                     at::Tensor &output) {
+  int batch_size = input.size(0);
+  const int nstack = input.size(1);
+  const int n = input.size(2);
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_bbs_multiply_untied_forward_fast_cuda", [&] {
+    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    const InputReader<scalar_t> input_reader(input);
+    OutputWriter<scalar_t> output_writer(output);
+    dim3 block(min(n, MAX_BLOCK_SIZE));
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD[log_n - 1]), 1, nstack);
+    auto stream = at::cuda::getCurrentCUDAStream();
+    switch (log_n) {
+      #define CASE_LOG_N(log_n_val) case log_n_val:                     \
+      butterfly_bbs_multiply_untied_forward_fast_cuda_kernel<log_n_val> \
+        <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, batch_size, nblocks); break;
+      MAP(CASE_LOG_N, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+    }
+  });
+  // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
+  #undef CASE_LOG_N
+  AT_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_bbs_multiply_untied_forward_fast_cuda failed with error code ",
+     cudaGetLastError());
+}
+
+template <int log_n, int items_per_thread=ITEMS_PER_THREAD_BACKWARD[log_n - 1],
+            int max_reg_storage_per_thread=items_per_thread,
+            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_BACKWARD[log_n - 1],
+            int max_smem_per_thread=items_per_thread, typename scalar_t>
+C10_LAUNCH_BOUNDS_2(MIN_MACRO(1 << log_n, MAX_BLOCK_SIZE), min_blocks_per_mp)
+__global__ void butterfly_bbs_multiply_untied_forward_backward_fast_cuda_kernel(const CudaAcsr<scalar_t, 4> twiddle_a,
+                                                                                InputReader<scalar_t> input_reader,
+                                                                                InputReader<scalar_t> grad_reader,
+                                                                                IntermediateStorage<scalar_t> inter_storage,
+                                                                                CudaAcsr<scalar_t, 4> d_twiddle_a,
+                                                                                OutputWriter<scalar_t> d_input_writer,
+                                                                                int batch_size,
+                                                                                int nblocks) {
+  constexpr int n = 1 << log_n;
+  constexpr int nthreads = min_const(n, MAX_BLOCK_SIZE);
+  constexpr int smem_limit = min_const(SMEM_PER_MP / min_blocks_per_mp, MAX_SMEM_PER_BLOCK);
+  constexpr int smem_per_thread = min_const(max_smem_per_thread, items_per_thread,
+                                            smem_limit / (nthreads * sizeof(scalar_t)));
+  constexpr int reg_storage_per_thread = min_const(max_reg_storage_per_thread, items_per_thread);
+  constexpr int mult_per_warp = n / nthreads;
+  scalar_t input_val[mult_per_warp][items_per_thread];
+  scalar_t grad_val[mult_per_warp][items_per_thread];
+  // const int input_idx_1 = (threadIdx.x % warpSize) + mult_per_warp * warpSize * (threadIdx.x / warpSize);
+  const int input_idx_1 = (threadIdx.x & ((1 << 5) - 1)) + mult_per_warp * warpSize * (threadIdx.x >> 5);
+  input_reader.load<items_per_thread, mult_per_warp>(input_val, input_idx_1);
+  if (log_n <= 5) {
+    for (int block = 0; block < nblocks; block++) {
+      b_untied_forward<min_const(log_n, 5), false, items_per_thread>
+        (twiddle_a, input_val, block * 2 * log_n, input_idx_1);
+      if (block < nblocks - 1) {
+        inter_storage.save<items_per_thread>(input_val, input_idx_1, block * 2);
+        b_untied_forward<min_const(log_n, 5), true, items_per_thread>
+          (twiddle_a, input_val, (block * 2 + 1) * log_n, input_idx_1);
+        inter_storage.save<items_per_thread>(input_val, input_idx_1, block * 2 + 1);
+      }
+    }
+    grad_reader.load<items_per_thread, mult_per_warp>(grad_val, input_idx_1);
+    for (int block = nblocks - 1; block >= 0; block--) {
+      if (block < nblocks - 1) {
+        inter_storage.load<items_per_thread>(input_val, input_idx_1, block * 2);
+      }
+      b_untied_forward_backward<min_const(log_n, 5), true, items_per_thread, mult_per_warp, reg_storage_per_thread>
+        (twiddle_a, d_twiddle_a, input_val, grad_val, (block * 2 + 1) * log_n, input_idx_1);
+      block == 0 ? input_reader.load<items_per_thread>(input_val, input_idx_1)
+        : inter_storage.load<items_per_thread>(input_val, input_idx_1, (block - 1) * 2 + 1);
+      b_untied_forward_backward<min_const(log_n, 5), false, items_per_thread, mult_per_warp, reg_storage_per_thread>
+        (twiddle_a, d_twiddle_a, input_val, grad_val, block * 2 * log_n, input_idx_1);
+    }
+  } else {
+    __shared__ scalar_t temp_storage[nthreads * smem_per_thread];
+    // constexpr int nsteps_1 = div_up_const(log_n, 2);
+    constexpr int nsteps_1 = log_n <= 10 ? 5 : log_n - 5;
+    constexpr int nsteps_2 = max_const(log_n - nsteps_1, 1);  // Take max to avoid compiler's warning
+    constexpr int log_nwarps = min_const(max_const(log_n - 5, 1), 5);  // Take max to avoid compiler's warning
+    const int input_idx_2 = ((threadIdx.x & ((1 << log_nwarps) - 1)) << nsteps_1) + (threadIdx.x >> log_nwarps);
+    const int thread_idx_2 = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
+    block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, threadIdx.x, thread_idx_2, nthreads);
+    for (int block = 0; block < nblocks; block++) {
+      b_untied_forward<nsteps_2, false, items_per_thread, mult_per_warp>
+        (twiddle_a, input_val, block * 2 * log_n, input_idx_2);
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, thread_idx_2, threadIdx.x, nthreads);
+      inter_storage.save<items_per_thread, mult_per_warp>(input_val, input_idx_1, block * 4);
+      b_untied_forward<nsteps_1, false, items_per_thread, mult_per_warp>
+        (twiddle_a, input_val, block * 2 * log_n + nsteps_2, input_idx_1);
+      inter_storage.save<items_per_thread, mult_per_warp>(input_val, input_idx_1, block * 4 + 1);
+      b_untied_forward<nsteps_1, true, items_per_thread, mult_per_warp>
+        (twiddle_a, input_val, (block * 2 + 1) * log_n, input_idx_1);
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, threadIdx.x, thread_idx_2, nthreads);
+      if (block < nblocks - 1) {
+        // We can store using input_idx_1 instead of input_idx_2 since we'll load using input_idx_1 as well
+        inter_storage.save<items_per_thread, mult_per_warp>(input_val, input_idx_1, block * 4 + 2);
+        b_untied_forward<nsteps_2, true, items_per_thread, mult_per_warp>
+          (twiddle_a, input_val, (block * 2 + 1) * log_n + nsteps_1, input_idx_2);
+        inter_storage.save<items_per_thread, mult_per_warp>(input_val, input_idx_1, block * 4 + 3);
+      }
+    }
+    grad_reader.load<items_per_thread, mult_per_warp>(grad_val, input_idx_2);
+    for (int block = nblocks - 1; block >= 0; block--) {
+      if (block < nblocks - 1) {
+        inter_storage.load<items_per_thread, mult_per_warp>(input_val, input_idx_1, block * 4 + 2);
+      }
+      b_untied_forward_backward<nsteps_2, true, items_per_thread, mult_per_warp, reg_storage_per_thread>
+        (twiddle_a, d_twiddle_a, input_val, grad_val, (block * 2 + 1) * log_n + nsteps_1, input_idx_2);
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, grad_val, thread_idx_2, threadIdx.x, nthreads);
+      inter_storage.load<items_per_thread, mult_per_warp>(input_val, input_idx_1, block * 4 + 1);
+      b_untied_forward_backward<nsteps_1, true, items_per_thread, mult_per_warp, reg_storage_per_thread>
+        (twiddle_a, d_twiddle_a, input_val, grad_val, (block * 2 + 1) * log_n, input_idx_1);
+      inter_storage.load<items_per_thread, mult_per_warp>(input_val, input_idx_1, block * 4);
+      b_untied_forward_backward<nsteps_1, false, items_per_thread, mult_per_warp>
+        (twiddle_a, d_twiddle_a, input_val, grad_val, block * 2 * log_n + nsteps_2, input_idx_1);
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, grad_val, threadIdx.x, thread_idx_2, nthreads);
+      block == 0 ? input_reader.load<items_per_thread, mult_per_warp>(input_val, input_idx_2)
+        : inter_storage.load<items_per_thread, mult_per_warp>(input_val, input_idx_1, (block - 1) * 4 + 3);
+      b_untied_forward_backward<nsteps_2, false, items_per_thread, mult_per_warp>
+        (twiddle_a, d_twiddle_a, input_val, grad_val, block * 2 * log_n, input_idx_2);
+    }
+    block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, grad_val, thread_idx_2, threadIdx.x, nthreads);
+  }
+  d_input_writer.save<items_per_thread, mult_per_warp>(grad_val, input_idx_1);
+}
+
+void butterfly_bbs_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle,
+                                                              const at::Tensor &input,
+                                                              const at::Tensor &grad,
+                                                              at::Tensor& d_twiddle,
+                                                              at::Tensor& d_input) {
+  int batch_size = input.size(0);
+  const int nstack = input.size(1);
+  const int n = input.size(2);
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
+  // TODO How much storage do we need when log_n > 5?
+  auto intermediate_storage = at::empty({log_n <= 5 ? (nblocks - 1) * 2 : (nblocks - 1) * 4 + 2, batch_size, nstack, n},
+                                        at::dtype(input.dtype()).device(input.device()));
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_bbs_multiply_untied_forward_backward_fast_cuda", [&] {
+    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    const InputReader<scalar_t> input_reader(input);
+    const InputReader<scalar_t> grad_reader(grad);
+    IntermediateStorage<scalar_t> inter_storage(intermediate_storage);
+    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    OutputWriter<scalar_t> d_input_writer(d_input);
+    dim3 block(min(n, MAX_BLOCK_SIZE));
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD[log_n - 1]), 1, nstack);
+    auto stream = at::cuda::getCurrentCUDAStream();
+    switch (log_n) {
+      #define CASE_LOG_N(log_n_val) case log_n_val:                              \
+      butterfly_bbs_multiply_untied_forward_backward_fast_cuda_kernel<log_n_val> \
+        <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, inter_storage, d_twiddle_a, d_input_writer, batch_size, nblocks); break;
+      MAP(CASE_LOG_N, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+    }
+  });
+  // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
+  #undef CASE_LOG_N
+  AT_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_bbs_multiply_untied_forward_backward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
 
