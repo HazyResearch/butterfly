@@ -7,6 +7,7 @@ import unittest
 import torch
 
 from butterfly import Butterfly
+from butterfly.utils import twiddle_normal_to_fast_format
 from cnn.models.butterfly_conv import ButterflyConv2d
 
 from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
@@ -29,29 +30,6 @@ from factor_multiply_fast import butterfly_ortho_multiply_untied_forward_fast
 from factor_multiply_fast import butterfly_ortho_multiply_untied_backward_fast
 from factor_multiply_fast import butterfly_odo_multiply_untied_forward_fast
 from factor_multiply_fast import butterfly_odo_multiply_untied_backward_fast
-
-def twiddle_normal_to_fast_format(twiddle):
-    """Convert twiddle stored in the normal format to the fast format.
-    Parameters:
-        twiddle: (nstack, log_n, n / 2, 2, 2)
-    Returns:
-        twiddle_fast: (nstack, log_n, 2, n)
-    """
-    twiddle = twiddle.clone()
-    nstack = twiddle.shape[0]
-    n = twiddle.shape[2] * 2
-    m = int(math.log2(n))
-    twiddle[:, :, :, 1] = twiddle[:, :, :, 1, [1, 0]]
-    twiddle_list = []
-    for i in range(m):
-        stride = 1 << i
-        new_twiddle = twiddle[:, i]
-        new_twiddle = new_twiddle.reshape(nstack, n // 2 // stride, stride, 2, 2)
-        new_twiddle = new_twiddle.permute(0, 1, 3, 2, 4)
-        new_twiddle = new_twiddle.reshape(nstack, n, 2).transpose(1, 2)
-        twiddle_list.append(new_twiddle)
-    result = torch.stack(twiddle_list, dim=1)
-    return result
 
 
 class ButterflyMultTest(unittest.TestCase):
@@ -475,7 +453,7 @@ class ButterflyMultTest(unittest.TestCase):
                             twiddle_fast = twiddle_fast.flip(1)
                         input = torch.randn((batch_size, nstack, n) + (() if not complex else (2, )), requires_grad=True, device=twiddle.device)
                         # input = torch.arange(n, dtype=torch.float, device=device, requires_grad=True).unsqueeze(0).unsqueeze(1).expand(batch_size, -1, -1)
-                        output = butterfly_multiply_untied_forward_fast(twiddle_fast, input, increasing_stride)
+                        output = butterfly_multiply_untied_forward_fast(twiddle_fast, input, increasing_stride, False)
                         # output_old = butterfly_mult_untied_torch(twiddle, input, increasing_stride)
                         output_old = butterfly_mult_untied(twiddle, input, increasing_stride)
                         self.assertTrue(torch.allclose(output, output_old, rtol=self.rtol, atol=self.atol),

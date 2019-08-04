@@ -3,6 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from .utils import twiddle_normal_to_fast_format
 from .butterfly_multiply import butterfly_mult, butterfly_mult_untied
 from .butterfly_multiply import butterfly_ortho_mult_tied, bbt_ortho_mult_tied
 from .butterfly_multiply import butterfly_ortho_mult_untied, butterfly_mult_untied_svd
@@ -44,7 +45,8 @@ class Butterfly(nn.Module):
 
     def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
                  increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
-                 nblocks=0, diag_constraint=None, expansion=1, diag_init='normal', double=False, diag_bookends=False):
+                 nblocks=0, diag_constraint=None, expansion=1, diag_init='normal', double=False, diag_bookends=False,
+                 fast=True):
         super().__init__()
         self.double = double
         if double:
@@ -70,6 +72,7 @@ class Butterfly(nn.Module):
         self.expansion = expansion
         self.diag_init = diag_init
         self.diag_bookends = diag_bookends
+        self.fast = fast
         self.nstack *= self.expansion
         if nblocks > 0:
             assert not complex, 'native BBT with complex is not supported, use two separate Butterflies (e.g. nn.Sequential)'
@@ -103,6 +106,20 @@ class Butterfly(nn.Module):
                     D = torch.stack((c * torch.cos(alpha - psi), c * torch.sin(alpha - psi)), dim=-1)
                     self.twiddle = nn.Parameter(torch.stack((torch.stack((A, B), dim=-2),
                                                              torch.stack((C, D), dim=-2)), dim=-3))
+            if fast:
+                if nblocks == 0:
+                    twiddle_fast = twiddle_normal_to_fast_format(self.twiddle)
+                    if not increasing_stride:
+                        twiddle_fast = twiddle_fast.flip(1)
+                else:
+                    twiddle_fast = []
+                    for i, chunk in enumerate(self.twiddle.chunk(nblocks * 2, dim=1)):
+                        chunk_fast = twiddle_normal_to_fast_format(chunk)
+                        if i % 2 == 0:
+                            chunk_fast = chunk_fast.flip(1)
+                        twiddle_fast.append(chunk_fast)
+                    twiddle_fast = torch.cat(twiddle_fast, dim=1)
+                self.twiddle = nn.Parameter(twiddle_fast)
         else:
             assert not complex, 'orthogonal/svd parameterization is only implemented for real, not complex'
             if diag_init == 'normal':
@@ -189,7 +206,7 @@ class Butterfly(nn.Module):
             if self.tied_weight:
                 output = butterfly_mult(self.twiddle, output, self.increasing_stride)
             else:
-                output = butterfly_mult_untied(self.twiddle, output, self.increasing_stride, self.training) if self.nblocks == 0 else bbt_mult_untied(self.twiddle, output)
+                output = butterfly_mult_untied(self.twiddle, output, self.increasing_stride, self.training, self.fast) if self.nblocks == 0 else bbt_mult_untied(self.twiddle, output, self.fast)
         elif self.param == 'ortho':
             if self.tied_weight:
                 output = butterfly_ortho_mult_tied(self.twiddle, output, self.increasing_stride)

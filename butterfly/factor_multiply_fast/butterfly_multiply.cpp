@@ -9,6 +9,10 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
                                                  const at::Tensor &input,
                                                  at::Tensor &output,
                                                  bool increasing_stride);
+void butterfly_multiply_untied_forward_fast_cuda_benchmark(const at::Tensor &twiddle,
+                                                           const at::Tensor &input,
+                                                           at::Tensor &output,
+                                                           bool increasing_stride);
 void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle,
                                                           const at::Tensor &input,
                                                           const at::Tensor &grad,
@@ -81,7 +85,11 @@ at::Tensor butterfly_multiply_untied_forward_fast(const at::Tensor &twiddle,
            "log n, 2, n) (nstack, log n, 2, n, 2)");
   auto output = torch::empty_like(input);
   AT_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_fast: only supports CUDA");
-  butterfly_multiply_untied_forward_fast_cuda(twiddle, input, output, increasing_stride);
+  if (!benchmark) {
+    butterfly_multiply_untied_forward_fast_cuda(twiddle, input, output, increasing_stride);
+  } else {
+    butterfly_multiply_untied_forward_fast_cuda_benchmark(twiddle, input, output, increasing_stride);
+  }
   return output;
 }
 

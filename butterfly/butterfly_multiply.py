@@ -22,7 +22,12 @@ try:
     from factor_multiply import butterfly_conv2d, butterfly_conv2d_backward, butterfly_conv2d_forward_backward
     from factor_multiply import bbt_conv2d, bbt_conv2d_forward_backward
     from factor_multiply import butterfly_conv2d_svd, butterfly_conv2d_svd_forward_backward
-    from factor_multiply import butterfly_multiply_untied_eval
+    # from factor_multiply import butterfly_multiply_untied_eval
+
+    from factor_multiply_fast import butterfly_multiply_untied_forward_fast
+    from factor_multiply_fast import butterfly_multiply_untied_forward_backward_fast
+    from factor_multiply_fast import butterfly_bbs_multiply_untied_forward_fast
+    from factor_multiply_fast import butterfly_bbs_multiply_untied_forward_backward_fast
 except:
     use_extension = False
     import warnings
@@ -154,7 +159,7 @@ def butterfly_mult_untied_torch(twiddle, input, increasing_stride=True, return_i
 class ButterflyMultUntied(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, twiddle, input, increasing_stride=True, is_training=True):
+    def forward(ctx, twiddle, input, increasing_stride=True, is_training=True, fast=True):
         """
         Parameters:
             twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
@@ -167,12 +172,17 @@ class ButterflyMultUntied(torch.autograd.Function):
             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
         # use optimized code for inference
-        if not is_training and not input.is_cuda and input.dim() == 3 and input.dtype == torch.float and input.shape[-1] > 8:
+        # if not is_training and not input.is_cuda and input.dim() == 3 and input.dtype == torch.float and input.shape[-1] > 8:
+        if False:
             output = butterfly_multiply_untied_eval(twiddle, input, increasing_stride)
         else:
-            output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
+            if not fast:
+                output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
+            else:
+                output = butterfly_multiply_untied_forward_fast(twiddle, input, increasing_stride, False)
         ctx.save_for_backward(twiddle, input)
         ctx._increasing_stride = increasing_stride
+        ctx._fast = fast
         return output
 
     @staticmethod
@@ -189,13 +199,17 @@ class ButterflyMultUntied(torch.autograd.Function):
         # twiddle, output_and_intermediate = ctx.saved_tensors
         twiddle, input = ctx.saved_tensors
         increasing_stride = ctx._increasing_stride
+        fast = ctx._fast
         n = input.shape[2]
         if input.dim() == 3 and n <= 1024 and input.is_cuda:
-            d_coefficients, d_input = butterfly_multiply_untied_forward_backward(twiddle, input, grad, increasing_stride)
+            if not fast:
+                d_coefficients, d_input = butterfly_multiply_untied_forward_backward(twiddle, input, grad, increasing_stride)
+            else:
+                d_coefficients, d_input = butterfly_multiply_untied_forward_backward_fast(twiddle, input, grad, increasing_stride)
         else:
             output_and_intermediate = butterfly_multiply_untied(twiddle, input, increasing_stride, True)
             d_coefficients, d_input = butterfly_multiply_untied_backward(grad, twiddle, output_and_intermediate, increasing_stride)
-        return d_coefficients, d_input, None, None  # Autograd requires 3 gradients
+        return d_coefficients, d_input, None, None, None  # Autograd requires 3 gradients
 
 butterfly_mult_untied = ButterflyMultUntied.apply if use_extension else butterfly_mult_untied_torch
 
@@ -303,7 +317,7 @@ def butterfly_ortho_mult_untied_torch(twiddle, input, increasing_stride):
 class BbtMultUntied(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, twiddle, input):
+    def forward(ctx, twiddle, input, fast=True):
         """
         Parameters:
             twiddle: (nstack, nblocks * 2 * log n, n / 2, 2, 2)
@@ -311,8 +325,12 @@ class BbtMultUntied(torch.autograd.Function):
         Returns:
             output: (batch_size, nstack, n)
         """
-        output = bbt_multiply_untied(twiddle, input)
+        if not fast:
+            output = bbt_multiply_untied(twiddle, input)
+        else:
+            output = butterfly_bbs_multiply_untied_forward_fast(twiddle, input)
         ctx.save_for_backward(twiddle, input)
+        ctx._fast = fast
         return output
 
     @staticmethod
@@ -325,17 +343,21 @@ class BbtMultUntied(torch.autograd.Function):
             d_input: (batch_size, nstack, n)
         """
         twiddle, input = ctx.saved_tensors
-        d_coefficients, d_input = bbt_multiply_untied_forward_backward(twiddle, input, grad)
-        return d_coefficients, d_input
+        fast = ctx._fast
+        if not fast:
+            d_coefficients, d_input = bbt_multiply_untied_forward_backward(twiddle, input, grad)
+        else:
+            d_coefficients, d_input = butterfly_bbs_multiply_untied_forward_backward_fast(twiddle, input, grad)
+        return d_coefficients, d_input, None
 
 
-def bbt_mult_untied(twiddle, input):
+def bbt_mult_untied(twiddle, input, fast=True):
     n = input.shape[2]
     m = int(math.log2(n))
     nblocks = twiddle.shape[1] // (2 * m)
     assert nblocks * 2 * m == twiddle.shape[1], 'twiddle must have shape (nstack, nblocks * 2 * log n, n / 2, 2, 2)'
     if n <= 1024 and input.is_cuda and nblocks <= 14:  # CUDA only supports nblocks <= 14
-        return BbtMultUntied.apply(twiddle, input)
+        return BbtMultUntied.apply(twiddle, input, fast)
     else:
         output = input
         reverse_idx = torch.arange(m - 1, -1, -1, device=twiddle.device)
