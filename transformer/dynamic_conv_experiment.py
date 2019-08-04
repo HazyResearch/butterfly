@@ -10,16 +10,13 @@ import math
 from pathlib import Path
 import pickle
 import random
-import glob
-import subprocess  # To run fairseq-train
+import subprocess  # To run fairseq-generate
 import re  # To extract BLEU score from output of fairseq-generate
+import socket  # For hostname
 
 import numpy as np
 
 import torch
-from torch import nn
-from torch import optim
-import torch.nn.functional as F
 
 from sacred import Experiment
 from sacred.observers import FileStorageObserver, SlackObserver
@@ -28,10 +25,23 @@ import ray
 from ray.tune import Trainable, Experiment as RayExperiment, sample_from, grid_search
 from ray.tune.schedulers import AsyncHyperBandScheduler
 
-# # Fairseq scripts
+# Fairseq scripts
 from train import train_translation
 from generate import generate_translation
 from average_checkpoints import main as avg_checkpoints
+
+
+def evaluate_translation(gen_args):
+    # gen_process = subprocess.run(['fairseq-generate'] + gen_args, capture_output=True)
+    # Need to use sys.executable to call the correct Python interpreter
+    gen_process = subprocess.run([sys.executable, str(Path(project_root) / 'fairseq/generate.py')] + gen_args,
+                                 capture_output=True)
+    err = gen_process.stderr.decode(sys.stdout.encoding)
+    out = gen_process.stdout.decode(sys.stdout.encoding)
+    sys.stderr.write(err)
+    sys.stdout.write(out)
+    m = re.search(r'BLEU4 = ([-+]?\d*\.\d+|\d+),', out)
+    return None, float(m.group(1))  # Return a pair to be compatible with generate_translation
 
 
 class TrainableModel(Trainable):
@@ -45,7 +55,7 @@ class TrainableModel(Trainable):
         if self.device == 'cuda':
             torch.cuda.manual_seed(config['seed'])
         model = config['model']
-        train_args = [project_root + '/fairseq/data-bin/iwslt14.tokenized.de-en']
+        train_args = [str(Path(project_root) / 'fairseq/data-bin/iwslt14.tokenized.de-en')]
         train_args += ['--clip-norm', '0'] if model['name'] == 'DynamicConv' else []
         train_args += ['--optimizer', 'adam']
         train_args += ['--lr', str(config['lr'])]
@@ -65,6 +75,8 @@ class TrainableModel(Trainable):
         train_args += ['--warmup-init-lr', "1e-07"]
         train_args += ['--adam-betas=(0.9, 0.98)']
         train_args += ['--keep-last-epochs', '10']
+        # Always train from scratch, to overwrite previous runs, so point to nonexistent checkpoint file
+        train_args += ['--restore-file', 'nonexistent_checkpoint.pt']
         train_args += ['-a', 'lightconv_butterfly_iwslt_de_en'] if model['name'] == 'DynamicConv' else ['-a', 'transformer_butterfly_iwslt_de_en']
         train_args += ['--dropout', str(config['dropout'])]
         train_args += ['--attention-dropout', '0.1'] if model['name'] == 'DynamicConv' else []
@@ -72,61 +84,56 @@ class TrainableModel(Trainable):
         train_args += ['--encoder-glu', '0'] if model['name'] == 'DynamicConv' else []
         train_args += ['--decoder-glu', '0 '] if model['name'] == 'DynamicConv' else []
         train_args += ['--seed', str(config['seed'])]
-        self._save_dir = config['result_dir'] + f"/seed={config['seed']}"
-        train_args += ['--save-dir', self._save_dir]
-        n_encoder_layer = 7 if model['name'] == 'DynamicConv' else 6
-        structure_type = config['structure_type']
-        structure_nblocks = config['structure_nblocks']
-        n_encoder_structure_layer = config['n_encoder_structure_layer']
-        encoder_structure_type = ['Linear'] * (n_encoder_layer - n_encoder_structure_layer) + [structure_type] * n_encoder_structure_layer
-        encoder_structure_nblocks = [0] * (n_encoder_layer - n_encoder_structure_layer) + [structure_nblocks] * n_encoder_structure_layer
-        n_decoder_structure_layer = config['n_decoder_structure_layer']
-        decoder_structure_type = ['Linear'] * (6 - n_decoder_structure_layer) + [structure_type] * n_decoder_structure_layer
-        decoder_structure_nblocks = [0] * (6 - n_decoder_structure_layer) + [structure_nblocks] * n_decoder_structure_layer
-        train_args += ['--encoder-structure-type-list', str(encoder_structure_type)]
-        train_args += ['--decoder-structure-type-list', str(decoder_structure_type)]
-        train_args += ['--encoder-structure-nblocks-list', str(encoder_structure_nblocks)] if model['name'] != 'DynamicConv' else []
-        train_args += ['--decoder-structure-nblocks-list', str(decoder_structure_nblocks)] if model['name'] != 'DynamicConv' else []
-        if config['structured_attention']:
-            encoder_structured_attention = [False] * (6 - n_encoder_structure_layer) + [True] * n_encoder_structure_layer
-            train_args += ['--encoder-structured-attention-list', str(encoder_structured_attention)] if model['name'] != 'DynamicConv' else []
-            decoder_structured_attention = [False] * (6 - n_decoder_structure_layer) + [True] * n_decoder_structure_layer
-            train_args += ['--decoder-structured-attention-list', str(decoder_structured_attention)]
+        self._save_dir = Path(config['result_dir']) / f"seed={config['seed']}"
+        train_args += ['--save-dir', str(self._save_dir)]
+        train_args += ['--encoder-layers', str(len(config['encoder']))]
+        train_args += ['--decoder-layers', str(len(config['decoder']))]
+        train_args += ['--encoder-structure-type-list', str(config['encoder'])]
+        train_args += ['--decoder-structure-type-list', str(config['decoder'])]
+        print(f'Host: {socket.gethostname()}, save_dir: {self._save_dir}')
 
         avg_args = [
-            '--inputs=' + self._save_dir, '--num-epoch-checkpoints=10',
-            '--output=' + self._save_dir + '/model.pt'
+            '--inputs=' + str(self._save_dir), '--num-epoch-checkpoints=10',
+            '--output=' + str(self._save_dir / 'model.pt')
         ]
-        gen_args = [project_root + '/fairseq/data-bin/iwslt14.tokenized.de-en', '--batch-size=64', '--remove-bpe',
-                    '--beam=4', '--quiet',
+        gen_args = [project_root + '/fairseq/data-bin/iwslt14.tokenized.de-en',
+                    '--batch-size=64', '--remove-bpe',
+                    '--beam=4', '--quiet', '--no-progress-bar'
                    ]
         self._train_args = train_args
         self._avg_args = avg_args
         self._gen_args = gen_args
 
     def _train(self):
-        os.makedirs(self._save_dir, exist_ok=True)
+        self._save_dir.mkdir(exist_ok=True)
         stdout = sys.stdout
-        with open(self._save_dir + '/logs.txt', 'w+') as log:
+        with open(self._save_dir / 'logs.txt', 'w+') as log:
             sys.stdout = log
-            train_translation(self._train_args)
+            # [2019-08-02] For some reason ray gets stuck when I call train_translation
+            # or generate_translation.
+            # Workaround: use subprocess to call fairseq-generate in another process
+            # train_translation(self._train_args)
+            subprocess.run([sys.executable, str(Path(project_root) / 'fairseq/train.py')] + self._train_args,
+                           stdout=log)
             avg_checkpoints(cmdline_args=self._avg_args)
+            last_model = self._save_dir / 'checkpoint_last.pt'
+            best_model = self._save_dir / 'checkpoint_best.pt'
+            ensemble_model = self._save_dir / 'model.pt'
             # Delete checkpoints to save disk space
-            last_model = os.path.join(self._save_dir, 'checkpoint_last.pt')
-            best_model = os.path.join(self._save_dir, 'checkpoint_best.pt')
-            ensemble_model = os.path.join(self._save_dir, 'model.pt')
-            for ckpt_file in glob.glob(os.path.join(self._save_dir, '*.pt')):
-                if ckpt_file != last_model and ckpt_file != ensemble_model \
-                                        and ckpt_file != best_model:
-                    os.remove(ckpt_file)
-            _, BLEU_last_valid = generate_translation(
-                self._gen_args + ['--gen-subset=valid', '--path=' + last_model])
-            _, BLEU_ensm_valid = generate_translation(
-                self._gen_args + ['--gen-subset=valid', '--path=' + ensemble_model])
-            _, BLEU_last_test = generate_translation(
-                self._gen_args + ['--gen-subset=test', '--path=' + last_model])
-            _, BLEU_ensm_test = generate_translation(
-                self._gen_args + ['--gen-subset=test', '--path=' + ensemble_model])
+            # for ckpt_file in Path(self._save_dir).glob('*.pt'):
+            #     if ckpt_file != last_model and ckpt_file != ensemble_model \
+            #                             and ckpt_file != best_model:
+            #         ckpt_file.unlink()
+            if self.device == 'cuda':
+                torch.cuda.empty_cache()
+            _, BLEU_last_valid = evaluate_translation(
+                self._gen_args + ['--gen-subset=valid', '--path=' + str(last_model)])
+            _, BLEU_ensm_valid = evaluate_translation(
+                self._gen_args + ['--gen-subset=valid', '--path=' + str(ensemble_model)])
+            _, BLEU_last_test = evaluate_translation(
+                self._gen_args + ['--gen-subset=test', '--path=' + str(last_model)])
+            _, BLEU_ensm_test = evaluate_translation(
+                self._gen_args + ['--gen-subset=test', '--path=' + str(ensemble_model)])
         sys.stdout = stdout
         return {
             'final_bleu_valid': BLEU_last_valid,
@@ -154,12 +161,9 @@ if slack_config_path.exists():
 def default_config():
     model = 'DynamicConv'  # Name of model, either 'DynamicConv' or 'Transformer'
     model_args = {}  # Arguments to be passed to the model, as a dictionary
-    n_encoder_structure_layer = 0  # Number of structured layer in the encoder
-    n_decoder_structure_layer = 0  # Number of structured layer in the decoder
-    structure_type = 'B'  # 'B' for butterfly or BBT for product of 2 butterflies
-    nblocks = 0  # Number of (BB^T) blocks in structure
-    structured_attention = False  # Whether attention layers are structured
-    ntrials = 20  # Number of trials for hyperparameter tuning
+    encoder = ['D'] * (7 if model == 'DynamicConv' else 6)  # Layers in the encoder
+    decoder = ['D'] * 6  # Layers in the decoder
+    ntrials = 3  # Number of trials for hyperparameter tuning
     nmaxupdates = 50000  # Maximum number of updates
     result_dir = project_root + '/transformer/results'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
@@ -167,22 +171,20 @@ def default_config():
 
 
 @ex.capture
-def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_decoder_structure_layer, structure_type, nblocks, structured_attention,
+def dynamic_conv_experiment(model, model_args, encoder, decoder,
                             nmaxupdates, ntrials, result_dir, cuda, smoke_test):
-    name=f'{model}_{model_args}_type_{structure_type}_nblocks_{nblocks}_encstruct_{n_encoder_structure_layer}_decstruct_{n_decoder_structure_layer}_attstruct_{structured_attention}'
+    name=f"{model}_{model_args}_encoder_[{'-'.join(encoder)}]_decoder_[{'-'.join(decoder)}]"
     config={
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
         # 'lr': grid_search([5e-4, 7e-4, 9e-4, 11e-4]),
-        'lr': grid_search([7.5e-4, 10e-4]),
+        'lr': grid_search([1e-4, 2.5e-4, 5e-4, 7.5e-4]),
         'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if model == 'DynamicConv' else 1e-4,
         # Transformer seems to need dropout 0.3
         'dropout': sample_from(lambda spec: random.uniform(0.1, 0.3)) if model == 'DynamicConv' else 0.3,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
-        'n_encoder_structure_layer': n_encoder_structure_layer,
-        'n_decoder_structure_layer': n_decoder_structure_layer,
-        'structure_type': structure_type,
-        'structure_nblocks': nblocks,
-        'structured_attention': structured_attention,
+        # 'seed': 17667,
+        'encoder': list(encoder),  # Need to copy @encoder as sacred created a read-only list
+        'decoder': list(decoder),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
         'nmaxupdates': nmaxupdates,
@@ -196,7 +198,7 @@ def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_deco
         checkpoint_at_end=False,
         checkpoint_freq=1000,  # Just to enable recovery with @max_failures
         max_failures=-1,
-        resources_per_trial={'cpu': 4, 'gpu': 1 if cuda else 0},
+        resources_per_trial={'cpu': 2, 'gpu': 1 if cuda else 0},
         stop={"training_iteration": 1},
         config=config,
     )
@@ -204,7 +206,7 @@ def dynamic_conv_experiment(model, model_args, n_encoder_structure_layer, n_deco
 
 
 @ex.automain
-def run(model, structure_type, nblocks, result_dir, nmaxupdates):
+def run(model, encoder, decoder, result_dir):
     experiment = dynamic_conv_experiment()
     try:
         with open('../config/redis_address', 'r') as f:
@@ -212,15 +214,9 @@ def run(model, structure_type, nblocks, result_dir, nmaxupdates):
             ray.init(redis_address=address)
     except:
         ray.init()
-    trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
+    trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True).trials
     trials = [trial for trial in trials if trial.last_result is not None]
-    bleu = [trial.last_result.get('ensemble_bleu_test', float('-inf')) for trial in trials]
-
-    checkpoint_path = Path(result_dir) / experiment.name
-    checkpoint_path.mkdir(parents=True, exist_ok=True)
-    checkpoint_path /= 'trial.pkl'
-    with checkpoint_path.open('wb') as f:
-        pickle.dump(trials, f)
-
-    ex.add_artifact(str(checkpoint_path))
-    return model, structure_type, nblocks, max(bleu)
+    bleu = [(trial.last_result.get('ensemble_bleu_valid', float('-inf')),
+             trial.last_result.get('ensemble_bleu_test', float('-inf'))) for trial in trials]
+    max_bleu = max(bleu, key=lambda x: x[0])[1]
+    return model, encoder, decoder, max_bleu
