@@ -164,3 +164,10 @@ python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["B"
 python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["B_1", "B_1", "B_1", "B_1", "B_1", "B_1"]' 'decoder=["B_1", "B_1", "B_1", "B_1", "B_1", "B_1"]'
 python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["B_2", "B_2", "B_2", "B_2", "B_2", "B_2"]' 'decoder=["B_2", "B_2", "B_2", "B_2", "B_2", "B_2"]'
 python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["B_3", "B_3", "B_3", "B_3", "B_3", "B_3"]' 'decoder=["B_3", "B_3", "B_3", "B_3", "B_3", "B_3"]'
+
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_1", "ODO_1", "ODO_1", "ODO_1", "ODO_1", "ODO_1"]' 'decoder=["ODO_1", "ODO_1", "ODO_1", "ODO_1", "ODO_1", "ODO_1"]'
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2"]' 'decoder=["ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2"]'
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' 'decoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]'
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8"]' 'decoder=["ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8"]'
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12"]' 'decoder=["ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12"]'
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14"]' 'decoder=["ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14"]'

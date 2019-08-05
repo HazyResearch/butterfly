@@ -881,7 +881,7 @@ void butterfly_ortho_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle
         <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, input_reader, output_writer, batch_size) \
         : butterfly_ortho_multiply_untied_forward_fast_cuda_kernel<log_n_val, false>                        \
         <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, input_reader, output_writer, batch_size); break;
-      // MAP(CASE_LOG_N, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+      MAP(CASE_LOG_N, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
     }
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
@@ -1060,6 +1060,7 @@ void butterfly_ortho_multiply_untied_backward_fast_cuda(const at::Tensor &twiddl
         : butterfly_ortho_multiply_untied_backward_fast_cuda_kernel<log_n_val, false>                                                   \
         <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, output_reader, grad_reader, d_twiddle_a, d_input_writer, batch_size); break;
       // MAP(CASE_LOG_N, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+      MAP(CASE_LOG_N, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
     }
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
@@ -1295,6 +1296,7 @@ void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_
       butterfly_odo_multiply_untied_backward_fast_cuda_kernel<log_n_val> \
         <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); break;
       // MAP(CASE_LOG_N, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+      MAP(CASE_LOG_N, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
     }
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work

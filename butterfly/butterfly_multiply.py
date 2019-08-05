@@ -28,6 +28,8 @@ try:
     from factor_multiply_fast import butterfly_multiply_untied_forward_backward_fast
     from factor_multiply_fast import butterfly_bbs_multiply_untied_forward_fast
     from factor_multiply_fast import butterfly_bbs_multiply_untied_forward_backward_fast
+    from factor_multiply_fast import butterfly_odo_multiply_untied_forward_fast
+    from factor_multiply_fast import butterfly_odo_multiply_untied_backward_fast
 except:
     use_extension = False
     import warnings
@@ -442,6 +444,40 @@ def bbt_ortho_mult_untied_torch(twiddle, input):
     twiddle = torch.stack((torch.stack((c, -s), dim=-1),
                             torch.stack((s, c), dim=-1)), dim=-2)
     return bbt_mult_untied_torch(twiddle, input)
+
+
+class ODOMultUntied(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, twiddle, diag, input):
+        """
+        Parameters:
+            twiddle: (nstack, nblocks * 2 * log n, n / 2)
+            diag: (nstack, nblocks, n)
+            input: (batch_size, nstack, n)
+        Returns:
+            output: (batch_size, nstack, n)
+        """
+        twiddle_cos, twiddle_sin = torch.cos(twiddle), torch.sin(twiddle)
+        output = butterfly_odo_multiply_untied_forward_fast(twiddle_cos, twiddle_sin, diag, input)
+        ctx.save_for_backward(twiddle_cos, twiddle_sin, diag, output)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad):
+        """
+        Parameters:
+            grad: (batch_size, nstack, n)
+        Return:
+            d_twiddle: (nstack, nblocks * 2 * log n, n / 2)
+            d_diag: (nstack, nblocks, n)
+            d_input: (batch_size, nstack, n)
+        """
+        twiddle_cos, twiddle_sin, diag, output = ctx.saved_tensors
+        d_coefficients, d_diag, d_input = butterfly_odo_multiply_untied_backward_fast(twiddle_cos, twiddle_sin, diag, output, grad)
+        return d_coefficients, d_diag, d_input
+
+odo_mult_untied = ODOMultUntied.apply
 
 
 def twiddle_svd2regular(twiddle):

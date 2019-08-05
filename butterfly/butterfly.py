@@ -8,6 +8,7 @@ from .butterfly_multiply import butterfly_mult, butterfly_mult_untied
 from .butterfly_multiply import butterfly_ortho_mult_tied, bbt_ortho_mult_tied
 from .butterfly_multiply import butterfly_ortho_mult_untied, butterfly_mult_untied_svd
 from .butterfly_multiply import bbt_mult_untied, bbt_ortho_mult_untied
+from .butterfly_multiply import odo_mult_untied
 
 class Butterfly(nn.Module):
     """Product of log N butterfly factors, each is a block 2x2 of diagonal matrices.
@@ -130,7 +131,19 @@ class Butterfly(nn.Module):
                 self.diag_gen = lambda shape: (torch.rand(shape) >= 0.5).float() * 2 - 1
             else: assert False, f"diag_init type {diag_init} not supported"
 
-            if param == 'ortho':
+            if param == 'odo' and self.fast:
+                self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
+                # TODO: assuming that nblocks > 0, otherwise there's no diag
+                # Initialize diag away from zero for numerical stability
+                # Rejection sampling
+                while True:
+                    diag_temp = self.diag_gen(self.nstack * nblocks * size * 2)
+                    diag_temp = diag_temp[diag_temp.abs() > 0.2]
+                    if diag_temp.numel() >= self.nstack * nblocks * size:
+                        break
+                self.diag = nn.Parameter(diag_temp[:self.nstack * nblocks * size].view(self.nstack, nblocks, size))
+                self.diag._is_structured = True
+            elif param == 'ortho':
                 assert not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
             elif param == 'odo' or param == 'odr' or param == 'opdo':
@@ -222,21 +235,24 @@ class Butterfly(nn.Module):
                     diag.clamp_(min=1 / self.max_gain, max=self.max_gain)
             elif self.diag_constraint == 'square':
                 diag = diag * diag
-            if self.diag_bookends:
-                output = output * self.diag_r
-            if self.tied_weight:
-                output = butterfly_ortho_mult_tied(self.twiddle, output, False) if self.nblocks == 0 else bbt_ortho_mult_tied(self.twiddle, output)
+            if self.param == 'odo' and self.fast:
+                output = odo_mult_untied(self.twiddle, diag, input)
             else:
-                output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
-            output = output * diag
-            if self.param == 'opdo' and self.expansion > 1:
-                output = output.view(-1, self.expansion, output.shape[-1]).sum(dim=-2, keepdim=True).expand(-1, self.expansion, -1).reshape(output.shape)
-            if self.tied_weight:
-                output = butterfly_ortho_mult_tied(self.twiddle1, output, True) if self.nblocks == 0 else bbt_ortho_mult_tied(self.twiddle1, output)
-            else:
-                output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
-            if self.diag_bookends:
-                output = output * self.diag_l
+                if self.diag_bookends:
+                    output = output * self.diag_r
+                if self.tied_weight:
+                    output = butterfly_ortho_mult_tied(self.twiddle, output, False) if self.nblocks == 0 else bbt_ortho_mult_tied(self.twiddle, output)
+                else:
+                    output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
+                output = output * diag
+                if self.param == 'opdo' and self.expansion > 1:
+                    output = output.view(-1, self.expansion, output.shape[-1]).sum(dim=-2, keepdim=True).expand(-1, self.expansion, -1).reshape(output.shape)
+                if self.tied_weight:
+                    output = butterfly_ortho_mult_tied(self.twiddle1, output, True) if self.nblocks == 0 else bbt_ortho_mult_tied(self.twiddle1, output)
+                else:
+                    output = butterfly_ortho_mult_untied(self.twiddle1, output, not self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle1, output)
+                if self.diag_bookends:
+                    output = output * self.diag_l
         elif self.param == 'obdobt':
             for t, t1, d in zip(self.twiddle.split(self.m, dim=1), self.twiddle1.split(self.m, dim=1), self.diag):
                 output = butterfly_ortho_mult_untied(t, output, False)
