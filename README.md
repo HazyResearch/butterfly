@@ -16,6 +16,8 @@ To install it:
 ```
 cd butterfly/factor_multiply
 python setup.py install
+cd butterfly/factor_multiply_fast
+python setup.py install
 ```
 Without the C++/CUDA version, butterfly multiplication is still usable, but is
 quite slow. The variable `use_extension` in `butterfly/butterfly_multiply.py`
