@@ -47,7 +47,7 @@ class Butterfly(nn.Module):
     def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
                  increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
                  nblocks=0, diag_constraint=None, expansion=1, diag_init='normal', double=False, diag_bookends=False,
-                 fast=True):
+                 fast=True, twiddle_lr_multiplier=1.0):
         super().__init__()
         self.double = double
         if double:
@@ -74,6 +74,7 @@ class Butterfly(nn.Module):
         self.diag_init = diag_init
         self.diag_bookends = diag_bookends
         self.fast = fast
+        self.twiddle_lr_multiplier = twiddle_lr_multiplier
         self.nstack *= self.expansion
         if nblocks > 0:
             assert not complex, 'native BBT with complex is not supported, use two separate Butterflies (e.g. nn.Sequential)'
@@ -200,6 +201,10 @@ class Butterfly(nn.Module):
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
+        if self.twiddle_lr_multiplier != 1.0:
+            self.twiddle.register_hook(lambda grad: grad * self.twiddle_lr_multiplier)
+            if hasattr(self, 'diag'):
+                self.diag.register_hook(lambda grad: grad * self.twiddle_lr_multiplier)
 
     def reset_parameters(self):
         """Initialize bias the same way as torch.nn.Linear."""
@@ -315,8 +320,8 @@ class Butterfly(nn.Module):
             return output.view(*input.size()[:-1], self.out_size) if not self.double else output.view(*input.size()[:-1], self.out_size // 2)
 
     def extra_repr(self):
-        s = 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, expansion={}, diag_init={}, double={}'.format(
-            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.expansion, self.diag_init, self.double
+        s = 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, expansion={}, diag_init={}, double={}, lr_multiplier'.format(
+            self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.expansion, self.diag_init, self.double, self.twiddle_lr_multiplier
         )
         if self.param == 'odo' or self.param == 'odr' or self.param == 'opdo':
             s += ', diag_constraint={}'.format('none' if self.diag_constraint is None else self.diag_constraint)
@@ -369,13 +374,14 @@ class ButterflyBmm(Butterfly):
 
     def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False, tied_weight=True,
                  increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
-                 nblocks=0, diag_constraint=None, expansion=1, diag_init='one', double=False):
+                 nblocks=0, diag_constraint=None, expansion=1, diag_init='one', double=False,
+                 **extra_args):
         m = int(math.ceil(math.log2(in_size)))
         in_size_extended = 1 << m  # Will zero-pad input if in_size is not a power of 2
         nstack = int(math.ceil(out_size / in_size_extended))
         super().__init__(in_size_extended, in_size_extended * nstack * matrix_batch, bias, complex,
                          tied_weight, increasing_stride, ortho_init, param, max_gain, nblocks,
-                         diag_constraint, expansion, diag_init, double)
+                         diag_constraint, expansion, diag_init, double, **extra_args)
         self.in_size = in_size if not double else in_size * 2
         self.out_size = out_size if not double else out_size * 2
         self.nstack = nstack * expansion
@@ -413,8 +419,8 @@ class ButterflyBmm(Butterfly):
         return output if self.bias is None else output + self.bias
 
     def extra_repr(self):
-        s = 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, expansion={}, diag_init={}, double={}'.format(
-            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.expansion, self.diag_init, self.double
+        s = 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, expansion={}, diag_init={}, double={}, lr_multiplier={}'.format(
+            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.expansion, self.diag_init, self.double, self.twiddle_lr_multiplier
         )
         if self.param == 'odo':
             s += ', diag_constraint={}'.format('none' if self.diag_constraint is None else self.diag_constraint)

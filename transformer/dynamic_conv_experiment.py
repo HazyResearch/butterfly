@@ -90,6 +90,7 @@ class TrainableModel(Trainable):
         train_args += ['--decoder-layers', str(len(config['decoder']))]
         train_args += ['--encoder-structure-type-list', str(config['encoder'])]
         train_args += ['--decoder-structure-type-list', str(config['decoder'])]
+        train_args += ['--structure-lr-multiplier', str(config['structure-lr-multiplier'])]
         print(f'Host: {socket.gethostname()}, save_dir: {self._save_dir}')
 
         avg_args = [
@@ -105,7 +106,7 @@ class TrainableModel(Trainable):
         self._gen_args = gen_args
 
     def _train(self):
-        self._save_dir.mkdir(exist_ok=True)
+        self._save_dir.mkdir(parents=True, exist_ok=True)
         stdout = sys.stdout
         with open(self._save_dir / 'logs.txt', 'w+') as log:
             sys.stdout = log
@@ -163,6 +164,7 @@ def default_config():
     model_args = {}  # Arguments to be passed to the model, as a dictionary
     encoder = ['D'] * (7 if model == 'DynamicConv' else 6)  # Layers in the encoder
     decoder = ['D'] * 6  # Layers in the decoder
+    structure_lr_multiplier = 1.0
     ntrials = 3  # Number of trials for hyperparameter tuning
     nmaxupdates = 50000  # Maximum number of updates
     result_dir = project_root + '/transformer/results'  # Directory to store results
@@ -171,9 +173,9 @@ def default_config():
 
 
 @ex.capture
-def dynamic_conv_experiment(model, model_args, encoder, decoder,
+def dynamic_conv_experiment(model, model_args, encoder, decoder, structure_lr_multiplier,
                             nmaxupdates, ntrials, result_dir, cuda, smoke_test):
-    name=f"{model}_{model_args}_encoder_[{'-'.join(encoder)}]_decoder_[{'-'.join(decoder)}]"
+    name=f"{model}_{model_args}_encoder_[{'-'.join(encoder)}]_decoder_[{'-'.join(decoder)}]_structlr_{structure_lr_multiplier}"
     config={
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
         # 'lr': grid_search([5e-4, 7e-4, 9e-4, 11e-4]),
@@ -182,9 +184,9 @@ def dynamic_conv_experiment(model, model_args, encoder, decoder,
         # Transformer seems to need dropout 0.3
         'dropout': sample_from(lambda spec: random.uniform(0.1, 0.3)) if model == 'DynamicConv' else 0.3,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
-        # 'seed': 17667,
         'encoder': list(encoder),  # Need to copy @encoder as sacred created a read-only list
         'decoder': list(decoder),
+        'structure-lr-multiplier': structure_lr_multiplier,
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
         'nmaxupdates': nmaxupdates,

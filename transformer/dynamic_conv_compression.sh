@@ -162,12 +162,33 @@ python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["D"
 
 python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["B", "B", "B", "B", "B", "B"]' 'decoder=["B", "B", "B", "B", "B", "B"]'
 python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["B_1", "B_1", "B_1", "B_1", "B_1", "B_1"]' 'decoder=["B_1", "B_1", "B_1", "B_1", "B_1", "B_1"]'
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["B_2", "B_2", "B_2", "B_2", "B_2", "B_2"]' 'decoder=["B_2", "B_2", "B_2", "B_2", "B_2", "B_2"]'
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["B_3", "B_3", "B_3", "B_3", "B_3", "B_3"]' 'decoder=["B_3", "B_3", "B_3", "B_3", "B_3", "B_3"]'
+# p100-template-7
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["B_2", "B_2", "B_2", "B_2", "B_2", "B_2"]' 'decoder=["B_2", "B_2", "B_2", "B_2", "B_2", "B_2"]'; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-6
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["B_3", "B_3", "B_3", "B_3", "B_3", "B_3"]' 'decoder=["B_3", "B_3", "B_3", "B_3", "B_3", "B_3"]'; gcloud compute instances stop $(hostname) --zone us-west1-b -q
 
 python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_1", "ODO_1", "ODO_1", "ODO_1", "ODO_1", "ODO_1"]' 'decoder=["ODO_1", "ODO_1", "ODO_1", "ODO_1", "ODO_1", "ODO_1"]'
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2"]' 'decoder=["ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2"]'
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' 'decoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]'
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8"]' 'decoder=["ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8"]'
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12"]' 'decoder=["ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12"]'
-python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14"]' 'decoder=["ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14"]'
+# p100-template-5
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2"]' 'decoder=["ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2", "ODO_2"]'; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-4
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' 'decoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]'; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-3
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8"]' 'decoder=["ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8", "ODO_8"]'; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-2
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12"]' 'decoder=["ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12", "ODO_12"]'; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+# p100-template-1 TODO shutdown
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14"]' 'decoder=["ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14", "ODO_14"]'; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+
+# pip install -U ray && cd learning-circuits && git reset origin/master --hard && git pull && git checkout cnn && cd fairseq && git reset origin/master --hard && git pull && git checkout butterfly_transformer && cd ../butterfly/factor_multiply && python setup.py install && cd ../factor_multiply_fast && python setup.py install && cd ../../transformer
+
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4_2.0", "ODO_4_2.0", "ODO_4_2.0", "ODO_4_2.0", "ODO_4_2.0", "ODO_4_2.0"]' 'decoder=["ODO_4_2.0", "ODO_4_2.0", "ODO_4_2.0", "ODO_4_2.0", "ODO_4_2.0", "ODO_4_2.0"]'
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4_4.0", "ODO_4_4.0", "ODO_4_4.0", "ODO_4_4.0", "ODO_4_4.0", "ODO_4_4.0"]' 'decoder=["ODO_4_4.0", "ODO_4_4.0", "ODO_4_4.0", "ODO_4_4.0", "ODO_4_4.0", "ODO_4_4.0"]'
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4_0.5", "ODO_4_0.5", "ODO_4_0.5", "ODO_4_0.5", "ODO_4_0.5", "ODO_4_0.5"]' 'decoder=["ODO_4_0.5", "ODO_4_0.5", "ODO_4_0.5", "ODO_4_0.5", "ODO_4_0.5", "ODO_4_0.5"]'
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4_0.25", "ODO_4_0.25", "ODO_4_0.25", "ODO_4_0.25", "ODO_4_0.25", "ODO_4_0.25"]' 'decoder=["ODO_4_0.25", "ODO_4_0.25", "ODO_4_0.25", "ODO_4_0.25", "ODO_4_0.25", "ODO_4_0.25"]'
+
+# cd learning-circuits && git pull && cd ../../fairseq && git pull && cd ../transformer
+
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' 'decoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' structure-lr-multiplier=2.0; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' 'decoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' structure-lr-multiplier=4.0; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' 'decoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' structure-lr-multiplier=0.5; gcloud compute instances stop $(hostname) --zone us-west1-b -q
+python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' 'decoder=["ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4", "ODO_4"]' structure-lr-multiplier=0.25; gcloud compute instances stop $(hostname) --zone us-west1-b -q
