@@ -76,7 +76,7 @@ class TrainableModel(Trainable):
         train_args += ['--adam-betas=(0.9, 0.98)']
         train_args += ['--keep-last-epochs', '10']
         # Always train from scratch, to overwrite previous runs, so point to nonexistent checkpoint file
-        train_args += ['--restore-file', 'nonexistent_checkpoint.pt']
+        # train_args += ['--restore-file', 'nonexistent_checkpoint.pt']
         train_args += ['-a', 'lightconv_butterfly_iwslt_de_en'] if model['name'] == 'DynamicConv' else ['-a', 'transformer_butterfly_iwslt_de_en']
         train_args += ['--dropout', str(config['dropout'])]
         train_args += ['--attention-dropout', '0.1'] if model['name'] == 'DynamicConv' else []
@@ -164,7 +164,7 @@ def default_config():
     model_args = {}  # Arguments to be passed to the model, as a dictionary
     encoder = ['D'] * (7 if model == 'DynamicConv' else 6)  # Layers in the encoder
     decoder = ['D'] * 6  # Layers in the decoder
-    structure_lr_multiplier = 1.0
+    structure_lr_multiplier = 1.0  # Learning rate multiplier for structured parameters
     ntrials = 3  # Number of trials for hyperparameter tuning
     nmaxupdates = 50000  # Maximum number of updates
     result_dir = project_root + '/transformer/results'  # Directory to store results
@@ -179,14 +179,17 @@ def dynamic_conv_experiment(model, model_args, encoder, decoder, structure_lr_mu
     config={
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
         # 'lr': grid_search([5e-4, 7e-4, 9e-4, 11e-4]),
-        'lr': grid_search([1e-4, 2.5e-4, 5e-4, 7.5e-4]),
+        # 'lr': grid_search([1e-4, 2.5e-4, 5e-4, 7.5e-4]),
+        'lr': 5e-4,
         'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if model == 'DynamicConv' else 1e-4,
         # Transformer seems to need dropout 0.3
         'dropout': sample_from(lambda spec: random.uniform(0.1, 0.3)) if model == 'DynamicConv' else 0.3,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'encoder': list(encoder),  # Need to copy @encoder as sacred created a read-only list
         'decoder': list(decoder),
-        'structure-lr-multiplier': structure_lr_multiplier,
+        # 'structure-lr-multiplier': structure_lr_multiplier,
+        # 'structure-lr-multiplier': grid_search([0.25, 0.5, 1.0, 2.0, 4.0]),
+        'structure-lr-multiplier': grid_search([0.25, 0.5, 2.0, 4.0]),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
         'nmaxupdates': nmaxupdates,
