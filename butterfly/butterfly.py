@@ -136,8 +136,7 @@ class Butterfly(nn.Module):
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 # TODO: assuming that nblocks > 0, otherwise there's no diag
                 # Initialize diag away from zero for numerical stability
-                # Rejection sampling
-                while True:
+                while True:  # Rejection sampling
                     diag_temp = self.diag_gen(self.nstack * nblocks * size * 2)
                     diag_temp = diag_temp[diag_temp.abs() > 0.2]
                     if diag_temp.numel() >= self.nstack * nblocks * size:
@@ -241,7 +240,7 @@ class Butterfly(nn.Module):
             elif self.diag_constraint == 'square':
                 diag = diag * diag
             if self.param == 'odo' and self.fast:
-                output = odo_mult_untied(self.twiddle, diag, input)
+                output = odo_mult_untied(self.twiddle, diag, output)
             else:
                 if self.diag_bookends:
                     output = output * self.diag_r
