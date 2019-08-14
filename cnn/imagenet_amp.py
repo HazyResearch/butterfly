@@ -29,7 +29,7 @@ except ImportError:
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
-                     and callable(models.__dict__[name])) + ['mobilenetv1']
+                     and callable(models.__dict__[name])) + ['mobilenetv1', 'mobilenetv1_butterfly']
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR',
@@ -39,6 +39,9 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',
                     help='model architecture: ' +
                     ' | '.join(model_names) +
                     ' (default: resnet18)')
+parser.add_argument('--struct', metavar='STRUCT', default='odo_4',
+                    type=str,
+                    help='structure for 1x1 conv: ' + ' (default: odo_4)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
@@ -49,6 +52,8 @@ parser.add_argument('-b', '--batch-size', default=256, type=int,
                     metavar='N', help='mini-batch size per process (default: 256)')
 parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='Initial learning rate.  Will be scaled by <global batch size>/256: args.lr = args.lr*float(args.batch_size*args.world_size)/256.  A warmup schedule will also be applied over the first 5 epochs.')
+parser.add_argument('--lr-multiplier', default=1.0, type=float,
+                    metavar='LR_MULT', help='Learning rate multiplier for structured parameters')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
@@ -134,8 +139,11 @@ def main():
         print("=> creating model '{}'".format(args.arch))
         if args.arch == 'mobilenetv1':
             model = MobileNet()
+        elif args.arch == 'mobilenetv1_butterfly'
+            model = MobileNet(structure=[args.struct] * 7)
         else:
             model = models.__dict__[args.arch]()
+    print(model)
 
     if args.sync_bn:
         import apex
@@ -146,7 +154,12 @@ def main():
 
     # Scale learning rate based on global batch size
     args.lr = args.lr*float(args.batch_size*args.world_size)/256.
-    optimizer = torch.optim.SGD(model.parameters(), args.lr,
+    params = list(filter(lambda p: p.requires_grad, model.parameters()))
+    structured_params = list(filter(lambda p: getattr(p, '_is_structured', False), params))
+    unstructured_params = list(filter(lambda p: not (getattr(p, '_is_structured', False)), params))
+    params_dict = [{'params': structured_params, 'weight_decay': 0.0, 'lr_multiplier': args.lr_multiplier},
+                   {'params': unstructured_params}]
+    optimizer = torch.optim.SGD(params_dict, args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
 
@@ -509,7 +522,7 @@ def adjust_learning_rate(optimizer, epoch, step, len_epoch):
     #     print("epoch = {}, step = {}, lr = {}".format(epoch, step, lr))
 
     for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
+        param_group['lr'] = lr * param_group.get('lr_multiplier', 1.0)
 
 
 def accuracy(output, target, topk=(1,)):
