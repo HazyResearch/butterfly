@@ -55,6 +55,7 @@ class Block(nn.Module):
     def __init__(self, in_planes, out_planes, stride=1, structure='D'):
         super(Block, self).__init__()
         self.conv1 = nn.Conv2d(in_planes, in_planes, kernel_size=3, stride=stride, padding=1, groups=in_planes, bias=False)
+        self.conv1.weight._dw_conv = True
         self.bn1 = nn.BatchNorm2d(in_planes)
         if structure == 'D':
             self.conv2 = nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0, bias=False)
