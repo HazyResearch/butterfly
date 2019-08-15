@@ -3,16 +3,20 @@
 #include <utility>
 #include <vector>
 
+#define BFLY_BENCHMARK false
+
 #define CHECK_DEVICE(x) AT_CHECK(x.type().device_type() == at::kCPU || x.type().device_type() == at::kCUDA, #x " must be on CPU or CUDA")
 
 void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
                                                  const at::Tensor &input,
                                                  at::Tensor &output,
                                                  bool increasing_stride);
+#if BFLY_BENCHMARK
 void butterfly_multiply_untied_forward_fast_cuda_benchmark(const at::Tensor &twiddle,
                                                            const at::Tensor &input,
                                                            at::Tensor &output,
                                                            bool increasing_stride);
+#endif
 void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle,
                                                           const at::Tensor &input,
                                                           const at::Tensor &grad,
@@ -44,6 +48,13 @@ void butterfly_odo_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle_c
                                                      const at::Tensor &diagonal,
                                                      const at::Tensor &input,
                                                      at::Tensor &output);
+#if BFLY_BENCHMARK
+void butterfly_odo_multiply_untied_forward_fast_cuda_benchmark(const at::Tensor &twiddle_cos,
+                                                               const at::Tensor &twiddle_sin,
+                                                               const at::Tensor &diagonal,
+                                                               const at::Tensor &input,
+                                                               at::Tensor &output);
+#endif
 void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_cos,
                                                       const at::Tensor &twiddle_sin,
                                                       const at::Tensor &diagonal,
@@ -52,11 +63,20 @@ void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_
                                                       at::Tensor &d_twiddle,
                                                       at::Tensor &d_diagonal,
                                                       at::Tensor &d_input);
+#if BFLY_BENCHMARK
+void butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(const at::Tensor &twiddle_cos,
+                                                                const at::Tensor &twiddle_sin,
+                                                                const at::Tensor &diagonal,
+                                                                const at::Tensor &output,
+                                                                const at::Tensor &grad,
+                                                                at::Tensor &d_twiddle,
+                                                                at::Tensor &d_diagonal,
+                                                                at::Tensor &d_input);
+#endif
 
 at::Tensor butterfly_multiply_untied_forward_fast(const at::Tensor &twiddle,
                                                   const at::Tensor &input,
-                                                  bool increasing_stride,
-                                                  bool benchmark=false) {
+                                                  bool increasing_stride) {
   /* Parameters:
          twiddle: (nstack, log n, n/2, 2, 2) if real or (nstack, log n, n/2, 2, 2, 2) if complex
          input: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
@@ -85,11 +105,11 @@ at::Tensor butterfly_multiply_untied_forward_fast(const at::Tensor &twiddle,
            "log n, 2, n) (nstack, log n, 2, n, 2)");
   auto output = torch::empty_like(input);
   AT_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_fast: only supports CUDA");
-  if (!benchmark) {
-    butterfly_multiply_untied_forward_fast_cuda(twiddle, input, output, increasing_stride);
-  } else {
-    butterfly_multiply_untied_forward_fast_cuda_benchmark(twiddle, input, output, increasing_stride);
-  }
+  #if !BFLY_BENCHMARK
+  butterfly_multiply_untied_forward_fast_cuda(twiddle, input, output, increasing_stride);
+  #else
+  butterfly_multiply_untied_forward_fast_cuda_benchmark(twiddle, input, output, increasing_stride);
+  #endif
   return output;
 }
 
@@ -342,7 +362,11 @@ at::Tensor butterfly_odo_multiply_untied_forward_fast(const at::Tensor &twiddle_
            "nblocks, n/2)");
   auto output = torch::empty_like(input);
   AT_CHECK(input.is_cuda(), "butterfly_odo_multiply_untied_forward_fast: only supports CUDA");
+  #if !BFLY_BENCHMARK
   butterfly_odo_multiply_untied_forward_fast_cuda(twiddle_cos, twiddle_sin, diagonal, input, output);
+  #else
+  butterfly_odo_multiply_untied_forward_fast_cuda_benchmark(twiddle_cos, twiddle_sin, diagonal, input, output);
+  #endif
   return output;
 }
 
@@ -396,8 +420,13 @@ std::vector<at::Tensor> butterfly_odo_multiply_untied_backward_fast(const at::Te
   auto d_twiddle = torch::zeros_like(twiddle_cos);
   auto d_diagonal = torch::zeros_like(diagonal);
   AT_CHECK(output.is_cuda(), "butterfly_odo_multiply_untied_backward_fast: only supports CUDA");
+  #if !BFLY_BENCHMARK
   butterfly_odo_multiply_untied_backward_fast_cuda(twiddle_cos, twiddle_sin, diagonal, output, grad,
                                                    d_twiddle, d_diagonal, d_input);
+  #else
+  butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(twiddle_cos, twiddle_sin, diagonal, output, grad,
+                                                             d_twiddle, d_diagonal, d_input);
+  #endif
   return {d_twiddle, d_diagonal, d_input} ;
 }
 

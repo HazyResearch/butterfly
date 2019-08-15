@@ -181,7 +181,7 @@ class ButterflyMultUntied(torch.autograd.Function):
             if not fast:
                 output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
             else:
-                output = butterfly_multiply_untied_forward_fast(twiddle, input, increasing_stride, False)
+                output = butterfly_multiply_untied_forward_fast(twiddle, input, increasing_stride)
         ctx.save_for_backward(twiddle, input)
         ctx._increasing_stride = increasing_stride
         ctx._fast = fast

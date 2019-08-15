@@ -9,6 +9,8 @@
 #include <thrust/tuple.h>
 #include "map.h"  // For the MAP macro, i.e. for_each over the arguments
 
+#define BFLY_BENCHMARK false
+
 #define thc_cos std::cos
 #define thc_sin std::sin
 
@@ -16,7 +18,12 @@
 
 #define MIN_MACRO(x, y) (((x) <= (y)) ? (x) : (y))
 
-static constexpr int SMEM_PER_MP = 64 * (1 << 10);
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 700)
+  static constexpr int SMEM_PER_MP = 96 * (1 << 10);
+#else
+  static constexpr int SMEM_PER_MP = 64 * (1 << 10);
+#endif
+// static constexpr int SMEM_PER_MP = 64 * (1 << 10);
 static constexpr int MAX_SMEM_PER_BLOCK = 48 * (1 << 10);
 static constexpr int MAX_BLOCK_SIZE = 1024;
 // static constexpr int WORK_PER_THREAD = 16;
@@ -26,6 +33,10 @@ static constexpr int ITEMS_PER_THREAD_FORWARD[14] = {4, 4, 4, 4, 4, 4, 4, 8, 8, 
 static constexpr int ITEMS_PER_THREAD_BACKWARD[14] = {16, 16, 16, 16, 16, 16, 16, 16, 16, 8, 8, 8, 8, 8};
 static constexpr int MIN_BLOCKS_PER_MP_FORWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1};
 static constexpr int MIN_BLOCKS_PER_MP_BACKWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+static constexpr int ITEMS_PER_THREAD_ORTHO_FORWARD[14] = {4, 4, 4, 4, 4, 4, 4, 8, 8, 8, 13, 10, 4, 4};
+static constexpr int ITEMS_PER_THREAD_ORTHO_BACKWARD[14] = {16, 16, 16, 16, 16, 16, 16, 16, 8, 8, 8, 8, 8, 8};
+static constexpr int MIN_BLOCKS_PER_MP_ORTHO_FORWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+static constexpr int MIN_BLOCKS_PER_MP_ORTHO_BACKWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1};
 
 template <typename T, size_t N>
 using CudaAcsr = at::PackedTensorAccessor<T, N, at::RestrictPtrTraits, int32_t>;
@@ -805,8 +816,8 @@ __device__ __forceinline__ void b_ortho_untied_forward(const CudaAcsr<scalar_t, 
 }
 
 template <int log_n, bool increasing_stride,
-            int items_per_thread=ITEMS_PER_THREAD_FORWARD[log_n - 1],
-            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_FORWARD[log_n - 1],
+            int items_per_thread=ITEMS_PER_THREAD_ORTHO_FORWARD[log_n - 1],
+            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_ORTHO_FORWARD[log_n - 1],
             int max_smem_per_thread=items_per_thread, typename scalar_t>
 // C10_LAUNCH_BOUNDS_2 supposedly takes min(1 << log_n, 1024)
 // https://github.com/pytorch/pytorch/blob/v1.1.0/c10/macros/Macros.h
@@ -873,7 +884,7 @@ void butterfly_ortho_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle
     const InputReader<scalar_t> input_reader(input);
     OutputWriter<scalar_t> output_writer(output);
     dim3 block(min(n, MAX_BLOCK_SIZE));
-    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD[log_n - 1]), 1, nstack);
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_ORTHO_FORWARD[log_n - 1]), 1, nstack);
     auto stream = at::cuda::getCurrentCUDAStream();
     switch (log_n) {
       #define CASE_LOG_N(log_n_val) case log_n_val:                                                         \
@@ -970,8 +981,8 @@ __device__ __forceinline__ void b_ortho_untied_backward(const CudaAcsr<scalar_t,
 }
 
 template <int log_n, bool increasing_stride,
-            int items_per_thread=ITEMS_PER_THREAD_BACKWARD[log_n - 1],
-            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_BACKWARD[log_n - 1],
+            int items_per_thread=ITEMS_PER_THREAD_ORTHO_BACKWARD[log_n - 1],
+            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_ORTHO_BACKWARD[log_n - 1],
             int max_smem_per_thread=items_per_thread, typename scalar_t>
 // C10_LAUNCH_BOUNDS_2 supposedly takes min(1 << log_n, 1024)
 // https://github.com/pytorch/pytorch/blob/v1.1.0/c10/macros/Macros.h
@@ -1051,7 +1062,7 @@ void butterfly_ortho_multiply_untied_backward_fast_cuda(const at::Tensor &twiddl
     auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
     OutputWriter<scalar_t> d_input_writer(d_input);
     dim3 block(min(n, MAX_BLOCK_SIZE));
-    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD[log_n - 1]), 1, nstack);
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_ORTHO_BACKWARD[log_n - 1]), 1, nstack);
     auto stream = at::cuda::getCurrentCUDAStream();
     switch (log_n) {
       #define CASE_LOG_N(log_n_val) case log_n_val:                                                                                     \
@@ -1086,8 +1097,8 @@ __device__ __forceinline__ void diag_forward(const CudaAcsr<scalar_t, 3> diagona
   }
 }
 
-template <int log_n, int items_per_thread=ITEMS_PER_THREAD_FORWARD[log_n - 1],
-            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_FORWARD[log_n - 1],
+template <int log_n, int items_per_thread=ITEMS_PER_THREAD_ORTHO_FORWARD[log_n - 1],
+            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_ORTHO_FORWARD[log_n - 1],
             int max_smem_per_thread=items_per_thread, typename scalar_t>
 // C10_LAUNCH_BOUNDS_2 supposedly takes min(1 << log_n, 1024)
 // https://github.com/pytorch/pytorch/blob/v1.1.0/c10/macros/Macros.h
@@ -1161,7 +1172,7 @@ void butterfly_odo_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle_c
     const InputReader<scalar_t> input_reader(input);
     OutputWriter<scalar_t> output_writer(output);
     dim3 block(min(n, MAX_BLOCK_SIZE));
-    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD[log_n - 1]), 1, nstack);
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_ORTHO_FORWARD[log_n - 1]), 1, nstack);
     auto stream = at::cuda::getCurrentCUDAStream();
     switch (log_n) {
       #define CASE_LOG_N(log_n_val) case log_n_val:                     \
@@ -1200,8 +1211,8 @@ __device__ __forceinline__ void diag_backward(const CudaAcsr<scalar_t, 3> diagon
   }
 }
 
-template <int log_n, int items_per_thread=ITEMS_PER_THREAD_BACKWARD[log_n - 1],
-            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_BACKWARD[log_n - 1],
+template <int log_n, int items_per_thread=ITEMS_PER_THREAD_ORTHO_BACKWARD[log_n - 1],
+            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_ORTHO_BACKWARD[log_n - 1],
             int max_smem_per_thread=items_per_thread, typename scalar_t>
 C10_LAUNCH_BOUNDS_2(MIN_MACRO(1 << log_n, MAX_BLOCK_SIZE), min_blocks_per_mp)
 __global__ void butterfly_odo_multiply_untied_backward_fast_cuda_kernel(const CudaAcsr<scalar_t, 3> twiddle_cos_a,
@@ -1289,7 +1300,7 @@ void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_
     auto d_diagonal_a = d_diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
     OutputWriter<scalar_t> d_input_writer(d_input);
     dim3 block(min(n, MAX_BLOCK_SIZE));
-    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD[log_n - 1]), 1, nstack);
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_ORTHO_BACKWARD[log_n - 1]), 1, nstack);
     auto stream = at::cuda::getCurrentCUDAStream();
     switch (log_n) {
       #define CASE_LOG_N(log_n_val) case log_n_val:                      \
@@ -1306,6 +1317,7 @@ void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_
      cudaGetLastError());
 }
 
+#if BFLY_BENCHMARK
 template <int log_n, bool increasing_stride, int items_per_thread, typename scalar_t>
 void butterfly_multiply_untied_forward_fast_cuda_benchmark_logn_ipt(int min_blocks_per_mp,
                                                                     dim3 block,
@@ -1488,3 +1500,127 @@ void butterfly_multiply_untied_forward_fast_cuda_benchmark(const at::Tensor &twi
       }
   });
 }
+
+void butterfly_odo_multiply_untied_forward_fast_cuda_benchmark(const at::Tensor &twiddle_cos,
+                                                               const at::Tensor &twiddle_sin,
+                                                               const at::Tensor &diagonal,
+                                                               const at::Tensor &input,
+                                                               at::Tensor &output) {
+  int batch_size = input.size(0);
+  const int nstack = input.size(1);
+  const int n = input.size(2);
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle_cos.size(1) / (2 * log_n);
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_odo_multiply_untied_forward_fast_cuda_benchmark", [&] {
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto diagonal_a = diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const InputReader<scalar_t> input_reader(input);
+    OutputWriter<scalar_t> output_writer(output);
+    dim3 block(min(n, MAX_BLOCK_SIZE));
+    auto stream = at::cuda::getCurrentCUDAStream();
+    switch (log_n) {
+      case 9:
+        #define CASE_IPT_9(items_per_thread_val) do {                                      \
+        dim3 grid(div_up(batch_size, items_per_thread_val), 1, nstack);                    \
+        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<9, items_per_thread_val, 1> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<9, items_per_thread_val, 2> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<9, items_per_thread_val, 3> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<9, items_per_thread_val, 4> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
+        } while (0);
+        // MAP(CASE_IPT_9, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 16);
+        MAP(CASE_IPT_9, 1, 2, 4, 6, 8, 12, 16);
+        break;
+      case 10:
+        #define CASE_IPT_10(items_per_thread_val) do {                                      \
+        dim3 grid(div_up(batch_size, items_per_thread_val), 1, nstack);                     \
+        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<10, items_per_thread_val, 1> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<10, items_per_thread_val, 2> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<10, items_per_thread_val, 3> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<10, items_per_thread_val, 4> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
+        } while (0);
+        // MAP(CASE_IPT_10, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 16);
+        MAP(CASE_IPT_10, 1, 2, 4, 6, 8, 12, 16);
+        break;
+    }
+  });
+  // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
+  #undef CASE_IPT_9
+  #undef CASE_IPT_10
+  AT_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_odo_multiply_untied_forward_fast_cuda_benchmark failed with error code ",
+     cudaGetLastError());
+}
+
+void butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(const at::Tensor &twiddle_cos,
+                                                                const at::Tensor &twiddle_sin,
+                                                                const at::Tensor &diagonal,
+                                                                const at::Tensor &output,
+                                                                const at::Tensor &grad,
+                                                                at::Tensor& d_twiddle,
+                                                                at::Tensor& d_diagonal,
+                                                                at::Tensor& d_input) {
+  int batch_size = output.size(0);
+  const int nstack = output.size(1);
+  const int n = output.size(2);
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle_cos.size(1) / (2 * log_n);
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_odo_multiply_untied_backward_fast_cuda_benchmark", [&] {
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto diagonal_a = diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const InputReader<scalar_t> output_reader(output);
+    const InputReader<scalar_t> grad_reader(grad);
+    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    auto d_diagonal_a = d_diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    OutputWriter<scalar_t> d_input_writer(d_input);
+    dim3 block(min(n, MAX_BLOCK_SIZE));
+    auto stream = at::cuda::getCurrentCUDAStream();
+    switch (log_n) {
+      case 9:
+        #define CASE_IPT_9(items_per_thread_val) do {                                       \
+        dim3 grid(div_up(batch_size, items_per_thread_val), 1, nstack);                     \
+        butterfly_odo_multiply_untied_backward_fast_cuda_kernel<9, items_per_thread_val, 1> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_backward_fast_cuda_kernel<9, items_per_thread_val, 2> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_backward_fast_cuda_kernel<9, items_per_thread_val, 3> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_backward_fast_cuda_kernel<9, items_per_thread_val, 4> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        } while(0);
+        MAP(CASE_IPT_9, 1, 2, 4, 6, 8, 12, 16, 24);
+        break;
+      case 10:
+        #define CASE_IPT_10(items_per_thread_val) do {                                       \
+        dim3 grid(div_up(batch_size, items_per_thread_val), 1, nstack);                      \
+        butterfly_odo_multiply_untied_backward_fast_cuda_kernel<10, items_per_thread_val, 1> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_backward_fast_cuda_kernel<10, items_per_thread_val, 2> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_backward_fast_cuda_kernel<10, items_per_thread_val, 3> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_backward_fast_cuda_kernel<10, items_per_thread_val, 4> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        } while(0);
+        MAP(CASE_IPT_10, 1, 2, 4, 6, 8, 12, 16, 24);
+        break;
+    }
+  });
+  // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
+  #undef CASE_IPT_9
+  #undef CASE_IPT_10
+  AT_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_odo_multiply_untied_backward_fast_cuda_benchmark failed with error code ",
+     cudaGetLastError());
+}
+
+#endif // BFLY_BENCHMARK
