@@ -10,7 +10,7 @@ os.environ['PYTHONPATH'] = project_root + ":" + os.environ.get('PYTHONPATH', '')
 from butterfly import Butterfly
 from butterfly.butterfly_multiply import butterfly_mult_untied
 # import baselines.toeplitz as toeplitz
-import structure.layer as sl
+# import structure.layer as sl
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
