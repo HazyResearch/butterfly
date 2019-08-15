@@ -13,7 +13,8 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
         extra_compile_args={'cxx': ['-g', '-march=native', '-funroll-loops'],
                             # 'nvcc': ['-arch=sm_60', '-O2', '-lineinfo']})
                             # 'nvcc': ['-arch=sm_60', '-O2', '--expt-extended-lambda', '--expt-relaxed-constexpr',  '-lineinfo']})
-                            'nvcc': ['-O2', '--expt-extended-lambda', '--expt-relaxed-constexpr',  '-lineinfo']})
+                            'nvcc': ['-O2', '--expt-extended-lambda', '--expt-relaxed-constexpr',  '-lineinfo']
+                                    + (['-arch=sm_70'] if torch.cuda.get_device_capability() == (7, 0) else [])})
     ext_modules.append(extension)
 # extension = CppExtension('factor_multiply', ['factor_multiply.cpp'], extra_compile_args=['-march=native'])
 # extension = CppExtension('factor_multiply', ['factor_multiply.cpp'])

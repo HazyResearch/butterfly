@@ -139,7 +139,7 @@ def main():
         print("=> creating model '{}'".format(args.arch))
         if args.arch == 'mobilenetv1':
             model = MobileNet()
-        elif args.arch == 'mobilenetv1_butterfly'
+        elif args.arch == 'mobilenetv1_butterfly':
             model = MobileNet(structure=[args.struct] * 7)
         else:
             model = models.__dict__[args.arch]()
