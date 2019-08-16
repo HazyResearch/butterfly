@@ -42,6 +42,8 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',
 parser.add_argument('--struct', metavar='STRUCT', default='odo_4',
                     type=str,
                     help='structure for 1x1 conv: ' + ' (default: odo_4)')
+parser.add_argument('--width', default=1.0, type=float,
+                    metavar='WIDTH', help='Width multiplier of the CNN (default 1.0)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
@@ -138,9 +140,9 @@ def main():
     else:
         print("=> creating model '{}'".format(args.arch))
         if args.arch == 'mobilenetv1':
-            model = MobileNet()
+            model = MobileNet(width_mult=args.width)
         elif args.arch == 'mobilenetv1_struct':
-            model = MobileNet(structure=[args.struct] * 7)
+            model = MobileNet(width_mult=args.width, structure=[args.struct] * 7)
         else:
             model = models.__dict__[args.arch]()
     print(model)
