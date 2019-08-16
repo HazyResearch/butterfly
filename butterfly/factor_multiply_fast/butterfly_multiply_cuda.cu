@@ -726,7 +726,6 @@ void butterfly_bbs_multiply_untied_forward_backward_fast_cuda(const at::Tensor &
   const int n = input.size(2);
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle.size(1) / (2 * log_n);
-  // TODO How much storage do we need when log_n > 5?
   auto intermediate_storage = at::empty({log_n <= 5 ? (nblocks - 1) * 2 : (nblocks - 1) * 4 + 2, batch_size, nstack, n},
                                         at::dtype(input.dtype()).device(input.device()));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_bbs_multiply_untied_forward_backward_fast_cuda", [&] {
@@ -1321,6 +1320,162 @@ void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_
   #undef CASE_LOG_N
   AT_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_odo_multiply_untied_backward_fast_cuda failed with error code ",
+     cudaGetLastError());
+}
+
+template <int items_per_thread, int mult_per_warp=1, typename scalar_t,
+            typename accscalar_t=at::acc_type<scalar_t, true>>
+__device__ __forceinline__ void diag_backward_with_input(const CudaAcsr<scalar_t, 3> diagonal_a,
+                                                         CudaAcsr<scalar_t, 3> d_diagonal_a,
+                                                         scalar_t input_val[mult_per_warp][items_per_thread],
+                                                         scalar_t grad_val[mult_per_warp][items_per_thread],
+                                                         int diagonal_idx,
+                                                         int input_idx) {
+  const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly_ortho as well
+  #pragma unroll
+  for (int mult = 0; mult < mult_per_warp; mult++) {
+    const scalar_t diag_val = diagonal_a[s][diagonal_idx][mult * warpSize + input_idx];
+    accscalar_t d_diag_val = 0;
+    #pragma unroll
+    for (int item = 0; item < items_per_thread; item++) {
+      d_diag_val += input_val[mult][item] * grad_val[mult][item];
+      grad_val[mult][item] *= diag_val;
+    }
+    atomicAdd(&d_diagonal_a[s][diagonal_idx][mult * warpSize + input_idx], d_diag_val);
+  }
+}
+
+template <int log_n, int items_per_thread=ITEMS_PER_THREAD_ORTHO_BACKWARD[log_n - 1],
+            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_ORTHO_BACKWARD[log_n - 1],
+            int max_smem_per_thread=items_per_thread, typename scalar_t>
+C10_LAUNCH_BOUNDS_2(MIN_MACRO(1 << log_n, MAX_BLOCK_SIZE), min_blocks_per_mp)
+__global__ void butterfly_odo_multiply_untied_forward_backward_fast_cuda_kernel(const CudaAcsr<scalar_t, 3> twiddle_cos_a,
+                                                                                const CudaAcsr<scalar_t, 3> twiddle_sin_a,
+                                                                                const CudaAcsr<scalar_t, 3> diagonal_a,
+                                                                                InputReader<scalar_t> input_reader,
+                                                                                InputReader<scalar_t> grad_reader,
+                                                                                IntermediateStorage<scalar_t> inter_storage,
+                                                                                CudaAcsr<scalar_t, 3> d_twiddle_a,
+                                                                                CudaAcsr<scalar_t, 3> d_diagonal_a,
+                                                                                OutputWriter<scalar_t> d_input_writer,
+                                                                                int batch_size,
+                                                                                int nblocks) {
+  constexpr int n = 1 << log_n;
+  constexpr int nthreads = min_const(n, MAX_BLOCK_SIZE);
+  constexpr int smem_limit = min_const(SMEM_PER_MP / min_blocks_per_mp, MAX_SMEM_PER_BLOCK);
+  constexpr int smem_per_thread = min_const(max_smem_per_thread, items_per_thread,
+                                            smem_limit / (nthreads * sizeof(scalar_t)));
+  constexpr int mult_per_warp = n / nthreads;
+  scalar_t input_val[mult_per_warp][items_per_thread];
+  scalar_t grad_val[mult_per_warp][items_per_thread];
+  // const int input_idx_1 = (threadIdx.x % warpSize) + mult_per_warp * warpSize * (threadIdx.x / warpSize);
+  const int input_idx_1 = (threadIdx.x & ((1 << 5) - 1)) + mult_per_warp * warpSize * (threadIdx.x >> 5);
+  input_reader.load<items_per_thread, mult_per_warp>(input_val, input_idx_1);
+  if (log_n <= 5) {
+    for (int block = 0; block < nblocks; block++) {
+      b_ortho_untied_forward<min_const(log_n, 5), false, items_per_thread>
+        (twiddle_cos_a, twiddle_sin_a, input_val, block * 2 * log_n, input_idx_1, 0);
+      inter_storage.save<items_per_thread>(input_val, input_idx_1, block);
+      diag_forward<items_per_thread>(diagonal_a, input_val, block, input_idx_1);
+      b_ortho_untied_forward<min_const(log_n, 5), true, items_per_thread>
+        (twiddle_cos_a, twiddle_sin_a, input_val, (block * 2 + 1) * log_n, input_idx_1, 0);
+    }
+    grad_reader.load<items_per_thread, mult_per_warp>(grad_val, input_idx_1);
+    for (int block = nblocks - 1; block >= 0; block--) {
+      b_ortho_untied_backward<min_const(log_n, 5), true, items_per_thread, mult_per_warp>
+        (twiddle_cos_a, twiddle_sin_a, d_twiddle_a, input_val, grad_val, (block * 2 + 1) * log_n, input_idx_1, 0);
+      inter_storage.load<items_per_thread>(input_val, input_idx_1, block);
+      diag_backward_with_input<items_per_thread>(diagonal_a, d_diagonal_a, input_val, grad_val, block, input_idx_1);
+      b_ortho_untied_backward<min_const(log_n, 5), false, items_per_thread, mult_per_warp>
+        (twiddle_cos_a, twiddle_sin_a, d_twiddle_a, input_val, grad_val, block * 2 * log_n, input_idx_1, 0);
+    }
+  } else {
+    __shared__ scalar_t temp_storage[nthreads * smem_per_thread];
+    // constexpr int nsteps_1 = div_up_const(log_n, 2);
+    constexpr int nsteps_1 = log_n <= 10 ? 5 : log_n - 5;
+    constexpr int nsteps_2 = max_const(log_n - nsteps_1, 1);  // Take max to avoid compiler's warning
+    constexpr int log_nwarps = min_const(max_const(log_n - 5, 1), 5);  // Take max to avoid compiler's warning
+    const int input_idx_2 = ((threadIdx.x & ((1 << log_nwarps) - 1)) << nsteps_1) + (threadIdx.x >> log_nwarps);
+    const int thread_idx_2 = (threadIdx.x & ((1 << log_nwarps) - 1)) * warpSize + (threadIdx.x >> log_nwarps);
+    block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, threadIdx.x, thread_idx_2, nthreads);
+    for (int block = 0; block < nblocks; block++) {
+      b_ortho_untied_forward<nsteps_2, false, items_per_thread, mult_per_warp>
+        (twiddle_cos_a, twiddle_sin_a, input_val, block * 2 * log_n, input_idx_2, nsteps_1);
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, thread_idx_2, threadIdx.x, nthreads);
+      b_ortho_untied_forward<nsteps_1, false, items_per_thread, mult_per_warp>
+        (twiddle_cos_a, twiddle_sin_a, input_val, block * 2 * log_n + nsteps_2, input_idx_1, 0);
+      inter_storage.save<items_per_thread, mult_per_warp>(input_val, input_idx_1, block);
+      diag_forward<items_per_thread, mult_per_warp>(diagonal_a, input_val, block, input_idx_1);
+      b_ortho_untied_forward<nsteps_1, true, items_per_thread, mult_per_warp>
+        (twiddle_cos_a, twiddle_sin_a, input_val, (block * 2 + 1) * log_n, input_idx_1, 0);
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, threadIdx.x, thread_idx_2, nthreads);
+      b_ortho_untied_forward<nsteps_2, true, items_per_thread, mult_per_warp>
+        (twiddle_cos_a, twiddle_sin_a, input_val, (block * 2 + 1) * log_n + nsteps_1, input_idx_2, nsteps_1);
+    }
+    grad_reader.load<items_per_thread, mult_per_warp>(grad_val, input_idx_2);
+    for (int block = nblocks - 1; block >= 0; block--) {
+      b_ortho_untied_backward<nsteps_2, true, items_per_thread, mult_per_warp>
+        (twiddle_cos_a, twiddle_sin_a, d_twiddle_a, input_val, grad_val, (block * 2 + 1) * log_n + nsteps_1, input_idx_2, nsteps_1);
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, grad_val, thread_idx_2, threadIdx.x, nthreads);
+      __syncthreads();
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, thread_idx_2, threadIdx.x, nthreads);
+      b_ortho_untied_backward<nsteps_1, true, items_per_thread, mult_per_warp>
+        (twiddle_cos_a, twiddle_sin_a, d_twiddle_a, input_val, grad_val, (block * 2 + 1) * log_n, input_idx_1, 0);
+      inter_storage.load<items_per_thread, mult_per_warp>(input_val, input_idx_1, block);
+      diag_backward_with_input<items_per_thread, mult_per_warp>(diagonal_a, d_diagonal_a, input_val, grad_val, block, input_idx_1);
+      b_ortho_untied_backward<nsteps_1, false, items_per_thread, mult_per_warp>
+        (twiddle_cos_a, twiddle_sin_a, d_twiddle_a, input_val, grad_val, block * 2 * log_n + nsteps_2, input_idx_1, 0);
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, grad_val, threadIdx.x, thread_idx_2, nthreads);
+      __syncthreads();
+      block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, input_val, threadIdx.x, thread_idx_2, nthreads);
+      b_ortho_untied_backward<nsteps_2, false, items_per_thread, mult_per_warp>
+        (twiddle_cos_a, twiddle_sin_a, d_twiddle_a, input_val, grad_val, block * 2 * log_n, input_idx_2, nsteps_1);
+    }
+    block_exchange<items_per_thread, mult_per_warp, smem_per_thread>(temp_storage, grad_val, thread_idx_2, threadIdx.x, nthreads);
+  }
+  d_input_writer.save<items_per_thread, mult_per_warp>(grad_val, input_idx_1);
+}
+
+void butterfly_odo_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle_cos,
+                                                              const at::Tensor &twiddle_sin,
+                                                              const at::Tensor &diagonal,
+                                                              const at::Tensor &input,
+                                                              const at::Tensor &grad,
+                                                              at::Tensor& d_twiddle,
+                                                              at::Tensor& d_diagonal,
+                                                              at::Tensor& d_input) {
+  int batch_size = input.size(0);
+  const int nstack = input.size(1);
+  const int n = input.size(2);
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle_cos.size(1) / (2 * log_n);
+  auto intermediate_storage = at::empty({nblocks, batch_size, nstack, n},
+                                        at::dtype(input.dtype()).device(input.device()));
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_odo_multiply_untied_forward_backward_fast_cuda", [&] {
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto diagonal_a = diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const InputReader<scalar_t> input_reader(input);
+    const InputReader<scalar_t> grad_reader(grad);
+    IntermediateStorage<scalar_t> inter_storage(intermediate_storage);
+    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    auto d_diagonal_a = d_diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    OutputWriter<scalar_t> d_input_writer(d_input);
+    dim3 block(min(n, MAX_BLOCK_SIZE));
+    dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_ORTHO_BACKWARD[log_n - 1]), 1, nstack);
+    auto stream = at::cuda::getCurrentCUDAStream();
+    switch (log_n) {
+      #define CASE_LOG_N(log_n_val) case log_n_val:                      \
+      butterfly_odo_multiply_untied_forward_backward_fast_cuda_kernel<log_n_val> \
+        <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, grad_reader, inter_storage, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); break;
+      // MAP(CASE_LOG_N, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+      MAP(CASE_LOG_N, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+    }
+  });
+  // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
+  #undef CASE_LOG_N
+  AT_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_odo_multiply_untied_forward_backward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
 

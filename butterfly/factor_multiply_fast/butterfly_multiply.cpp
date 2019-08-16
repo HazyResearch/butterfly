@@ -63,6 +63,14 @@ void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_
                                                       at::Tensor &d_twiddle,
                                                       at::Tensor &d_diagonal,
                                                       at::Tensor &d_input);
+void butterfly_odo_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle_cos,
+                                                              const at::Tensor &twiddle_sin,
+                                                              const at::Tensor &diagonal,
+                                                              const at::Tensor &input,
+                                                              const at::Tensor &grad,
+                                                              at::Tensor &d_twiddle,
+                                                              at::Tensor &d_diagonal,
+                                                              at::Tensor &d_input);
 #if BFLY_BENCHMARK
 void butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(const at::Tensor &twiddle_cos,
                                                                 const at::Tensor &twiddle_sin,
@@ -430,6 +438,66 @@ std::vector<at::Tensor> butterfly_odo_multiply_untied_backward_fast(const at::Te
   return {d_twiddle, d_diagonal, d_input} ;
 }
 
+std::vector<at::Tensor> butterfly_odo_multiply_untied_forward_backward_fast(const at::Tensor &twiddle_cos,
+                                                                            const at::Tensor &twiddle_sin,
+                                                                            const at::Tensor &diagonal,
+                                                                            const at::Tensor &input,
+                                                                            const at::Tensor &grad) {
+  /* Parameters:
+         twiddle_cos: (nstack, nblocks * 2 * log n, n/2)
+         twiddle_sin: (nstack, nblocks * 2 * log n, n/2)
+         diagonal: (nstack, nblocks, n)
+         input: (batch_size, nstack, n)
+     Returns:
+         input: (batch_size, nstack, n)
+  */
+  const auto batch_size = input.size(0);
+  const auto nstack = input.size(1);
+  const auto n = input.size(2);
+  const int log_n = int(log2((double)n));
+  AT_CHECK(1 << log_n == n, "butterfly_odo_multiply_untied_forward_backward_fast: n must be a power of 2");
+  AT_CHECK(n <= 16384,
+           "butterfly_odo_multiply_untied_forward_backward_fast: only supports n <= 4096");
+  const int nblocks = twiddle_cos.size(1) / (2 * log_n);
+  AT_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && diagonal.dim() == 3 && input.dim() == 3 && grad.dim() == 3),
+           "butterfly_odo_multiply_untied_forward_backward_fast: twiddle_cos, twiddle_sin, diagonal, input, "
+           "and grad must have dimension 3,3,3,3");
+  CHECK_DEVICE(twiddle_cos);
+  CHECK_DEVICE(twiddle_sin);
+  CHECK_DEVICE(diagonal);
+  CHECK_DEVICE(input);
+  CHECK_DEVICE(grad);
+  AT_CHECK(
+      twiddle_cos.device() == input.device() && twiddle_cos.device() == grad.device()
+      && twiddle_cos.device() == twiddle_sin.device() && twiddle_cos.device() == diagonal.device(),
+      "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (",
+      input.device(), ") and grad (", grad.device(), ")");
+  AT_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
+           "butterfly_odo_multiply_untied_forward_backward_fast: twiddle_cos must have shape (nstack, "
+           "log n, n / 2)");
+  AT_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
+           "butterfly_odo_multiply_untied_forward_backward_fast: twiddle_sin must have shape (nstack, "
+           "log n, n / 2)");
+  AT_CHECK(diagonal.sizes() == torch::IntArrayRef({nstack, nblocks, n}),
+           "butterfly_odo_multiply_untied_forward_backward_fast: diagonal must have shape (nstack, "
+           "log n, n / 2)");
+  AT_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
+           "butterfly_odo_multiply_untied_forward_backward: grad must have shape "
+           "(batch_size, nstack, n)");
+  auto d_input = torch::empty_like(input);
+  auto d_twiddle = torch::zeros_like(twiddle_cos);
+  auto d_diagonal = torch::zeros_like(diagonal);
+  AT_CHECK(input.is_cuda(), "butterfly_odo_multiply_untied_forward_backward_fast: only supports CUDA");
+  // #if !BFLY_BENCHMARK
+  butterfly_odo_multiply_untied_forward_backward_fast_cuda(twiddle_cos, twiddle_sin, diagonal, input, grad,
+                                                           d_twiddle, d_diagonal, d_input);
+  // #else
+  // butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark(twiddle_cos, twiddle_sin, diagonal, input, grad,
+  //                                                            d_twiddle, d_diagonal, d_input);
+  // #endif
+  return {d_twiddle, d_diagonal, d_input} ;
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_multiply_untied_forward_fast",
         &butterfly_multiply_untied_forward_fast,
@@ -455,4 +523,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("butterfly_odo_multiply_untied_backward_fast",
         &butterfly_odo_multiply_untied_backward_fast,
         "Butterfly_Odo multiply untied backward fast");
+  m.def("butterfly_odo_multiply_untied_forward_backward_fast",
+        &butterfly_odo_multiply_untied_forward_backward_fast,
+        "Butterfly_Odo multiply untied forward_backward fast");
 }

@@ -30,6 +30,7 @@ from factor_multiply_fast import butterfly_ortho_multiply_untied_forward_fast
 from factor_multiply_fast import butterfly_ortho_multiply_untied_backward_fast
 from factor_multiply_fast import butterfly_odo_multiply_untied_forward_fast
 from factor_multiply_fast import butterfly_odo_multiply_untied_backward_fast
+from factor_multiply_fast import butterfly_odo_multiply_untied_forward_backward_fast
 
 
 class ButterflyMultTest(unittest.TestCase):
@@ -591,8 +592,10 @@ class ButterflyMultTest(unittest.TestCase):
                 self.assertTrue(torch.allclose(output, output_old, rtol=self.rtol, atol=self.atol),
                                 ((output - output_old).abs().max().item(), device))
                 grad = torch.randn_like(output)
-                d_twiddle, d_diagonal, d_input = butterfly_odo_multiply_untied_backward_fast(twiddle_fast_cos, twiddle_fast_sin,
-                                                                                 diagonal, output, grad)
+                # d_twiddle, d_diagonal, d_input = butterfly_odo_multiply_untied_backward_fast(twiddle_fast_cos, twiddle_fast_sin,
+                #                                                                  diagonal, output, grad)
+                d_twiddle, d_diagonal, d_input = butterfly_odo_multiply_untied_forward_backward_fast(twiddle_fast_cos, twiddle_fast_sin,
+                                                                                 diagonal, input, grad)
                 # d_twiddle, d_input = torch.autograd.grad(output, (twiddle_fast, input), grad, retain_graph=True)
                 d_twiddle_old, d_diagonal_old, d_input_old = torch.autograd.grad(output_old, (twiddle, diagonal, input), grad, retain_graph=True)
                 self.assertTrue(torch.allclose(d_input, d_input_old, rtol=self.rtol, atol=self.atol),
