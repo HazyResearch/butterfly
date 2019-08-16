@@ -55,8 +55,10 @@ class Block(nn.Module):
     def __init__(self, in_planes, out_planes, stride=1, structure='D'):
         super(Block, self).__init__()
         self.conv1 = nn.Conv2d(in_planes, in_planes, kernel_size=3, stride=stride, padding=1, groups=in_planes, bias=False)
-        self.conv1.weight._dw_conv = True
+        self.conv1.weight._no_wd = True
         self.bn1 = nn.BatchNorm2d(in_planes)
+        self.bn1.weight._no_wd = True
+        self.bn1.bias._no_wd = True
         if structure == 'D':
             self.conv2 = nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0, bias=False)
         else:
@@ -64,6 +66,8 @@ class Block(nn.Module):
             nblocks = 0 if len(structure.split('_')) <= 1 else int(structure.split('_')[1])
             self.conv2 = Butterfly1x1Conv(in_planes, out_planes, bias=False, tied_weight=False, param=param, nblocks=nblocks)
         self.bn2 = nn.BatchNorm2d(out_planes)
+        self.bn2.weight._no_wd = True
+        self.bn2.bias._no_wd = True
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)), inplace=True)
@@ -88,6 +92,8 @@ class MobileNet(nn.Module):
         input_channel = _make_divisible(32 * width_mult, round_nearest)
         self.conv1 = nn.Conv2d(3, input_channel, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(input_channel)
+        self.bn1.weight._no_wd = True
+        self.bn1.bias._no_wd = True
         self.layers = self._make_layers(in_planes=input_channel)
         self.last_channel = _make_divisible(1024 * width_mult, round_nearest)
         self.linear = nn.Linear(self.last_channel, num_classes)

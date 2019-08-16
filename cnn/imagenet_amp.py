@@ -156,11 +156,11 @@ def main():
     args.lr = args.lr*float(args.batch_size*args.world_size)/256.
     params = list(filter(lambda p: p.requires_grad, model.parameters()))
     structured_params = list(filter(lambda p: getattr(p, '_is_structured', False), params))
-    dw_conv_params = list(filter(lambda p: getattr(p, '_dw_conv', False), params))
+    no_wd_params = list(filter(lambda p: getattr(p, '_no_wd', False), params))
     unstructured_params = list(filter(lambda p: not (getattr(p, '_is_structured', False))
-                                           and not getattr(p, '_dw_conv', False), params))
+                                           and not getattr(p, '_no_wd', False), params))
     params_dict = [{'params': structured_params, 'weight_decay': 0.0, 'lr_multiplier': args.lr_multiplier},
-                   {'params': dw_conv_params, 'weight_decay': 0.0},
+                   {'params': no_wd_params, 'weight_decay': 0.0},
                    {'params': unstructured_params}]
     optimizer = torch.optim.SGD(params_dict, args.lr,
                                 momentum=args.momentum,
