@@ -42,6 +42,8 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',
 parser.add_argument('--struct', metavar='STRUCT', default='odo_4',
                     type=str,
                     help='structure for 1x1 conv: ' + ' (default: odo_4)')
+parser.add_argument('--n-struct-layers', default=7, type=int,
+                    metavar='NSL', help='Number of structured layer (default 7)')
 parser.add_argument('--width', default=1.0, type=float,
                     metavar='WIDTH', help='Width multiplier of the CNN (default 1.0)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
@@ -142,7 +144,7 @@ def main():
         if args.arch == 'mobilenetv1':
             model = MobileNet(width_mult=args.width)
         elif args.arch == 'mobilenetv1_struct':
-            model = MobileNet(width_mult=args.width, structure=[args.struct] * 7)
+            model = MobileNet(width_mult=args.width, structure=[args.struct] * args.n_struct_layers)
         else:
             model = models.__dict__[args.arch]()
     print(model)
@@ -570,3 +572,17 @@ def reduce_tensor(tensor):
 
 if __name__ == '__main__':
     main()
+
+b = 256
+criterion = nn.CrossEntropyLoss().cuda()
+torch.cuda.empty_cache()
+# model = MobileNet(structure=['odo_4'] * 7).to('cuda')
+model = MobileNet(width_mult=2.0).to('cuda')
+opt = torch.optim.SGD(model.parameters(), 0.1)
+x = torch.randn(b, 3, 224, 224, device='cuda')
+target = torch.ones(b, dtype=torch.long, device='cuda')
+opt.zero_grad()
+# out = model(x)
+# criterion(out, target).backward()
+criterion(model(x), target).backward()
+opt.step()
