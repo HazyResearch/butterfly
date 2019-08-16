@@ -368,21 +368,21 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # for param in model.parameters():
         #     print(param.data.double().sum().item(), param.grad.data.double().sum().item())
 
-        # Compute grad norm
-        total_grad_norm = 0.0
-        diag_grad_norm = 0.0
-        diag_abs_min = float('inf')
-        with torch.no_grad():
-            for n, p in model.named_parameters():
-                param_norm = p.grad.norm(2)
-                total_grad_norm += param_norm.item() ** 2
-                if 'diag' in n:
-                    diag_grad_norm += param_norm.item() ** 2
-                    diag_abs_min = min(diag_abs_min, p.abs().min().item())
-        diag_grad_norm = diag_grad_norm ** (1 / 2)
-        total_grad_norm = total_grad_norm ** (1 / 2)
-        if args.local_rank == 0:
-            print(f'Total grad norm {total_grad_norm} \t Diag grad norm {diag_grad_norm} \t Diag abs min {diag_abs_min}')
+        # # Compute grad norm
+        # total_grad_norm = 0.0
+        # diag_grad_norm = 0.0
+        # diag_abs_min = float('inf')
+        # with torch.no_grad():
+        #     for n, p in model.named_parameters():
+        #         param_norm = p.grad.norm(2)
+        #         total_grad_norm += param_norm.item() ** 2
+        #         if 'diag' in n:
+        #             diag_grad_norm += param_norm.item() ** 2
+        #             diag_abs_min = min(diag_abs_min, p.abs().min().item())
+        # diag_grad_norm = diag_grad_norm ** (1 / 2)
+        # total_grad_norm = total_grad_norm ** (1 / 2)
+        # if args.local_rank == 0:
+        #     print(f'Total grad norm {total_grad_norm} \t Diag grad norm {diag_grad_norm} \t Diag abs min {diag_abs_min}')
 
         if args.prof >= 0: torch.cuda.nvtx.range_push("optimizer.step()")
         optimizer.step()
