@@ -87,7 +87,7 @@ class MobileNet(nn.Module):
     # (128,2) means conv planes=128, conv stride=2, by default conv stride=1
     cfg = [64, (128,2), 128, (256,2), 256, (512,2), 512, 512, 512, 512, 512, (1024,2), 1024]
 
-    def __init__(self, num_classes=1000, width_mult=1.0, round_nearest=8, structure=None):
+    def __init__(self, num_classes=1000, width_mult=1.0, round_nearest=8, structure=None, softmax_structure='D'):
         """
         structure: list of string
         """
@@ -104,7 +104,12 @@ class MobileNet(nn.Module):
         self.bn1.bias._no_wd = True
         self.layers = self._make_layers(in_planes=input_channel)
         self.last_channel = _make_divisible(1024 * width_mult, round_nearest)
-        self.linear = nn.Linear(self.last_channel, num_classes)
+        if softmax_structure == 'D':
+            self.linear = nn.Linear(self.last_channel, num_classes)
+        else:
+            param = softmax_structure.split('_')[0]
+            nblocks = 0 if len(softmax_structure.split('_')) <= 1 else int(softmax_structure.split('_')[1])
+            self.linear = Butterfly(self.last_channel, num_classes, tied_weight=False, param=param, nblocks=nblocks)
 
     def _make_layers(self, in_planes):
         layers = []

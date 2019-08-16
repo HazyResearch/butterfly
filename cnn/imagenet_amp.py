@@ -42,6 +42,9 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',
 parser.add_argument('--struct', metavar='STRUCT', default='odo_4',
                     type=str,
                     help='structure for 1x1 conv: ' + ' (default: odo_4)')
+parser.add_argument('--softmax-struct', metavar='SMSTRUCT', default='D',
+                    type=str,
+                    help='structure for softmax layer: ' + ' (default: D)')
 parser.add_argument('--n-struct-layers', default=7, type=int,
                     metavar='NSL', help='Number of structured layer (default 7)')
 parser.add_argument('--width', default=1.0, type=float,
@@ -144,7 +147,8 @@ def main():
         if args.arch == 'mobilenetv1':
             model = MobileNet(width_mult=args.width)
         elif args.arch == 'mobilenetv1_struct':
-            model = MobileNet(width_mult=args.width, structure=[args.struct] * args.n_struct_layers)
+            model = MobileNet(width_mult=args.width, structure=[args.struct] * args.n_struct_layers,
+                              softmax_structure=args.softmax_struct)
         else:
             model = models.__dict__[args.arch]()
     print(model)
