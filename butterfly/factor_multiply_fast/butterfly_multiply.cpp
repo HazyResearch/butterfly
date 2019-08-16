@@ -63,14 +63,6 @@ void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_
                                                       at::Tensor &d_twiddle,
                                                       at::Tensor &d_diagonal,
                                                       at::Tensor &d_input);
-void butterfly_odo_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle_cos,
-                                                              const at::Tensor &twiddle_sin,
-                                                              const at::Tensor &diagonal,
-                                                              const at::Tensor &input,
-                                                              const at::Tensor &grad,
-                                                              at::Tensor &d_twiddle,
-                                                              at::Tensor &d_diagonal,
-                                                              at::Tensor &d_input);
 #if BFLY_BENCHMARK
 void butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(const at::Tensor &twiddle_cos,
                                                                 const at::Tensor &twiddle_sin,
@@ -80,6 +72,24 @@ void butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(const at::Tensor
                                                                 at::Tensor &d_twiddle,
                                                                 at::Tensor &d_diagonal,
                                                                 at::Tensor &d_input);
+#endif
+void butterfly_odo_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle_cos,
+                                                              const at::Tensor &twiddle_sin,
+                                                              const at::Tensor &diagonal,
+                                                              const at::Tensor &input,
+                                                              const at::Tensor &grad,
+                                                              at::Tensor &d_twiddle,
+                                                              at::Tensor &d_diagonal,
+                                                              at::Tensor &d_input);
+#if BFLY_BENCHMARK
+void butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark(const at::Tensor &twiddle_cos,
+                                                                        const at::Tensor &twiddle_sin,
+                                                                        const at::Tensor &diagonal,
+                                                                        const at::Tensor &input,
+                                                                        const at::Tensor &grad,
+                                                                        at::Tensor &d_twiddle,
+                                                                        at::Tensor &d_diagonal,
+                                                                        at::Tensor &d_input);
 #endif
 
 at::Tensor butterfly_multiply_untied_forward_fast(const at::Tensor &twiddle,
@@ -488,13 +498,13 @@ std::vector<at::Tensor> butterfly_odo_multiply_untied_forward_backward_fast(cons
   auto d_twiddle = torch::zeros_like(twiddle_cos);
   auto d_diagonal = torch::zeros_like(diagonal);
   AT_CHECK(input.is_cuda(), "butterfly_odo_multiply_untied_forward_backward_fast: only supports CUDA");
-  // #if !BFLY_BENCHMARK
+  #if !BFLY_BENCHMARK
   butterfly_odo_multiply_untied_forward_backward_fast_cuda(twiddle_cos, twiddle_sin, diagonal, input, grad,
                                                            d_twiddle, d_diagonal, d_input);
-  // #else
-  // butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark(twiddle_cos, twiddle_sin, diagonal, input, grad,
-  //                                                            d_twiddle, d_diagonal, d_input);
-  // #endif
+  #else
+  butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark(twiddle_cos, twiddle_sin, diagonal, input, grad,
+                                                                     d_twiddle, d_diagonal, d_input);
+  #endif
   return {d_twiddle, d_diagonal, d_input} ;
 }
 

@@ -1689,13 +1689,10 @@ void butterfly_odo_multiply_untied_forward_fast_cuda_benchmark(const at::Tensor 
           <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
         butterfly_odo_multiply_untied_forward_fast_cuda_kernel<9, items_per_thread_val, 2> \
           <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
-        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<9, items_per_thread_val, 3> \
-          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
-        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<9, items_per_thread_val, 4> \
-          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
         } while (0);
         // MAP(CASE_IPT_9, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 16);
-        MAP(CASE_IPT_9, 1, 2, 4, 6, 8, 12, 16);
+        // MAP(CASE_IPT_9, 1, 2, 4, 6, 8, 12, 16);
+        MAP(CASE_IPT_9, 6, 8, 12, 16);
         break;
       case 10:
         #define CASE_IPT_10(items_per_thread_val) do {                                      \
@@ -1704,19 +1701,28 @@ void butterfly_odo_multiply_untied_forward_fast_cuda_benchmark(const at::Tensor 
           <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
         butterfly_odo_multiply_untied_forward_fast_cuda_kernel<10, items_per_thread_val, 2> \
           <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
-        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<10, items_per_thread_val, 3> \
-          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
-        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<10, items_per_thread_val, 4> \
-          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
         } while (0);
         // MAP(CASE_IPT_10, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 16);
-        MAP(CASE_IPT_10, 1, 2, 4, 6, 8, 12, 16);
+        // MAP(CASE_IPT_10, 1, 2, 4, 6, 8, 12, 16);
+        MAP(CASE_IPT_10, 6, 8, 12, 16);
+        break;
+      case 11:
+        #define CASE_IPT_11(items_per_thread_val) do {                                      \
+        dim3 grid(div_up(batch_size, items_per_thread_val), 1, nstack);                     \
+        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<11, items_per_thread_val, 1> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_forward_fast_cuda_kernel<11, items_per_thread_val, 2> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, output_writer, batch_size, nblocks); \
+        } while (0);
+        // MAP(CASE_IPT_11, 1, 2, 4, 6, 8, 12, 16);
+        MAP(CASE_IPT_11, 6, 8, 12, 16);
         break;
     }
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_IPT_9
   #undef CASE_IPT_10
+  #undef CASE_IPT_11
   AT_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_odo_multiply_untied_forward_fast_cuda_benchmark failed with error code ",
      cudaGetLastError());
@@ -1759,7 +1765,7 @@ void butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(const at::Tensor
         butterfly_odo_multiply_untied_backward_fast_cuda_kernel<9, items_per_thread_val, 4> \
           <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
         } while(0);
-        MAP(CASE_IPT_9, 1, 2, 4, 6, 8, 12, 16, 24);
+        // MAP(CASE_IPT_9, 1, 2, 4, 6, 8, 12, 16, 24);
         break;
       case 10:
         #define CASE_IPT_10(items_per_thread_val) do {                                       \
@@ -1773,7 +1779,7 @@ void butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(const at::Tensor
         butterfly_odo_multiply_untied_backward_fast_cuda_kernel<10, items_per_thread_val, 4> \
           <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, output_reader, grad_reader, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
         } while(0);
-        MAP(CASE_IPT_10, 1, 2, 4, 6, 8, 12, 16, 24);
+        // MAP(CASE_IPT_10, 1, 2, 4, 6, 8, 12, 16, 24);
         break;
     }
   });
@@ -1782,6 +1788,78 @@ void butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(const at::Tensor
   #undef CASE_IPT_10
   AT_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_odo_multiply_untied_backward_fast_cuda_benchmark failed with error code ",
+     cudaGetLastError());
+}
+
+void butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark(const at::Tensor &twiddle_cos,
+                                                                        const at::Tensor &twiddle_sin,
+                                                                        const at::Tensor &diagonal,
+                                                                        const at::Tensor &input,
+                                                                        const at::Tensor &grad,
+                                                                        at::Tensor& d_twiddle,
+                                                                        at::Tensor& d_diagonal,
+                                                                        at::Tensor& d_input) {
+  int batch_size = input.size(0);
+  const int nstack = input.size(1);
+  const int n = input.size(2);
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle_cos.size(1) / (2 * log_n);
+  auto intermediate_storage = at::empty({nblocks, batch_size, nstack, n},
+                                        at::dtype(input.dtype()).device(input.device()));
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark", [&] {
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto diagonal_a = diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const InputReader<scalar_t> input_reader(input);
+    const InputReader<scalar_t> grad_reader(grad);
+    IntermediateStorage<scalar_t> inter_storage(intermediate_storage);
+    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    auto d_diagonal_a = d_diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    OutputWriter<scalar_t> d_input_writer(d_input);
+    dim3 block(min(n, MAX_BLOCK_SIZE));
+    auto stream = at::cuda::getCurrentCUDAStream();
+    switch (log_n) {
+      case 9:
+        #define CASE_IPT_9(items_per_thread_val) do {                                               \
+        dim3 grid(div_up(batch_size, items_per_thread_val), 1, nstack);                             \
+        butterfly_odo_multiply_untied_forward_backward_fast_cuda_kernel<9, items_per_thread_val, 1> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, grad_reader, inter_storage, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_forward_backward_fast_cuda_kernel<9, items_per_thread_val, 2> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, grad_reader, inter_storage, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        } while(0);
+        // MAP(CASE_IPT_9, 1, 2, 4, 6, 8, 12, 16, 24);
+        MAP(CASE_IPT_9, 6, 8, 12, 16);
+        break;
+      case 10:
+        #define CASE_IPT_10(items_per_thread_val) do {                                               \
+        dim3 grid(div_up(batch_size, items_per_thread_val), 1, nstack);                              \
+        butterfly_odo_multiply_untied_forward_backward_fast_cuda_kernel<10, items_per_thread_val, 1> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, grad_reader, inter_storage, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_forward_backward_fast_cuda_kernel<10, items_per_thread_val, 2> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, grad_reader, inter_storage, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        } while(0);
+        // MAP(CASE_IPT_10, 1, 2, 4, 6, 8, 12, 16, 24);
+        MAP(CASE_IPT_9, 6, 8, 12, 16);
+        break;
+      case 11:
+        #define CASE_IPT_11(items_per_thread_val) do {                                               \
+        dim3 grid(div_up(batch_size, items_per_thread_val), 1, nstack);                              \
+        butterfly_odo_multiply_untied_forward_backward_fast_cuda_kernel<11, items_per_thread_val, 1> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, grad_reader, inter_storage, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        butterfly_odo_multiply_untied_forward_backward_fast_cuda_kernel<11, items_per_thread_val, 2> \
+          <<<grid, block, 0, stream>>>(twiddle_cos_a, twiddle_sin_a, diagonal_a, input_reader, grad_reader, inter_storage, d_twiddle_a, d_diagonal_a, d_input_writer, batch_size, nblocks); \
+        } while(0);
+        // MAP(CASE_IPT_11, 1, 2, 4, 6, 8, 12, 16, 24);
+        MAP(CASE_IPT_9, 6, 8, 12, 16);
+        break;
+    }
+  });
+  // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
+  #undef CASE_IPT_9
+  #undef CASE_IPT_10
+  #undef CASE_IPT_11
+  AT_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark failed with error code ",
      cudaGetLastError());
 }
 
