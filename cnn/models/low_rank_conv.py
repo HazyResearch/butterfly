@@ -34,19 +34,23 @@ class LowRankConv2d(nn.Module):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, x):
-        batch, c, h, w = x.shape
-        c_out = self.out_channels
-        h_out = (h + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) // self.stride[0] + 1
-        w_out = (h + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
-        # unfold x into patches and call batch matrix multiply
-        input_patches = F.unfold(x, self.kernel_size, self.dilation, self.padding, self.stride).view(
-            batch, c, self.kernel_size[0] * self.kernel_size[1], h_out * w_out)
-        x = input_patches.permute(2, 0, 3, 1).reshape(self.kernel_size[0] * self.kernel_size[1], batch * h_out * w_out, c)
-        output = x @ self.G.transpose(1, 2)
-        output = output @ self.H.transpose(1, 2)
-        # combine matrix batches
-        output = output.mean(dim=0).view(batch, h_out * w_out, c_out).transpose(1, 2).view(batch, c_out, h_out, w_out)
-        if self.bias is not None:
-            output = output + self.bias.unsqueeze(-1).unsqueeze(-1)
-        return output
+        M = torch.bmm(self.H, self.G).permute(1, 2, 0).reshape(
+            self.out_channels, self.in_channels, *self.kernel_size)
+        return F.conv2d(x, M, self.bias, self.stride, self.padding, self.dilation)
 
+    # def forward(self, x):
+    #     batch, c, h, w = x.shape
+    #     c_out = self.out_channels
+    #     h_out = (h + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) // self.stride[0] + 1
+    #     w_out = (h + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) // self.stride[1] + 1
+    #     # unfold x into patches and call batch matrix multiply
+    #     input_patches = F.unfold(x, self.kernel_size, self.dilation, self.padding, self.stride).view(
+    #         batch, c, self.kernel_size[0] * self.kernel_size[1], h_out * w_out)
+    #     x = input_patches.permute(2, 0, 3, 1).reshape(self.kernel_size[0] * self.kernel_size[1], batch * h_out * w_out, c)
+    #     output = x @ self.G.transpose(1, 2)
+    #     output = output @ self.H.transpose(1, 2)
+    #     # combine matrix batches
+    #     output = output.mean(dim=0).view(batch, h_out * w_out, c_out).transpose(1, 2).view(batch, c_out, h_out, w_out)
+    #     if self.bias is not None:
+    #         output = output + self.bias.unsqueeze(-1).unsqueeze(-1)
+    #     return output

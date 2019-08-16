@@ -29,7 +29,7 @@ except ImportError:
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
-                     and callable(models.__dict__[name])) + ['mobilenetv1', 'mobilenetv1_butterfly']
+                     and callable(models.__dict__[name])) + ['mobilenetv1', 'mobilenetv1_struct']
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR',
@@ -139,7 +139,7 @@ def main():
         print("=> creating model '{}'".format(args.arch))
         if args.arch == 'mobilenetv1':
             model = MobileNet()
-        elif args.arch == 'mobilenetv1_butterfly':
+        elif args.arch == 'mobilenetv1_struct':
             model = MobileNet(structure=[args.struct] * 7)
         else:
             model = models.__dict__[args.arch]()

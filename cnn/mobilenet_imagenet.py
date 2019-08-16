@@ -3,6 +3,8 @@
 See the paper "MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications"
 for more details.
 '''
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,6 +13,8 @@ import os, sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 from butterfly import Butterfly
+
+from cnn.models.low_rank_conv import LowRankConv2d
 
 
 def _make_divisible(v, divisor, min_value=None):
@@ -61,6 +65,10 @@ class Block(nn.Module):
         self.bn1.bias._no_wd = True
         if structure == 'D':
             self.conv2 = nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0, bias=False)
+        elif structure.startswith('LR'):
+            odo_nblocks = int(structure.split('_')[1])
+            rank = int(odo_nblocks * math.log2(in_planes) / 2)
+            self.conv2 = LowRankConv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0, bias=False, rank=rank)
         else:
             param = structure.split('_')[0]
             nblocks = 0 if len(structure.split('_')) <= 1 else int(structure.split('_')[1])
