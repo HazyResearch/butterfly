@@ -135,13 +135,14 @@ class Butterfly(nn.Module):
             if param == 'odo' and self.fast:
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 # TODO: assuming that nblocks > 0, otherwise there's no diag
-                # Initialize diag away from zero for numerical stability
-                while True:  # Rejection sampling
-                    diag_temp = self.diag_gen(self.nstack * nblocks * size * 2)
-                    diag_temp = diag_temp[diag_temp.abs() > 0.2]
-                    if diag_temp.numel() >= self.nstack * nblocks * size:
-                        break
-                self.diag = nn.Parameter(diag_temp[:self.nstack * nblocks * size].view(self.nstack, nblocks, size))
+                # # Initialize diag away from zero for numerical stability
+                # while True:  # Rejection sampling
+                #     diag_temp = self.diag_gen(self.nstack * nblocks * size * 2)
+                #     diag_temp = diag_temp[diag_temp.abs() > 0.2]
+                #     if diag_temp.numel() >= self.nstack * nblocks * size:
+                #         break
+                # self.diag = nn.Parameter(diag_temp[:self.nstack * nblocks * size].view(self.nstack, nblocks, size))
+                self.diag = nn.Parameter(self.diag_gen(self.nstack, nblocks, size))
                 self.diag._is_structured = True
             elif param == 'ortho':
                 assert not complex
