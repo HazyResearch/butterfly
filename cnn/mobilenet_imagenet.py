@@ -72,7 +72,7 @@ class Block(nn.Module):
         else:
             param = structure.split('_')[0]
             nblocks = 0 if len(structure.split('_')) <= 1 else int(structure.split('_')[1])
-            self.conv2 = Butterfly1x1Conv(in_planes, out_planes, bias=False, tied_weight=False, param=param, nblocks=nblocks)
+            self.conv2 = Butterfly1x1Conv(in_planes, out_planes, bias=False, tied_weight=False, ortho_init=True, param=param, nblocks=nblocks)
         self.bn2 = nn.BatchNorm2d(out_planes)
         self.bn2.weight._no_wd = True
         self.bn2.bias._no_wd = True
@@ -109,7 +109,7 @@ class MobileNet(nn.Module):
         else:
             param = softmax_structure.split('_')[0]
             nblocks = 0 if len(softmax_structure.split('_')) <= 1 else int(softmax_structure.split('_')[1])
-            self.linear = Butterfly(self.last_channel, num_classes, tied_weight=False, param=param, nblocks=nblocks)
+            self.linear = Butterfly(self.last_channel, num_classes, tied_weight=False, ortho_init=True, param=param, nblocks=nblocks)
 
     def _make_layers(self, in_planes):
         layers = []
