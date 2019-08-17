@@ -307,7 +307,7 @@ def butterfly_ortho_mult_untied(twiddle, input, increasing_stride):
         c, s = torch.cos(twiddle), torch.sin(twiddle)
         twiddle = torch.stack((torch.stack((c, -s), dim=-1),
                                torch.stack((s, c), dim=-1)), dim=-2)
-        return butterfly_mult_untied(twiddle, input, increasing_stride)
+        return butterfly_mult_untied(twiddle, input, increasing_stride, True, False)
 
 
 def butterfly_ortho_mult_untied_torch(twiddle, input, increasing_stride):
@@ -367,8 +367,8 @@ def bbt_mult_untied(twiddle, input, fast=True):
         for t in twiddle.chunk(nblocks, dim=1):
             # output = butterfly_mult_untied(t[:, :m].flip(1), output, False)
             # flip is crazy slow, advanced indexing is slightly faster
-            output = butterfly_mult_untied(t[:, reverse_idx], output, False)
-            output = butterfly_mult_untied(t[:, m:], output, True)
+            output = butterfly_mult_untied(t[:, reverse_idx], output, False, True, False)
+            output = butterfly_mult_untied(t[:, m:], output, True, True, False)
         return output
 
 
@@ -744,8 +744,8 @@ def bbt_mult_conv2d(twiddle, input, kernel_size, padding):
                 output = butterfly_mult_conv2d(t[:, reverse_idx], output, kernel_size, padding, False)
                 first = False
             else:
-                output = butterfly_mult_untied(t[:, reverse_idx], output, False)
-            output = butterfly_mult_untied(t[:, m:], output, True)
+                output = butterfly_mult_untied(t[:, reverse_idx], output, False, True, False)
+            output = butterfly_mult_untied(t[:, m:], output, True, True, False)
         return output
 
 
