@@ -72,6 +72,8 @@ class Block(nn.Module):
         else:
             param = structure.split('_')[0]
             nblocks = 0 if len(structure.split('_')) <= 1 else int(structure.split('_')[1])
+            self.residual = False if len(structure.split('_')) <= 2 else (structure.split('_')[2] == 'res')
+            self.residual = self.residual and in_planes == out_planes
             self.conv2 = Butterfly1x1Conv(in_planes, out_planes, bias=False, tied_weight=False, ortho_init=True, param=param, nblocks=nblocks)
         self.bn2 = nn.BatchNorm2d(out_planes)
         self.bn2.weight._no_wd = True
@@ -79,7 +81,7 @@ class Block(nn.Module):
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)), inplace=True)
-        out = F.relu(self.bn2(self.conv2(out)), inplace=True)
+        out = F.relu(self.bn2(self.conv2(out) if not getattr(self, 'residual', False) else out + self.conv2(out)), inplace=True)
         return out
 
 
