@@ -65,6 +65,8 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
+parser.add_argument('--scaled-wd', dest='scaled_wd', action='store_true',
+                    help='whether to scale the weight decay by the compression ratio wrt MobileNet')
 parser.add_argument('--print-freq', '-p', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
@@ -167,6 +169,9 @@ def main():
     no_wd_params = list(filter(lambda p: getattr(p, '_no_wd', False), params))
     unstructured_params = list(filter(lambda p: not (getattr(p, '_is_structured', False))
                                            and not getattr(p, '_no_wd', False), params))
+    if args.scaled_wd:
+        # Scale by the ratio between the number of params vs number of params of MobileNet
+        args.weight_decay *= sum(p.numel() for p in unstructured_params) / 4.2e6
     params_dict = [{'params': structured_params, 'weight_decay': 0.0, 'lr_multiplier': args.lr_multiplier},
                    {'params': no_wd_params, 'weight_decay': 0.0},
                    {'params': unstructured_params}]
@@ -576,17 +581,3 @@ def reduce_tensor(tensor):
 
 if __name__ == '__main__':
     main()
-
-b = 256
-criterion = nn.CrossEntropyLoss().cuda()
-torch.cuda.empty_cache()
-# model = MobileNet(structure=['odo_4'] * 7).to('cuda')
-model = MobileNet(width_mult=2.0).to('cuda')
-opt = torch.optim.SGD(model.parameters(), 0.1)
-x = torch.randn(b, 3, 224, 224, device='cuda')
-target = torch.ones(b, dtype=torch.long, device='cuda')
-opt.zero_grad()
-# out = model(x)
-# criterion(out, target).backward()
-criterion(model(x), target).backward()
-opt.step()
