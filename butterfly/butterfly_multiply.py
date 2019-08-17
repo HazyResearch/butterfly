@@ -24,6 +24,7 @@ try:
     from factor_multiply import butterfly_conv2d_svd, butterfly_conv2d_svd_forward_backward
     # from factor_multiply import butterfly_multiply_untied_eval
 
+    import factor_multiply_fast as fmf
     from factor_multiply_fast import butterfly_multiply_untied_forward_fast
     from factor_multiply_fast import butterfly_multiply_untied_forward_backward_fast
     from factor_multiply_fast import butterfly_bbs_multiply_untied_forward_fast
@@ -36,6 +37,12 @@ except:
     import warnings
     warnings.warn("C++/CUDA extension isn't installed properly. Will use butterfly multiply implemented in Pytorch, which is much slower.")
 
+try:
+    from apex import amp
+    amp.register_float_function(fmf, 'butterfly_odo_multiply_untied_forward_fast')
+    amp.register_float_function(fmf, 'butterfly_odo_multiply_untied_forward_backward_fast')
+except ImportError:
+    raise ImportError("Please install apex from https://www.github.com/nvidia/apex.")
 
 def butterfly_mult_torch(twiddle, input, increasing_stride=True, return_intermediates=False):
     """
@@ -460,7 +467,7 @@ class ODOMultUntied(torch.autograd.Function):
             output: (batch_size, nstack, n)
         """
         twiddle_cos, twiddle_sin = torch.cos(twiddle), torch.sin(twiddle)
-        output = butterfly_odo_multiply_untied_forward_fast(twiddle_cos, twiddle_sin, diag, input)
+        output = fmf.butterfly_odo_multiply_untied_forward_fast(twiddle_cos, twiddle_sin, diag, input)
         # ctx.save_for_backward(twiddle_cos, twiddle_sin, diag, output)
         ctx.save_for_backward(twiddle_cos, twiddle_sin, diag, input)
         return output
@@ -478,7 +485,9 @@ class ODOMultUntied(torch.autograd.Function):
         # twiddle_cos, twiddle_sin, diag, output = ctx.saved_tensors
         # d_coefficients, d_diag, d_input = butterfly_odo_multiply_untied_backward_fast(twiddle_cos, twiddle_sin, diag, output, grad)
         twiddle_cos, twiddle_sin, diag, input = ctx.saved_tensors
-        d_coefficients, d_diag, d_input = butterfly_odo_multiply_untied_forward_backward_fast(twiddle_cos, twiddle_sin, diag, input, grad)
+        d_coefficients, d_diag, d_input = fmf.butterfly_odo_multiply_untied_forward_backward_fast(twiddle_cos, twiddle_sin, diag, input, grad)
+        if input.dtype == torch.float16:
+            d_input = d_input.half()
         return d_coefficients, d_diag, d_input
 
 odo_mult_untied = ODOMultUntied.apply
