@@ -27,6 +27,8 @@ try:
 except ImportError:
     raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this example.")
 
+from imagenet.dataloaders import *
+
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
                      and callable(models.__dict__[name])) + ['mobilenetv1', 'mobilenetv1_struct']
@@ -34,6 +36,8 @@ model_names = sorted(name for name in models.__dict__
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR',
                     help='path to dataset')
+parser.add_argument('--data-backend', metavar='BACKEND', default='dali-cpu',
+                        choices=DATA_BACKEND_CHOICES)
 parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',
                     choices=model_names,
                     help='model architecture: ' +
@@ -90,22 +94,6 @@ parser.add_argument('--loss-scale', type=str, default=None)
 
 cudnn.benchmark = True
 
-def fast_collate(batch):
-    imgs = [img[0] for img in batch]
-    targets = torch.tensor([target[1] for target in batch], dtype=torch.int64)
-    w = imgs[0].size[0]
-    h = imgs[0].size[1]
-    tensor = torch.zeros( (len(imgs), 3, h, w), dtype=torch.uint8 )
-    for i, img in enumerate(imgs):
-        nump_array = np.asarray(img, dtype=np.uint8)
-        if(nump_array.ndim < 3):
-            nump_array = np.expand_dims(nump_array, axis=-1)
-        nump_array = np.rollaxis(nump_array, 2)
-
-        tensor[i] += torch.from_numpy(nump_array)
-
-    return tensor, targets
-
 best_prec1 = 0
 args = parser.parse_args()
 
@@ -153,7 +141,8 @@ def main():
                               softmax_structure=args.softmax_struct)
         else:
             model = models.__dict__[args.arch]()
-    print(model)
+    if args.local_rank == 0:
+        print(model)
 
     if args.sync_bn:
         import apex
@@ -219,9 +208,6 @@ def main():
         resume()
 
     # Data loading code
-    traindir = os.path.join(args.data, 'train')
-    valdir = os.path.join(args.data, 'val')
-
     if(args.arch == "inception_v3"):
         raise RuntimeError("Currently, inception_v3 is not supported by this example.")
         # crop_size = 299
@@ -230,44 +216,25 @@ def main():
         crop_size = 224
         val_size = 256
 
-    train_dataset = datasets.ImageFolder(
-        traindir,
-        transforms.Compose([
-            transforms.RandomResizedCrop(crop_size),
-            transforms.RandomHorizontalFlip(),
-            # transforms.ToTensor(), Too slow
-            # normalize,
-        ]))
-    val_dataset = datasets.ImageFolder(valdir, transforms.Compose([
-            transforms.Resize(val_size),
-            transforms.CenterCrop(crop_size),
-        ]))
-
-    train_sampler = None
-    val_sampler = None
-    if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-        val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
-
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True, sampler=train_sampler, collate_fn=fast_collate)
-
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset,
-        batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True,
-        sampler=val_sampler,
-        collate_fn=fast_collate)
+    if args.data_backend == 'pytorch':
+        get_train_loader = get_pytorch_train_loader
+        get_val_loader = get_pytorch_val_loader
+    elif args.data_backend == 'dali-gpu':
+        get_train_loader = get_dali_train_loader(dali_cpu=False)
+        get_val_loader = get_dali_val_loader()
+    elif args.data_backend == 'dali-cpu':
+        get_train_loader = get_dali_train_loader(dali_cpu=True)
+        get_val_loader = get_dali_val_loader()
+    train_loader, train_loader_len = get_train_loader(args.data, args.batch_size, 1000, False, workers=args.workers, fp16=False)
+    val_loader, val_loader_len = get_val_loader(args.data, args.batch_size, 1000, False, workers=args.workers, fp16=False)
+    train_loader._len = train_loader_len
+    val_loader._len = val_loader_len
 
     if args.evaluate:
         validate(val_loader, model, criterion)
         return
 
     for epoch in range(args.start_epoch, args.epochs):
-        if args.distributed:
-            train_sampler.set_epoch(epoch)
-
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch)
 
@@ -286,60 +253,6 @@ def main():
                 'optimizer' : optimizer.state_dict(),
             }, is_best)
 
-class data_prefetcher():
-    def __init__(self, loader):
-        self.loader = iter(loader)
-        self.stream = torch.cuda.Stream()
-        self.mean = torch.tensor([0.485 * 255, 0.456 * 255, 0.406 * 255]).cuda().view(1,3,1,1)
-        self.std = torch.tensor([0.229 * 255, 0.224 * 255, 0.225 * 255]).cuda().view(1,3,1,1)
-        # With Amp, it isn't necessary to manually convert data to half.
-        # if args.fp16:
-        #     self.mean = self.mean.half()
-        #     self.std = self.std.half()
-        self.preload()
-
-    def preload(self):
-        try:
-            self.next_input, self.next_target = next(self.loader)
-        except StopIteration:
-            self.next_input = None
-            self.next_target = None
-            return
-        # if record_stream() doesn't work, another option is to make sure device inputs are created
-        # on the main stream.
-        # self.next_input_gpu = torch.empty_like(self.next_input, device='cuda')
-        # self.next_target_gpu = torch.empty_like(self.next_target, device='cuda')
-        # Need to make sure the memory allocated for next_* is not still in use by the main stream
-        # at the time we start copying to next_*:
-        # self.stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(self.stream):
-            self.next_input = self.next_input.cuda(non_blocking=True)
-            self.next_target = self.next_target.cuda(non_blocking=True)
-            # more code for the alternative if record_stream() doesn't work:
-            # copy_ will record the use of the pinned source tensor in this side stream.
-            # self.next_input_gpu.copy_(self.next_input, non_blocking=True)
-            # self.next_target_gpu.copy_(self.next_target, non_blocking=True)
-            # self.next_input = self.next_input_gpu
-            # self.next_target = self.next_target_gpu
-
-            # With Amp, it isn't necessary to manually convert data to half.
-            # if args.fp16:
-            #     self.next_input = self.next_input.half()
-            # else:
-            self.next_input = self.next_input.float()
-            self.next_input = self.next_input.sub_(self.mean).div_(self.std)
-
-    def next(self):
-        torch.cuda.current_stream().wait_stream(self.stream)
-        input = self.next_input
-        target = self.next_target
-        if input is not None:
-            input.record_stream(torch.cuda.current_stream())
-        if target is not None:
-            target.record_stream(torch.cuda.current_stream())
-        self.preload()
-        return input, target
-
 
 def train(train_loader, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
@@ -351,18 +264,15 @@ def train(train_loader, model, criterion, optimizer, epoch):
     model.train()
     end = time.time()
 
-    prefetcher = data_prefetcher(train_loader)
-    input, target = prefetcher.next()
-    i = 0
-    while input is not None:
-        i += 1
+    data_iter = enumerate(train_loader)
+    for i, (input, target) in data_iter:
         if args.prof >= 0 and i == args.prof:
             print("Profiling begun at iteration {}".format(i))
             torch.cuda.cudart().cudaProfilerStart()
 
         if args.prof >= 0: torch.cuda.nvtx.range_push("Body of iteration {}".format(i))
 
-        adjust_learning_rate(optimizer, epoch, i, len(train_loader))
+        adjust_learning_rate(optimizer, epoch, i, train_loader._len)
 
         # compute output
         if args.prof >= 0: torch.cuda.nvtx.range_push("forward")
@@ -433,13 +343,12 @@ def train(train_loader, model, criterion, optimizer, epoch):
                       'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
                       'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                       'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                       epoch, i, len(train_loader),
+                       epoch, i, train_loader._len,
                        args.world_size*args.batch_size/batch_time.val,
                        args.world_size*args.batch_size/batch_time.avg,
                        batch_time=batch_time,
                        loss=losses, top1=top1, top5=top5))
         if args.prof >= 0: torch.cuda.nvtx.range_push("prefetcher.next()")
-        input, target = prefetcher.next()
         if args.prof >= 0: torch.cuda.nvtx.range_pop()
 
         # Pop range "Body of iteration {}".format(i)
@@ -462,12 +371,8 @@ def validate(val_loader, model, criterion):
 
     end = time.time()
 
-    prefetcher = data_prefetcher(val_loader)
-    input, target = prefetcher.next()
-    i = 0
-    while input is not None:
-        i += 1
-
+    data_iter = enumerate(val_loader)
+    for i, (input, target) in data_iter:
         # compute output
         with torch.no_grad():
             output = model(input)
@@ -499,13 +404,11 @@ def validate(val_loader, model, criterion):
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                   'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                   i, len(val_loader),
+                   i, val_loader._len,
                    args.world_size * args.batch_size / batch_time.val,
                    args.world_size * args.batch_size / batch_time.avg,
                    batch_time=batch_time, loss=losses,
                    top1=top1, top5=top5))
-
-        input, target = prefetcher.next()
 
     print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
           .format(top1=top1, top5=top5))
