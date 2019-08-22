@@ -5,7 +5,7 @@
 
 #define BFLY_BENCHMARK false
 
-#define CHECK_DEVICE(x) AT_CHECK(x.type().device_type() == at::kCPU || x.type().device_type() == at::kCUDA, #x " must be on CPU or CUDA")
+#define CHECK_DEVICE(x) TORCH_CHECK(x.type().device_type() == at::kCPU || x.type().device_type() == at::kCUDA, #x " must be on CPU or CUDA")
 
 void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
                                                  const at::Tensor &input,
@@ -107,22 +107,22 @@ at::Tensor butterfly_multiply_untied_forward_fast(const at::Tensor &twiddle,
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double)n));
-  AT_CHECK(1 << log_n == n, "butterfly_multiply_untied_forward_fast: n must be a power of 2");
-  AT_CHECK(n <= 16384,
+  TORCH_CHECK(1 << log_n == n, "butterfly_multiply_untied_forward_fast: n must be a power of 2");
+  TORCH_CHECK(n <= 16384,
            "butterfly_multiply_untied_forward_fast: only supports n <= 16384");
-  AT_CHECK((twiddle.dim() == 4 && input.dim() == 3),
+  TORCH_CHECK((twiddle.dim() == 4 && input.dim() == 3),
            "butterfly_multiply_untied_forward_fast: twiddle and input must have "
            "dimension 4,3 or 6,4");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (",
+  TORCH_CHECK(twiddle.device() == input.device(), "device of twiddle (",
            twiddle.device(), ") must match device of input (", input.device(),
            ")");
-  AT_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, log_n, 2, n}),
+  TORCH_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, log_n, 2, n}),
            "butterfly_multiply_untied_forward_fast: twiddle must have shape (nstack, "
            "log n, 2, n) (nstack, log n, 2, n, 2)");
   auto output = torch::empty_like(input);
-  AT_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_fast: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_fast: only supports CUDA");
   #if !BFLY_BENCHMARK
   butterfly_multiply_untied_forward_fast_cuda(twiddle, input, output, increasing_stride);
   #else
@@ -147,28 +147,28 @@ std::vector<at::Tensor> butterfly_multiply_untied_forward_backward_fast(const at
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double)n));
-  AT_CHECK(1 << log_n == n, "butterfly_multiply_untied_forward_backward_fast: n must be a power of 2");
-  AT_CHECK(n <= 4096,
+  TORCH_CHECK(1 << log_n == n, "butterfly_multiply_untied_forward_backward_fast: n must be a power of 2");
+  TORCH_CHECK(n <= 4096,
            "butterfly_multiply_untied_forward_backward_fast: only supports n <= 4096");
-  AT_CHECK((twiddle.dim() == 4 && input.dim() == 3 && grad.dim() == 3),
+  TORCH_CHECK((twiddle.dim() == 4 && input.dim() == 3 && grad.dim() == 3),
            "butterfly_multiply_untied_forward_backward_fast: twiddle, input, "
            "and grad must have dimension 4,3,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
-  AT_CHECK(
+  TORCH_CHECK(
       twiddle.device() == input.device() && twiddle.device() == grad.device(),
       "device of twiddle (", twiddle.device(), ") must match device of input (",
       input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, log_n, 2, n}),
+  TORCH_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, log_n, 2, n}),
            "butterfly_multiply_untied_forward_backward_fast: twiddle must have shape (nstack, "
            "log n, 2, n) (nstack, log n, 2, n, 2)");
-  AT_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
+  TORCH_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
            "butterfly_multiply_untied_forward_backward: grad must have shape "
            "(batch_size, nstack, n)");
   auto d_input = torch::empty_like(input);
   auto d_twiddle = torch::zeros_like(twiddle);
-  AT_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_backward_fast: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_backward_fast: only supports CUDA");
   butterfly_multiply_untied_forward_backward_fast_cuda(twiddle, input, grad,
                                                        d_twiddle, d_input,
                                                        increasing_stride);
@@ -186,24 +186,24 @@ at::Tensor butterfly_bbs_multiply_untied_forward_fast(const at::Tensor &twiddle,
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double)n));
-  AT_CHECK(1 << log_n == n, "butterfly_bbs_multiply_untied_forward_fast: n must be a power of 2");
-  AT_CHECK(n <= 16384,
+  TORCH_CHECK(1 << log_n == n, "butterfly_bbs_multiply_untied_forward_fast: n must be a power of 2");
+  TORCH_CHECK(n <= 16384,
            "butterfly_bbs_multiply_untied_forward_fast: only supports n <= 16384");
   const int nblocks = twiddle.size(1) / (2 * log_n);
-  AT_CHECK((twiddle.dim() == 4 && input.dim() == 3),
+  TORCH_CHECK((twiddle.dim() == 4 && input.dim() == 3),
            "butterfly_bbs_multiply_untied_forward_fast: twiddle and input must have "
            "dimension 3,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle.device() == input.device(),
+  TORCH_CHECK(twiddle.device() == input.device(),
            "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(),
            ")");
-  AT_CHECK(twiddle.sizes() ==
+  TORCH_CHECK(twiddle.sizes() ==
                torch::IntArrayRef({nstack, nblocks * 2 * log_n, 2, n}),
            "butterfly_bbs_multiply_untied_forward_fast: twiddle must have "
            "shape (nstack, nblocks * 2 * log n, 2, n)");
   auto output = torch::empty_like(input);
-  AT_CHECK(input.is_cuda(), "butterfly_bbs_multiply_untied_forward_fast: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_bbs_multiply_untied_forward_fast: only supports CUDA");
   butterfly_bbs_multiply_untied_forward_fast_cuda(twiddle, input, output);
   return output;
 }
@@ -222,29 +222,29 @@ std::vector<at::Tensor> butterfly_bbs_multiply_untied_forward_backward_fast(cons
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double)n));
-  AT_CHECK(1 << log_n == n, "butterfly_bbs_multiply_untied_forward_backward_fast: n must be a power of 2");
-  AT_CHECK(n <= 4096,
+  TORCH_CHECK(1 << log_n == n, "butterfly_bbs_multiply_untied_forward_backward_fast: n must be a power of 2");
+  TORCH_CHECK(n <= 4096,
            "butterfly_bbs_multiply_untied_forward_backward_fast: only supports n <= 4096");
   const int nblocks = twiddle.size(1) / (2 * log_n);
-  AT_CHECK((twiddle.dim() == 4 && input.dim() == 3 && grad.dim() == 3),
+  TORCH_CHECK((twiddle.dim() == 4 && input.dim() == 3 && grad.dim() == 3),
            "butterfly_bbs_multiply_untied_forward_backward_fast: twiddle, input, "
            "and grad must have dimension 4,3,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
-  AT_CHECK(
+  TORCH_CHECK(
       twiddle.device() == input.device() && twiddle.device() == grad.device(),
       "device of twiddle (", twiddle.device(), ") must match device of input (",
       input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, 2, n}),
+  TORCH_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, 2, n}),
            "butterfly_bbs_multiply_untied_forward_backward_fast: twiddle must have shape (nstack, "
            "nblocks * 2 * log n, 2, n)");
-  AT_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
+  TORCH_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
            "butterfly_bbs_multiply_untied_backward: grad must have shape "
            "(batch_size, nstack, n)");
   auto d_input = torch::empty_like(input);
   auto d_twiddle = torch::zeros_like(twiddle);
-  AT_CHECK(input.is_cuda(), "butterfly_bbs_multiply_untied_forward_backward_fast: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_bbs_multiply_untied_forward_backward_fast: only supports CUDA");
   butterfly_bbs_multiply_untied_forward_backward_fast_cuda(twiddle, input, grad,
                                                            d_twiddle, d_input);
   return {d_twiddle, d_input} ;
@@ -266,26 +266,26 @@ at::Tensor butterfly_ortho_multiply_untied_forward_fast(const at::Tensor &twiddl
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double)n));
-  AT_CHECK(1 << log_n == n, "butterfly_ortho_multiply_untied_forward_fast: n must be a power of 2");
-  AT_CHECK(n <= 16384,
+  TORCH_CHECK(1 << log_n == n, "butterfly_ortho_multiply_untied_forward_fast: n must be a power of 2");
+  TORCH_CHECK(n <= 16384,
            "butterfly_ortho_multiply_untied_forward_fast: only supports n <= 16384");
-  AT_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && input.dim() == 3),
+  TORCH_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && input.dim() == 3),
            "butterfly_ortho_multiply_untied_forward_fast: twiddle_cos, twiddle_sin and input must have "
            "dimension 3,3,3");
   CHECK_DEVICE(twiddle_cos);
   CHECK_DEVICE(twiddle_sin);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle_cos.device() == input.device() && twiddle_sin.device() == input.device(),
+  TORCH_CHECK(twiddle_cos.device() == input.device() && twiddle_sin.device() == input.device(),
            "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (", input.device(),
            ")");
-  AT_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, log_n, n / 2}),
+  TORCH_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, log_n, n / 2}),
            "butterfly_ortho_multiply_untied_forward_fast: twiddle_cos must have shape (nstack, "
            "log n, n/2)");
-  AT_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, log_n, n / 2}),
+  TORCH_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, log_n, n / 2}),
            "butterfly_ortho_multiply_untied_forward_fast: twiddle_sin must have shape (nstack, "
            "log n, n/2)");
   auto output = torch::empty_like(input);
-  AT_CHECK(input.is_cuda(), "butterfly_ortho_multiply_untied_forward_fast: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_ortho_multiply_untied_forward_fast: only supports CUDA");
   butterfly_ortho_multiply_untied_forward_fast_cuda(twiddle_cos, twiddle_sin, input, output, increasing_stride);
   return output;
 }
@@ -308,33 +308,33 @@ std::vector<at::Tensor> butterfly_ortho_multiply_untied_backward_fast(const at::
   const auto nstack = output.size(1);
   const auto n = output.size(2);
   const int log_n = int(log2((double)n));
-  AT_CHECK(1 << log_n == n, "butterfly_ortho_multiply_untied_backward_fast: n must be a power of 2");
-  AT_CHECK(n <= 16384,
+  TORCH_CHECK(1 << log_n == n, "butterfly_ortho_multiply_untied_backward_fast: n must be a power of 2");
+  TORCH_CHECK(n <= 16384,
            "butterfly_ortho_multiply_untied_backward_fast: only supports n <= 4096");
-  AT_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && output.dim() == 3 && grad.dim() == 3),
+  TORCH_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && output.dim() == 3 && grad.dim() == 3),
            "butterfly_ortho_multiply_untied_backward_fast: twiddle_cos, twiddle_sin, output, "
            "and grad must have dimension 3,3,3,3");
   CHECK_DEVICE(twiddle_cos);
   CHECK_DEVICE(twiddle_sin);
   CHECK_DEVICE(output);
   CHECK_DEVICE(grad);
-  AT_CHECK(
+  TORCH_CHECK(
       twiddle_cos.device() == output.device() && twiddle_cos.device() == grad.device()
       && twiddle_cos.device() == twiddle_sin.device(),
       "device of twiddle_cos (", twiddle_cos.device(), ") must match device of output (",
       output.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, log_n, n / 2}),
+  TORCH_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, log_n, n / 2}),
            "butterfly_ortho_multiply_untied_backward_fast: twiddle_cos must have shape (nstack, "
            "log n, n / 2)");
-  AT_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, log_n, n / 2}),
+  TORCH_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, log_n, n / 2}),
            "butterfly_ortho_multiply_untied_backward_fast: twiddle_sin must have shape (nstack, "
            "log n, n / 2)");
-  AT_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
+  TORCH_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
            "butterfly_ortho_multiply_untied_backward: grad must have shape "
            "(batch_size, nstack, n)");
   auto d_input = torch::empty_like(output);
   auto d_twiddle = torch::zeros_like(twiddle_cos);
-  AT_CHECK(output.is_cuda(), "butterfly_ortho_multiply_untied_backward_fast: only supports CUDA");
+  TORCH_CHECK(output.is_cuda(), "butterfly_ortho_multiply_untied_backward_fast: only supports CUDA");
   butterfly_ortho_multiply_untied_backward_fast_cuda(twiddle_cos, twiddle_sin, output, grad,
                                                      d_twiddle, d_input, increasing_stride);
   return {d_twiddle, d_input} ;
@@ -355,31 +355,31 @@ at::Tensor butterfly_odo_multiply_untied_forward_fast(const at::Tensor &twiddle_
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double)n));
-  AT_CHECK(1 << log_n == n, "butterfly_odo_multiply_untied_forward_fast: n must be a power of 2");
-  AT_CHECK(n <= 16384,
+  TORCH_CHECK(1 << log_n == n, "butterfly_odo_multiply_untied_forward_fast: n must be a power of 2");
+  TORCH_CHECK(n <= 16384,
            "butterfly_odo_multiply_untied_forward_fast: only supports n <= 16384");
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
-  AT_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && diagonal.dim() == 3 && input.dim() == 3),
+  TORCH_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && diagonal.dim() == 3 && input.dim() == 3),
            "butterfly_odo_multiply_untied_forward_fast: twiddle_cos, twiddle_sin, diagonal and input must have "
            "dimension 3,3,3,3");
   CHECK_DEVICE(twiddle_cos);
   CHECK_DEVICE(twiddle_sin);
   CHECK_DEVICE(diagonal);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle_cos.device() == input.device() && twiddle_sin.device() == input.device() && diagonal.device() == input.device(),
+  TORCH_CHECK(twiddle_cos.device() == input.device() && twiddle_sin.device() == input.device() && diagonal.device() == input.device(),
            "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (", input.device(),
            ")");
-  AT_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
+  TORCH_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
            "butterfly_odo_multiply_untied_forward_fast: twiddle_cos must have shape (nstack, "
            "nblocks * 2 * log n, n/2)");
-  AT_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
+  TORCH_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
            "butterfly_odo_multiply_untied_forward_fast: twiddle_sin must have shape (nstack, "
            "nblocks * 2 * log n, n/2)");
-  AT_CHECK(diagonal.sizes() == torch::IntArrayRef({nstack, nblocks, n}),
+  TORCH_CHECK(diagonal.sizes() == torch::IntArrayRef({nstack, nblocks, n}),
            "butterfly_odo_multiply_untied_forward_fast: diagonal must have shape (nstack, "
            "nblocks, n/2)");
   auto output = torch::empty_like(input);
-  AT_CHECK(input.is_cuda(), "butterfly_odo_multiply_untied_forward_fast: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_odo_multiply_untied_forward_fast: only supports CUDA");
   #if !BFLY_BENCHMARK
   butterfly_odo_multiply_untied_forward_fast_cuda(twiddle_cos, twiddle_sin, diagonal, input, output);
   #else
@@ -405,11 +405,11 @@ std::vector<at::Tensor> butterfly_odo_multiply_untied_backward_fast(const at::Te
   const auto nstack = output.size(1);
   const auto n = output.size(2);
   const int log_n = int(log2((double)n));
-  AT_CHECK(1 << log_n == n, "butterfly_odo_multiply_untied_backward_fast: n must be a power of 2");
-  AT_CHECK(n <= 16384,
+  TORCH_CHECK(1 << log_n == n, "butterfly_odo_multiply_untied_backward_fast: n must be a power of 2");
+  TORCH_CHECK(n <= 16384,
            "butterfly_odo_multiply_untied_backward_fast: only supports n <= 4096");
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
-  AT_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && diagonal.dim() == 3 && output.dim() == 3 && grad.dim() == 3),
+  TORCH_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && diagonal.dim() == 3 && output.dim() == 3 && grad.dim() == 3),
            "butterfly_odo_multiply_untied_backward_fast: twiddle_cos, twiddle_sin, diagonal, output, "
            "and grad must have dimension 3,3,3,3");
   CHECK_DEVICE(twiddle_cos);
@@ -417,27 +417,27 @@ std::vector<at::Tensor> butterfly_odo_multiply_untied_backward_fast(const at::Te
   CHECK_DEVICE(diagonal);
   CHECK_DEVICE(output);
   CHECK_DEVICE(grad);
-  AT_CHECK(
+  TORCH_CHECK(
       twiddle_cos.device() == output.device() && twiddle_cos.device() == grad.device()
       && twiddle_cos.device() == twiddle_sin.device() && twiddle_cos.device() == diagonal.device(),
       "device of twiddle_cos (", twiddle_cos.device(), ") must match device of output (",
       output.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
+  TORCH_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
            "butterfly_odo_multiply_untied_backward_fast: twiddle_cos must have shape (nstack, "
            "log n, n / 2)");
-  AT_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
+  TORCH_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
            "butterfly_odo_multiply_untied_backward_fast: twiddle_sin must have shape (nstack, "
            "log n, n / 2)");
-  AT_CHECK(diagonal.sizes() == torch::IntArrayRef({nstack, nblocks, n}),
+  TORCH_CHECK(diagonal.sizes() == torch::IntArrayRef({nstack, nblocks, n}),
            "butterfly_odo_multiply_untied_backward_fast: diagonal must have shape (nstack, "
            "log n, n / 2)");
-  AT_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
+  TORCH_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
            "butterfly_odo_multiply_untied_backward: grad must have shape "
            "(batch_size, nstack, n)");
   auto d_input = torch::empty_like(output);
   auto d_twiddle = torch::zeros_like(twiddle_cos);
   auto d_diagonal = torch::zeros_like(diagonal);
-  AT_CHECK(output.is_cuda(), "butterfly_odo_multiply_untied_backward_fast: only supports CUDA");
+  TORCH_CHECK(output.is_cuda(), "butterfly_odo_multiply_untied_backward_fast: only supports CUDA");
   #if !BFLY_BENCHMARK
   butterfly_odo_multiply_untied_backward_fast_cuda(twiddle_cos, twiddle_sin, diagonal, output, grad,
                                                    d_twiddle, d_diagonal, d_input);
@@ -465,11 +465,11 @@ std::vector<at::Tensor> butterfly_odo_multiply_untied_forward_backward_fast(cons
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double)n));
-  AT_CHECK(1 << log_n == n, "butterfly_odo_multiply_untied_forward_backward_fast: n must be a power of 2");
-  AT_CHECK(n <= 16384,
+  TORCH_CHECK(1 << log_n == n, "butterfly_odo_multiply_untied_forward_backward_fast: n must be a power of 2");
+  TORCH_CHECK(n <= 16384,
            "butterfly_odo_multiply_untied_forward_backward_fast: only supports n <= 4096");
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
-  AT_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && diagonal.dim() == 3 && input.dim() == 3 && grad.dim() == 3),
+  TORCH_CHECK((twiddle_cos.dim() == 3 && twiddle_sin.dim() == 3 && diagonal.dim() == 3 && input.dim() == 3 && grad.dim() == 3),
            "butterfly_odo_multiply_untied_forward_backward_fast: twiddle_cos, twiddle_sin, diagonal, input, "
            "and grad must have dimension 3,3,3,3");
   CHECK_DEVICE(twiddle_cos);
@@ -477,27 +477,27 @@ std::vector<at::Tensor> butterfly_odo_multiply_untied_forward_backward_fast(cons
   CHECK_DEVICE(diagonal);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
-  AT_CHECK(
+  TORCH_CHECK(
       twiddle_cos.device() == input.device() && twiddle_cos.device() == grad.device()
       && twiddle_cos.device() == twiddle_sin.device() && twiddle_cos.device() == diagonal.device(),
       "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (",
       input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
+  TORCH_CHECK(twiddle_cos.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
            "butterfly_odo_multiply_untied_forward_backward_fast: twiddle_cos must have shape (nstack, "
            "log n, n / 2)");
-  AT_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
+  TORCH_CHECK(twiddle_sin.sizes() == torch::IntArrayRef({nstack, nblocks * 2 * log_n, n / 2}),
            "butterfly_odo_multiply_untied_forward_backward_fast: twiddle_sin must have shape (nstack, "
            "log n, n / 2)");
-  AT_CHECK(diagonal.sizes() == torch::IntArrayRef({nstack, nblocks, n}),
+  TORCH_CHECK(diagonal.sizes() == torch::IntArrayRef({nstack, nblocks, n}),
            "butterfly_odo_multiply_untied_forward_backward_fast: diagonal must have shape (nstack, "
            "log n, n / 2)");
-  AT_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
+  TORCH_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
            "butterfly_odo_multiply_untied_forward_backward: grad must have shape "
            "(batch_size, nstack, n)");
   auto d_input = torch::empty_like(input);
   auto d_twiddle = torch::zeros_like(twiddle_cos);
   auto d_diagonal = torch::zeros_like(diagonal);
-  AT_CHECK(input.is_cuda(), "butterfly_odo_multiply_untied_forward_backward_fast: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_odo_multiply_untied_forward_backward_fast: only supports CUDA");
   #if !BFLY_BENCHMARK
   butterfly_odo_multiply_untied_forward_backward_fast_cuda(twiddle_cos, twiddle_sin, diagonal, input, grad,
                                                            d_twiddle, d_diagonal, d_input);

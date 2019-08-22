@@ -323,7 +323,7 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_LOG_N
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_forward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -527,7 +527,7 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_LOG_N
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_forward_backward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -610,7 +610,7 @@ void butterfly_bbs_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_LOG_N
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_bbs_multiply_untied_forward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -747,7 +747,7 @@ void butterfly_bbs_multiply_untied_forward_backward_fast_cuda(const at::Tensor &
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_LOG_N
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_bbs_multiply_untied_forward_backward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -903,7 +903,7 @@ void butterfly_ortho_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_LOG_N
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_ortho_multiply_untied_forward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -1082,7 +1082,7 @@ void butterfly_ortho_multiply_untied_backward_fast_cuda(const at::Tensor &twiddl
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_LOG_N
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_ortho_multiply_untied_backward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -1189,7 +1189,7 @@ void butterfly_odo_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle_c
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_LOG_N
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_odo_multiply_untied_forward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -1318,7 +1318,7 @@ void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_LOG_N
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_odo_multiply_untied_backward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -1474,7 +1474,7 @@ void butterfly_odo_multiply_untied_forward_backward_fast_cuda(const at::Tensor &
   });
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_LOG_N
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_odo_multiply_untied_forward_backward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -1497,7 +1497,7 @@ void butterfly_multiply_untied_forward_fast_cuda_benchmark_logn_ipt(int min_bloc
     MAP(CASE, 1, 2, 3, 4)
     #undef CASE
     }
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_forward_fast_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -1723,7 +1723,7 @@ void butterfly_odo_multiply_untied_forward_fast_cuda_benchmark(const at::Tensor 
   #undef CASE_IPT_9
   #undef CASE_IPT_10
   #undef CASE_IPT_11
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_odo_multiply_untied_forward_fast_cuda_benchmark failed with error code ",
      cudaGetLastError());
 }
@@ -1786,7 +1786,7 @@ void butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(const at::Tensor
   // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
   #undef CASE_IPT_9
   #undef CASE_IPT_10
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_odo_multiply_untied_backward_fast_cuda_benchmark failed with error code ",
      cudaGetLastError());
 }
@@ -1858,7 +1858,7 @@ void butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark(const at
   #undef CASE_IPT_9
   #undef CASE_IPT_10
   #undef CASE_IPT_11
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark failed with error code ",
      cudaGetLastError());
 }

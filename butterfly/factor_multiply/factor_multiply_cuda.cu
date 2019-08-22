@@ -125,7 +125,7 @@ void butterfly_factor_multiply_cuda(const at::Tensor& twiddle, const at::Tensor&
         AT_ERROR("butterfly_factor_multiply requires input dimension 3 or 4");
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_factor_multiply_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -392,7 +392,7 @@ void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::T
         AT_ERROR("butterfly_factor_multiply requires input dimension 3 or 4");
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_factor_multiply_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -490,7 +490,7 @@ void butterfly_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tensor& inpu
         AT_ERROR("butterfly_multiply_inplace requires input dimension 2 or 3");
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_inplace_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -705,7 +705,7 @@ void butterfly_multiply_inplace_backward_cuda(const at::Tensor& grad, const at::
         AT_ERROR("butterfly_multiply_inplace_backward requires input dimension 2 or 3");
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_inplace_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -943,7 +943,7 @@ void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor&
       }
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_intermediate_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -1268,7 +1268,7 @@ void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, co
       }
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_intermediate_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -1557,7 +1557,7 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
       }
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -1904,7 +1904,7 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
       }
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -2106,7 +2106,7 @@ void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, 
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_forward_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -2190,7 +2190,7 @@ void butterfly_ortho_multiply_tied_cuda(const at::Tensor& twiddle_cos, const at:
                       : butterfly_ortho_multiply_tied_cuda_kernel<scalar_t, false>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, save_output, log_stride, batch_size);
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_ortho_multiply_tied_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -2306,7 +2306,7 @@ void butterfly_ortho_multiply_tied_backward_cuda(const at::Tensor& twiddle_cos, 
                       : butterfly_ortho_multiply_tied_backward_cuda_kernel<scalar_t, accscalar_t, false>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_output, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size);
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_ortho_multiply_tied_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -2390,7 +2390,7 @@ void butterfly_ortho_multiply_untied_cuda(const at::Tensor& twiddle_cos, const a
                       : butterfly_ortho_multiply_untied_cuda_kernel<scalar_t, false>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input, save_output, log_stride, batch_size);
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_ortho_multiply_untied_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -2508,7 +2508,7 @@ void butterfly_ortho_multiply_untied_backward_cuda(const at::Tensor& twiddle_cos
                       : butterfly_ortho_multiply_untied_backward_cuda_kernel<scalar_t, accscalar_t, false>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_output, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size);
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_ortho_multiply_untied_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -2594,7 +2594,7 @@ void bbt_multiply_untied_cuda(const at::Tensor& twiddle, const at::Tensor& input
     bbt_multiply_untied_cuda_kernel<scalar_t>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, save_output, log_stride, batch_size, nblocks);
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "bbt_multiply_untied_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -2792,7 +2792,7 @@ void bbt_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const 
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
       }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "bbt_multiply_untied_forward_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -2879,7 +2879,7 @@ void bbt_ortho_multiply_untied_cuda(const at::Tensor& twiddle_cos, const at::Ten
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_input,
                                                              save_output, log_stride, batch_size, nblocks);
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "bbt_ortho_multiply_untied_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -2999,7 +2999,7 @@ void bbt_ortho_multiply_untied_backward_cuda(const at::Tensor& twiddle_cos, cons
     bbt_ortho_multiply_untied_backward_cuda_kernel<scalar_t, accscalar_t>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_cos_a, twiddle_sin_a, load_output, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size, nblocks);
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "bbt_ortho_multiply_untied_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -3124,7 +3124,7 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
           output_a, log_stride, log_n, kernel_size, padding, h_out, w_out);
       }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_conv2d_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -3261,7 +3261,7 @@ void butterfly_conv2d_backward_cuda(const at::Tensor&grad, const at::Tensor& twi
           grad_a, twiddle_a, output_a, d_twiddle_a, d_input_a, log_stride,
           log_n, kernel_size, padding, h_out, w_out);
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_conv2d_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -3401,7 +3401,7 @@ void butterfly_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, batch_size); break;
       }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_conv2d_forward_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -3472,7 +3472,7 @@ void bbt_conv2d_cuda(const at::Tensor& twiddle,
       bbt_multiply_untied_cuda_kernel<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, save_output, log_stride, batch_size, nblocks) ;
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "bbt_conv2d_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -3604,7 +3604,7 @@ void bbt_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, load_input, load_grad, d_twiddle_a, save_d_input, log_stride, batch_size); break;
       }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "bbt_conv2d_forward_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -3719,7 +3719,7 @@ void butterfly_multiply_untied_svd_cuda(const at::Tensor& twiddle, at::Tensor& o
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n);
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_svd_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -3881,7 +3881,7 @@ void butterfly_multiply_untied_svd_backward_cuda(const at::Tensor& twiddle, cons
       }
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_svd_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -4035,7 +4035,7 @@ void butterfly_multiply_untied_svd_forward_backward_cuda(const at::Tensor& twidd
                       : butterfly_multiply_untied_svd_forward_backward_cuda_kernel<scalar_t, accscalar_t, false>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, d_twiddle_a, d_input_a, log_stride, log_n);
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_svd_forward_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -4166,7 +4166,7 @@ void butterfly_conv2d_svd_cuda(const at::Tensor& twiddle,
           output_a, log_stride, log_n, kernel_size, padding, h_out, w_out);
       }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_conv2d_svd_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -4369,7 +4369,7 @@ void butterfly_conv2d_svd_forward_backward_cuda(const at::Tensor& twiddle,
         twiddle_a, input_a, grad_a, d_twiddle_a, d_input_a, log_stride,
         log_n, kernel_size, padding, h_out, w_out);
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_conv2d_svd_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -4454,7 +4454,7 @@ void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Te
         AT_ERROR("permutation_factor_even_odd_multiply requires input dimension 2 or 3");
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "permutation_factor_even_odd_multiply_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -4563,7 +4563,7 @@ void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, 
         AT_ERROR("permutation_factor_even_odd_multiply_backward requires input dimension 2 or 3");
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "permutation_factor_even_odd_multiply_backward_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -4645,7 +4645,7 @@ void permutation_factor_reverse_multiply_cuda(const at::Tensor& p, const at::Ten
         AT_ERROR("permutation_factor_reverse_multiply requires input dimension 2 or 3");
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "permutation_factor_reverse_multiply_cuda failed with error code ",
      cudaGetLastError());
 }
@@ -4745,7 +4745,7 @@ void permutation_factor_reverse_multiply_backward_cuda(const at::Tensor& grad, c
         AT_ERROR("permutation_factor_reverse_multiply_backward requires input dimension 2 or 3");
     }
   });
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "permutation_factor_reverse_multiply_backward_cuda failed with error code ",
      cudaGetLastError());
 }

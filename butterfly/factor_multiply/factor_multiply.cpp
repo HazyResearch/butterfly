@@ -76,7 +76,7 @@ void permutation_factor_reverse_multiply_cuda(const at::Tensor& p, const at::Ten
 void permutation_factor_reverse_multiply_backward_cuda(const at::Tensor& grad, const at::Tensor& p, const at::Tensor& input,
                                                        at::Tensor& d_p_expanded, at::Tensor& d_input);
 
-#define CHECK_DEVICE(x) AT_CHECK(x.type().device_type() == at::kCPU || x.type().device_type() == at::kCUDA, #x " must be on CPU or CUDA")
+#define CHECK_DEVICE(x) TORCH_CHECK(x.type().device_type() == at::kCPU || x.type().device_type() == at::kCUDA, #x " must be on CPU or CUDA")
 
 // 2x2 matrix [a, b; c, d] multiplied by a vector [x, y]
 template <typename scalar_t>
@@ -108,11 +108,11 @@ at::Tensor butterfly_factor_multiply(const at::Tensor& twiddle, const at::Tensor
   */
   auto output = torch::empty_like(input);
   if (input.is_cuda()) {
-    AT_CHECK(twiddle.is_cuda(), "butterfly_factor_multiply: Expected twiddle to be CUDA tensor");
+    TORCH_CHECK(twiddle.is_cuda(), "butterfly_factor_multiply: Expected twiddle to be CUDA tensor");
     butterfly_factor_multiply_cuda(twiddle, input, output);
     return output;
   }
-  AT_CHECK(!twiddle.is_cuda(), "butterfly_factor_multiply: Expected twiddle to be CPU tensor");
+  TORCH_CHECK(!twiddle.is_cuda(), "butterfly_factor_multiply: Expected twiddle to be CPU tensor");
   const auto batch_size = input.size(0);
   const auto n = input.size(2);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_factor_multiply", [&] {
@@ -177,7 +177,7 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
   const auto n = input.size(2);
   auto d_input = torch::empty_like(input);
   if (input.is_cuda()) {
-    AT_CHECK(twiddle.is_cuda() && grad.is_cuda(), "butterfly_factor_multiply_backward: Expected grad and twiddle to be CUDA tensor");
+    TORCH_CHECK(twiddle.is_cuda() && grad.is_cuda(), "butterfly_factor_multiply_backward: Expected grad and twiddle to be CUDA tensor");
     // CUDA kernel will compute the expanded gradient of @twiddle, then we'll call sum over the batch dimension.
     // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
     auto d_twiddle_expanded = input.dim() == 3 ?
@@ -190,7 +190,7 @@ std::vector<at::Tensor> butterfly_factor_multiply_backward(const at::Tensor& gra
     // return {d_twiddle_expanded[0], d_input};
     return {d_twiddle_expanded, d_input};
   }
-  AT_CHECK((!twiddle.is_cuda()) && (!grad.is_cuda()) , "butterfly_factor_multiply_backward: Expected grad and twiddle to be CPU tensor");
+  TORCH_CHECK((!twiddle.is_cuda()) && (!grad.is_cuda()) , "butterfly_factor_multiply_backward: Expected grad and twiddle to be CPU tensor");
   auto d_twiddle = torch::zeros_like(twiddle);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "butterfly_factor_multiply_backward", [&] {
     switch (input.dim()) {
@@ -266,7 +266,7 @@ at::Tensor butterfly_multiply_inplace(const at::Tensor& twiddle, const at::Tenso
   const auto n = input.size(1);
   auto output = input.clone();
   if (output.is_cuda()) {
-    AT_CHECK(twiddle.is_cuda(), "butterfly_multiply_inplace: Expected twiddle to be CUDA tensor");
+    TORCH_CHECK(twiddle.is_cuda(), "butterfly_multiply_inplace: Expected twiddle to be CUDA tensor");
     // butterfly_multiply_inplace_cuda(twiddle, output);
     // int m = int(log2((double) input.size(1)));
     auto input_temp_phi = input.dim() == 3 ?
@@ -275,7 +275,7 @@ at::Tensor butterfly_multiply_inplace(const at::Tensor& twiddle, const at::Tenso
     butterfly_multiply_inplace_cuda(twiddle, output);
     return output;
   }
-  AT_CHECK(!twiddle.is_cuda(), "butterfly_multiply_inplace: Expected twiddle to be CPU tensor");
+  TORCH_CHECK(!twiddle.is_cuda(), "butterfly_multiply_inplace: Expected twiddle to be CPU tensor");
   // const auto batch_size = output.size(0);
   // const auto n = output.size(1);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "butterfly_multiply_inplace", [&] {
@@ -354,11 +354,11 @@ std::vector<at::Tensor> butterfly_multiply_inplace_backward(const at::Tensor& gr
   auto d_twiddle = torch::zeros_like(twiddle);
   auto output_clone = at::_cast_Double(output.clone());
   if (output.is_cuda()) {
-    AT_CHECK(twiddle.is_cuda() && grad.is_cuda(), "butterfly_multiply_inplace_backward: Expected grad and twiddle to be CUDA tensor");
+    TORCH_CHECK(twiddle.is_cuda() && grad.is_cuda(), "butterfly_multiply_inplace_backward: Expected grad and twiddle to be CUDA tensor");
     butterfly_multiply_inplace_backward_cuda(grad, twiddle, output_clone, d_twiddle, d_input);
     return {d_twiddle, d_input};
   }
-  AT_CHECK((!twiddle.is_cuda()) && (!grad.is_cuda()) , "butterfly_multiply_inplace_backward: Expected grad and twiddle to be CPU tensor");
+  TORCH_CHECK((!twiddle.is_cuda()) && (!grad.is_cuda()) , "butterfly_multiply_inplace_backward: Expected grad and twiddle to be CPU tensor");
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(), "butterfly_multiply_inplace_backward", [&] {
     switch (grad.dim()) {
       case 2:  // real
@@ -456,12 +456,12 @@ at::Tensor butterfly_multiply_intermediate(const at::Tensor& twiddle, const at::
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double) n));
-  AT_CHECK((twiddle.dim() == 4 && input.dim() == 3) || (twiddle.dim() == 5 && input.dim() == 4),
+  TORCH_CHECK((twiddle.dim() == 4 && input.dim() == 3) || (twiddle.dim() == 5 && input.dim() == 4),
            "butterfly_multiply_intermediate: twiddle and input must have dimension 4,3 or 5,4");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == n - 1 && twiddle.size(2) == 2 && twiddle.size(3) == 2, "butterfly_multiply_intermediate: twiddle must have shape (nstack, n-1, 2, 2) or (nstack, n-1, 2, 2, 2)");
+  TORCH_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == n - 1 && twiddle.size(2) == 2 && twiddle.size(3) == 2, "butterfly_multiply_intermediate: twiddle must have shape (nstack, n-1, 2, 2) or (nstack, n-1, 2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
   auto output = input.dim() == 3 ?
     torch::empty({output_first_dim, batch_size, nstack, n}, torch::dtype(input.dtype()).device(input.device())) :
@@ -555,14 +555,14 @@ std::vector<at::Tensor> butterfly_multiply_intermediate_backward(const at::Tenso
   const auto nstack = grad.size(1);
   const auto n = grad.size(2);
   const int log_n = int(log2((double) n));
-  AT_CHECK((grad.dim() == 3 && twiddle.dim() == 4 && output.dim() == 4) || (grad.dim() == 4 && twiddle.dim() == 5 && output.dim() == 5),
+  TORCH_CHECK((grad.dim() == 3 && twiddle.dim() == 4 && output.dim() == 4) || (grad.dim() == 4 && twiddle.dim() == 5 && output.dim() == 5),
            "butterfly_multiply_intermediate_backward: grad, twiddle, and output must have dimension 3,4,4 or 4,5,5");
   CHECK_DEVICE(grad);
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(output);
-  AT_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == n - 1 && twiddle.size(2) == 2 && twiddle.size(3) == 2, "butterfly_multiply_intermediate_backward: twiddle must have shape (nstack, n-1, 2, 2) or (nstack, n-1, 2, 2, 2)");
-  AT_CHECK(output.size(0) == log_n + 1 && output.size(1) == batch_size && output.size(2) == nstack && output.size(3) == n, "butterfly_multiply_intermediate_backward: output must have shape (log n + 1, batch_size, nstack, n) or (log n + 1, batch_size, nstack, n, 2)");
+  TORCH_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == n - 1 && twiddle.size(2) == 2 && twiddle.size(3) == 2, "butterfly_multiply_intermediate_backward: twiddle must have shape (nstack, n-1, 2, 2) or (nstack, n-1, 2, 2, 2)");
+  TORCH_CHECK(output.size(0) == log_n + 1 && output.size(1) == batch_size && output.size(2) == nstack && output.size(3) == n, "butterfly_multiply_intermediate_backward: output must have shape (log n + 1, batch_size, nstack, n) or (log n + 1, batch_size, nstack, n, 2)");
   auto d_input = grad.clone();
   auto d_twiddle = torch::zeros_like(twiddle);
   if (output.is_cuda()) {
@@ -674,12 +674,12 @@ at::Tensor butterfly_multiply_untied(const at::Tensor& twiddle, const at::Tensor
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double) n));
-  AT_CHECK((twiddle.dim() == 5 && input.dim() == 3) || (twiddle.dim() == 6 && input.dim() == 4),
+  TORCH_CHECK((twiddle.dim() == 5 && input.dim() == 3) || (twiddle.dim() == 6 && input.dim() == 4),
            "butterfly_multiply_untied: twiddle and input must have dimension 5,3 or 6,4");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
+  TORCH_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
            "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
   auto output = input.dim() == 3 ?
@@ -883,12 +883,12 @@ at::Tensor butterfly_multiply_untied(const at::Tensor& twiddle, const at::Tensor
 //   const auto n = input.size(2);
 //   const int log_n = int(log2((double) n));
 //   at::Tensor output;
-//   AT_CHECK(twiddle.dim() == 5 && input.dim() == 3,
+//   TORCH_CHECK(twiddle.dim() == 5 && input.dim() == 3,
 //            "butterfly_multiply_untied: twiddle and input must have dimension 5,3");
 //   CHECK_DEVICE(twiddle);
 //   CHECK_DEVICE(input);
-//   AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-//   AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
+//   TORCH_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+//   TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
 //            "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2)");
 //   const auto twiddle_a = twiddle.accessor<float, 5>();
 //   const float* twiddle_data = twiddle.data<float>();
@@ -935,14 +935,14 @@ std::vector<at::Tensor> butterfly_multiply_untied_backward(const at::Tensor& gra
   const auto nstack = grad.size(1);
   const auto n = grad.size(2);
   const int log_n = int(log2((double) n));
-  AT_CHECK((grad.dim() == 3 && twiddle.dim() == 5 && output.dim() == 4) || (grad.dim() == 4 && twiddle.dim() == 6 && output.dim() == 5),
+  TORCH_CHECK((grad.dim() == 3 && twiddle.dim() == 5 && output.dim() == 4) || (grad.dim() == 4 && twiddle.dim() == 6 && output.dim() == 5),
            "butterfly_multiply_untied_backward: grad, twiddle, and output must have dimension 3,5,4 or 4,6,5");
   CHECK_DEVICE(grad);
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(output);
-  AT_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_backward: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
-  AT_CHECK(output.size(0) == log_n + 1 && output.size(1) == batch_size && output.size(2) == nstack && output.size(3) == n, "butterfly_multiply_untied_backward: output must have shape (log n + 1, batch_size, nstack, n) or (log n + 1, batch_size, nstack, n, 2)");
+  TORCH_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_backward: twiddle must have shape (nstack, log n, n/2, 2, 2) or (nstack, log n, n/2, 2, 2, 2)");
+  TORCH_CHECK(output.size(0) == log_n + 1 && output.size(1) == batch_size && output.size(2) == nstack && output.size(3) == n, "butterfly_multiply_untied_backward: output must have shape (log n + 1, batch_size, nstack, n) or (log n + 1, batch_size, nstack, n, 2)");
   auto d_input = grad.clone();
   auto d_twiddle = torch::zeros_like(twiddle);
   if (output.is_cuda()) {
@@ -1050,19 +1050,19 @@ std::vector<at::Tensor> butterfly_multiply_untied_forward_backward(const at::Ten
   const auto batch_size = input.size(0);
   const auto nstack = input.size(1);
   const auto n = input.size(2);
-  AT_CHECK(n <= 1024, "butterfly_multiply_untied_forward_backward: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "butterfly_multiply_untied_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
-  AT_CHECK(twiddle.dim() == 5 && input.dim() == 3 && grad.dim() == 3,
+  TORCH_CHECK(twiddle.dim() == 5 && input.dim() == 3 && grad.dim() == 3,
            "butterfly_multiply_untied_forward_backward: twiddle, input, and grad must have dimension 5,3,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
-  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_forward_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
-  AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "butterfly_multiply_untied_forward_backward: grad must have shape (batch_size, nstack, n)");
+  TORCH_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_forward_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  TORCH_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "butterfly_multiply_untied_forward_backward: grad must have shape (batch_size, nstack, n)");
   auto d_input = torch::empty_like(input);
   auto d_twiddle = torch::zeros_like(twiddle);
-  AT_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_backward: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_backward: only supports CUDA");
   butterfly_multiply_untied_forward_backward_cuda(twiddle, input, grad, d_twiddle, d_input, increasing_stride);
   return {d_twiddle, d_input} ;
 }
@@ -1081,15 +1081,15 @@ at::Tensor butterfly_ortho_multiply_tied(const at::Tensor& twiddle_cos, const at
   */
   const auto nstack = input.size(1);
   const auto n = input.size(2);
-  AT_CHECK(n <= 1024, "butterfly_ortho_multiply_tied: only supports n <= 1024");
-  AT_CHECK(twiddle_cos.dim() == 2 && input.dim() == 3,
+  TORCH_CHECK(n <= 1024, "butterfly_ortho_multiply_tied: only supports n <= 1024");
+  TORCH_CHECK(twiddle_cos.dim() == 2 && input.dim() == 3,
            "butterfly_ortho_multiply_tied: twiddle_cos, and input, must have dimension 2,3");
   CHECK_DEVICE(twiddle_cos);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle_cos.device() == input.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == n - 1, "butterfly_ortho_multiply_tied: twiddle_cos must have shape (nstack, n - 1)");
+  TORCH_CHECK(twiddle_cos.device() == input.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (", input.device(), ")");
+  TORCH_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == n - 1, "butterfly_ortho_multiply_tied: twiddle_cos must have shape (nstack, n - 1)");
   auto output = torch::empty_like(input);
-  AT_CHECK(input.is_cuda(), "butterfly_ortho_multiply_tied: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_ortho_multiply_tied: only supports CUDA");
   butterfly_ortho_multiply_tied_cuda(twiddle_cos, twiddle_sin, input, output, increasing_stride);
   return output;
 }
@@ -1111,18 +1111,18 @@ std::vector<at::Tensor> butterfly_ortho_multiply_tied_backward(const at::Tensor&
   const auto batch_size = output.size(0);
   const auto nstack = output.size(1);
   const auto n = output.size(2);
-  AT_CHECK(n <= 1024, "butterfly_ortho_multiply_tied_backward: only supports n <= 1024");
-  AT_CHECK(twiddle_cos.dim() == 2 && output.dim() == 3 && grad.dim() == 3,
+  TORCH_CHECK(n <= 1024, "butterfly_ortho_multiply_tied_backward: only supports n <= 1024");
+  TORCH_CHECK(twiddle_cos.dim() == 2 && output.dim() == 3 && grad.dim() == 3,
            "butterfly_ortho_multiply_tied_backward: twiddle_cos, output, and grad must have dimension 2,3,3");
   CHECK_DEVICE(twiddle_cos);
   CHECK_DEVICE(output);
   CHECK_DEVICE(grad);
-  AT_CHECK(twiddle_cos.device() == output.device() && twiddle_cos.device() == grad.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of output (", output.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == n - 1, "butterfly_ortho_multiply_tied_backward: twiddle_cos must have shape (nstack, n - 1)");
-  AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "butterfly_ortho_multiply_tied_backward: grad must have shape (batch_size, nstack, n)");
+  TORCH_CHECK(twiddle_cos.device() == output.device() && twiddle_cos.device() == grad.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of output (", output.device(), ") and grad (", grad.device(), ")");
+  TORCH_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == n - 1, "butterfly_ortho_multiply_tied_backward: twiddle_cos must have shape (nstack, n - 1)");
+  TORCH_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "butterfly_ortho_multiply_tied_backward: grad must have shape (batch_size, nstack, n)");
   auto d_input = torch::empty_like(output);
   auto d_twiddle = torch::zeros_like(twiddle_cos);
-  AT_CHECK(output.is_cuda(), "butterfly_ortho_multiply_tied_backward: only supports CUDA");
+  TORCH_CHECK(output.is_cuda(), "butterfly_ortho_multiply_tied_backward: only supports CUDA");
   butterfly_ortho_multiply_tied_backward_cuda(twiddle_cos, twiddle_sin, output, grad, d_twiddle, d_input, increasing_stride);
   return {d_twiddle, d_input} ;
 }
@@ -1142,16 +1142,16 @@ at::Tensor butterfly_ortho_multiply_untied(const at::Tensor& twiddle_cos, const 
   */
   const auto nstack = input.size(1);
   const auto n = input.size(2);
-  AT_CHECK(n <= 1024, "butterfly_ortho_multiply_untied: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "butterfly_ortho_multiply_untied: only supports n <= 1024");
   const int log_n = int(log2((double) n));
-  AT_CHECK(twiddle_cos.dim() == 3 && input.dim() == 3,
+  TORCH_CHECK(twiddle_cos.dim() == 3 && input.dim() == 3,
            "butterfly_ortho_multiply_untied: twiddle_cos, and input, must have dimension 3,3");
   CHECK_DEVICE(twiddle_cos);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle_cos.device() == input.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == log_n && twiddle_cos.size(2) == n / 2, "butterfly_ortho_multiply_untied: twiddle_cos must have shape (nstack, log n, n/2)");
+  TORCH_CHECK(twiddle_cos.device() == input.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (", input.device(), ")");
+  TORCH_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == log_n && twiddle_cos.size(2) == n / 2, "butterfly_ortho_multiply_untied: twiddle_cos must have shape (nstack, log n, n/2)");
   auto output = torch::empty_like(input);
-  AT_CHECK(input.is_cuda(), "butterfly_ortho_multiply_untied: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_ortho_multiply_untied: only supports CUDA");
   butterfly_ortho_multiply_untied_cuda(twiddle_cos, twiddle_sin, input, output, increasing_stride);
   return output;
 }
@@ -1173,19 +1173,19 @@ std::vector<at::Tensor> butterfly_ortho_multiply_untied_backward(const at::Tenso
   const auto batch_size = output.size(0);
   const auto nstack = output.size(1);
   const auto n = output.size(2);
-  AT_CHECK(n <= 1024, "butterfly_ortho_multiply_untied_backward: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "butterfly_ortho_multiply_untied_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
-  AT_CHECK(twiddle_cos.dim() == 3 && output.dim() == 3 && grad.dim() == 3,
+  TORCH_CHECK(twiddle_cos.dim() == 3 && output.dim() == 3 && grad.dim() == 3,
            "butterfly_ortho_multiply_untied_backward: twiddle_cos, output, and grad must have dimension 3,3,3");
   CHECK_DEVICE(twiddle_cos);
   CHECK_DEVICE(output);
   CHECK_DEVICE(grad);
-  AT_CHECK(twiddle_cos.device() == output.device() && twiddle_cos.device() == grad.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of output (", output.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == log_n && twiddle_cos.size(2) == n / 2, "butterfly_ortho_multiply_untied_backward: twiddle_cos must have shape (nstack, * log n, n/2)");
-  AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "butterfly_ortho_multiply_untied_backward: grad must have shape (batch_size, nstack, n)");
+  TORCH_CHECK(twiddle_cos.device() == output.device() && twiddle_cos.device() == grad.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of output (", output.device(), ") and grad (", grad.device(), ")");
+  TORCH_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == log_n && twiddle_cos.size(2) == n / 2, "butterfly_ortho_multiply_untied_backward: twiddle_cos must have shape (nstack, * log n, n/2)");
+  TORCH_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "butterfly_ortho_multiply_untied_backward: grad must have shape (batch_size, nstack, n)");
   auto d_input = torch::empty_like(output);
   auto d_twiddle = torch::zeros_like(twiddle_cos);
-  AT_CHECK(output.is_cuda(), "butterfly_ortho_multiply_untied_backward: only supports CUDA");
+  TORCH_CHECK(output.is_cuda(), "butterfly_ortho_multiply_untied_backward: only supports CUDA");
   butterfly_ortho_multiply_untied_backward_cuda(twiddle_cos, twiddle_sin, output, grad, d_twiddle, d_input, increasing_stride);
   return {d_twiddle, d_input} ;
 }
@@ -1202,18 +1202,18 @@ at::Tensor bbt_multiply_untied(const at::Tensor& twiddle, const at::Tensor& inpu
   */
   const auto nstack = input.size(1);
   const auto n = input.size(2);
-  AT_CHECK(n <= 1024, "bbt_multiply_untied: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "bbt_multiply_untied: only supports n <= 1024");
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle.size(1) / (2 * log_n);
-  AT_CHECK(nblocks <= 14, "bbt_multiply_untied: nblocks must be <= 14");
-  AT_CHECK(twiddle.dim() == 5 && input.dim() == 3,
+  TORCH_CHECK(nblocks <= 14, "bbt_multiply_untied: nblocks must be <= 14");
+  TORCH_CHECK(twiddle.dim() == 5 && input.dim() == 3,
            "bbt_multiply_untied: twiddle, and input, must have dimension 5,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == nblocks * 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_untied: twiddle must have shape (nstack, nblocks * 2 * log n, n/2, 2, 2)");
+  TORCH_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == nblocks * 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_untied: twiddle must have shape (nstack, nblocks * 2 * log n, n/2, 2, 2)");
   auto output = torch::empty_like(input);
-  AT_CHECK(input.is_cuda(), "bbt_multiply_untied: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "bbt_multiply_untied: only supports CUDA");
   bbt_multiply_untied_cuda(twiddle, input, output);
   return output;
 }
@@ -1234,21 +1234,21 @@ std::vector<at::Tensor> bbt_multiply_untied_forward_backward(const at::Tensor& t
   const auto batch_size = input.size(0);
   const auto nstack = input.size(1);
   const auto n = input.size(2);
-  AT_CHECK(n <= 1024, "bbt_multiply_untied_forward_backward: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "bbt_multiply_untied_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle.size(1) / (2 * log_n);
-  AT_CHECK(nblocks <= 14, "bbt_multiply_untied_forward_backward: nblocks must be <= 14");
-  AT_CHECK(twiddle.dim() == 5 && input.dim() == 3 && grad.dim() == 3,
+  TORCH_CHECK(nblocks <= 14, "bbt_multiply_untied_forward_backward: nblocks must be <= 14");
+  TORCH_CHECK(twiddle.dim() == 5 && input.dim() == 3 && grad.dim() == 3,
            "bbt_multiply_untied_forward_backward: twiddle, input, and grad must have dimension 5,3,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
-  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == nblocks * 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_untied_forward_backward: twiddle must have shape (nstack, nblocks * 2 * log n, n/2, 2, 2)");
-  AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "bbt_multiply_untied_forward_backward: grad must have shape (batch_size, nstack, n)");
+  TORCH_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == nblocks * 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_untied_forward_backward: twiddle must have shape (nstack, nblocks * 2 * log n, n/2, 2, 2)");
+  TORCH_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "bbt_multiply_untied_forward_backward: grad must have shape (batch_size, nstack, n)");
   auto d_input = torch::empty_like(input);
   auto d_twiddle = torch::zeros_like(twiddle);
-  AT_CHECK(input.is_cuda(), "bbt_multiply_untied_forward_backward: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "bbt_multiply_untied_forward_backward: only supports CUDA");
   bbt_multiply_untied_forward_backward_cuda(twiddle, input, grad, d_twiddle, d_input);
   return {d_twiddle, d_input} ;
 }
@@ -1266,18 +1266,18 @@ at::Tensor bbt_ortho_multiply_untied(const at::Tensor& twiddle_cos, const at::Te
   */
   const auto nstack = input.size(1);
   const auto n = input.size(2);
-  AT_CHECK(n <= 1024, "bbt_ortho_multiply_untied: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "bbt_ortho_multiply_untied: only supports n <= 1024");
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
-  AT_CHECK(nblocks <= 14, "bbt_ortho_multiply_untied: nblocks must be <= 14");
-  AT_CHECK(twiddle_cos.dim() == 3 && input.dim() == 3,
+  TORCH_CHECK(nblocks <= 14, "bbt_ortho_multiply_untied: nblocks must be <= 14");
+  TORCH_CHECK(twiddle_cos.dim() == 3 && input.dim() == 3,
            "bbt_ortho_multiply_untied: twiddle_cos, and input, must have dimension 3,3");
   CHECK_DEVICE(twiddle_cos);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle_cos.device() == input.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == nblocks * 2 * log_n && twiddle_cos.size(2) == n / 2, "bbt_ortho_multiply_untied: twiddle_cos must have shape (nstack, nblocks * 2 * log n, n/2)");
+  TORCH_CHECK(twiddle_cos.device() == input.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of input (", input.device(), ")");
+  TORCH_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == nblocks * 2 * log_n && twiddle_cos.size(2) == n / 2, "bbt_ortho_multiply_untied: twiddle_cos must have shape (nstack, nblocks * 2 * log n, n/2)");
   auto output = torch::empty_like(input);
-  AT_CHECK(input.is_cuda(), "bbt_ortho_multiply_untied: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "bbt_ortho_multiply_untied: only supports CUDA");
   bbt_ortho_multiply_untied_cuda(twiddle_cos, twiddle_sin, input, output);
   return output;
 }
@@ -1299,21 +1299,21 @@ std::vector<at::Tensor> bbt_ortho_multiply_untied_backward(const at::Tensor& twi
   const auto batch_size = output.size(0);
   const auto nstack = output.size(1);
   const auto n = output.size(2);
-  AT_CHECK(n <= 1024, "bbt_ortho_multiply_untied_backward: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "bbt_ortho_multiply_untied_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
-  AT_CHECK(nblocks <= 14, "bbt_ortho_multiply_untied_backward: nblocks must be <= 14");
-  AT_CHECK(twiddle_cos.dim() == 3 && output.dim() == 3 && grad.dim() == 3,
+  TORCH_CHECK(nblocks <= 14, "bbt_ortho_multiply_untied_backward: nblocks must be <= 14");
+  TORCH_CHECK(twiddle_cos.dim() == 3 && output.dim() == 3 && grad.dim() == 3,
            "bbt_ortho_multiply_untied_backward: twiddle_cos, output, and grad must have dimension 3,3,3");
   CHECK_DEVICE(twiddle_cos);
   CHECK_DEVICE(output);
   CHECK_DEVICE(grad);
-  AT_CHECK(twiddle_cos.device() == output.device() && twiddle_cos.device() == grad.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of output (", output.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == nblocks * 2 * log_n && twiddle_cos.size(2) == n / 2, "bbt_ortho_multiply_untied_backward: twiddle_cos must have shape (nstack, nblocks * 2 * log n, n/2)");
-  AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "bbt_ortho_multiply_untied_backward: grad must have shape (batch_size, nstack, n)");
+  TORCH_CHECK(twiddle_cos.device() == output.device() && twiddle_cos.device() == grad.device(), "device of twiddle_cos (", twiddle_cos.device(), ") must match device of output (", output.device(), ") and grad (", grad.device(), ")");
+  TORCH_CHECK(twiddle_cos.size(0) == nstack && twiddle_cos.size(1) == nblocks * 2 * log_n && twiddle_cos.size(2) == n / 2, "bbt_ortho_multiply_untied_backward: twiddle_cos must have shape (nstack, nblocks * 2 * log n, n/2)");
+  TORCH_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "bbt_ortho_multiply_untied_backward: grad must have shape (batch_size, nstack, n)");
   auto d_input = torch::empty_like(output);
   auto d_twiddle = torch::zeros_like(twiddle_cos);
-  AT_CHECK(output.is_cuda(), "bbt_ortho_multiply_untied_backward: only supports CUDA");
+  TORCH_CHECK(output.is_cuda(), "bbt_ortho_multiply_untied_backward: only supports CUDA");
   bbt_ortho_multiply_untied_backward_cuda(twiddle_cos, twiddle_sin, output, grad, d_twiddle, d_input);
   return {d_twiddle, d_input} ;
 }
@@ -1348,10 +1348,10 @@ at::Tensor butterfly_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   int64_t w_out = w + 2 * padding - (kernel_size - 1);
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
-  AT_CHECK((twiddle.dim() == 5 && input.dim() == 4),
+  TORCH_CHECK((twiddle.dim() == 5 && input.dim() == 4),
             "butterfly_conv2d: twiddle and input must have dimension 5,4");
-  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_conv2d: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  TORCH_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  TORCH_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_conv2d: twiddle must have shape (nstack, log n, n/2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
   // return unfolded output
   auto output = torch::zeros({output_first_dim, b_in*h_out*w_out, bstack, c_in},
@@ -1391,9 +1391,9 @@ std::vector<at::Tensor> butterfly_conv2d_backward(const at::Tensor& grad, const 
   CHECK_DEVICE(grad);
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(output);
-  AT_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
-  AT_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_conv2d_backward: twiddle must have shape (nstack, log n, n/2, 2, 2) where n=c_in");
-  AT_CHECK(output.size(0) == log_n + 1&& output.size(1) == batch_size && output.size(2) == bstack && output.size(3) == c_in, "butterfly_conv2d_backward: output must have shape (log n + 1, b_in * h_out * w_out, nstack, n)");
+  TORCH_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
+  TORCH_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_conv2d_backward: twiddle must have shape (nstack, log n, n/2, 2, 2) where n=c_in");
+  TORCH_CHECK(output.size(0) == log_n + 1&& output.size(1) == batch_size && output.size(2) == bstack && output.size(3) == c_in, "butterfly_conv2d_backward: output must have shape (log n + 1, b_in * h_out * w_out, nstack, n)");
   auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::zeros({b_in, c_in, h_in, w_in},
     torch::dtype(grad.dtype()).device(grad.device()));
@@ -1434,24 +1434,24 @@ std::vector<at::Tensor> butterfly_conv2d_forward_backward(
   const int64_t w_out = w_in + 2 * padding - (kernel_size - 1);
   // const int64_t b_out = b_in * h_out * w_out;  // Unused
   const int64_t nstack = grad.size(1);
-  AT_CHECK(n <= 1024, "butterfly_conv2d_forward_backward: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "butterfly_conv2d_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
-  AT_CHECK(twiddle.dim() == 5 && input.dim() == 4 && grad.dim() == 3,
+  TORCH_CHECK(twiddle.dim() == 5 && input.dim() == 4 && grad.dim() == 3,
            "butterfly_conv2d_forward_backward: twiddle, input, and grad must have dimension 5,4,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
-  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(),
+  TORCH_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(),
     "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n
     && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
      "butterfly_conv2d_forward_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
-  // AT_CHECK(grad.size(0) == b_out && grad.size(2) == n,
+  // TORCH_CHECK(grad.size(0) == b_out && grad.size(2) == n,
   //   "butterfly_conv2d_forward_backward: grad must have shape (batch_size, nstack, n)");
   auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::zeros({b_in, c_in, h_in, w_in},
     torch::dtype(grad.dtype()).device(grad.device()));
-  AT_CHECK(input.is_cuda(), "butterfly_conv2d_forward_backward: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_conv2d_forward_backward: only supports CUDA");
   butterfly_conv2d_forward_backward_cuda(twiddle, input, grad, d_twiddle,
                                          d_input, kernel_size,
                                          padding, h_out, w_out, increasing_stride);
@@ -1473,22 +1473,22 @@ at::Tensor bbt_conv2d(const at::Tensor& twiddle, const at::Tensor& input,
   const int64_t c_in = input.size(1);
   // twiddle nstack = c_out/c_in * matrix batach
   const int64_t n = c_in; // rename to be consistent with dimension of bbt
-  AT_CHECK(n <= 1024, "bbt_conv2d: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "bbt_conv2d: only supports n <= 1024");
   // const int64_t c_out = twiddle.size(0) / (kernel_size*kernel_size) * c_in;  // Unused
   const int64_t h = input.size(2);
   const int64_t w = input.size(3);
   const int64_t log_n = int(log2((double) c_in));
   const int nblocks = twiddle.size(1) / (2 * log_n);
-  AT_CHECK(nblocks <= 14, "bbt_multiply_untied: nblocks must be <= 14");
+  TORCH_CHECK(nblocks <= 14, "bbt_multiply_untied: nblocks must be <= 14");
   const int64_t bstack = twiddle.size(0);
   int64_t h_out = h + 2 * padding - (kernel_size - 1);
   int64_t w_out = w + 2 * padding - (kernel_size - 1);
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
-  AT_CHECK((twiddle.dim() == 5 && input.dim() == 4),
+  TORCH_CHECK((twiddle.dim() == 5 && input.dim() == 4),
             "bbt_conv2d: twiddle and input must have dimension 5,4");
-  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(1) == nblocks * 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_conv2d: twiddle must have shape (nstack, nblocks * 2 * log n, n/2, 2, 2)");
+  TORCH_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  TORCH_CHECK(twiddle.size(1) == nblocks * 2 * log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "bbt_multiply_conv2d: twiddle must have shape (nstack, nblocks * 2 * log n, n/2, 2, 2)");
   // return unfolded output
   auto output = torch::empty({b_in*h_out*w_out, bstack, c_in},
     torch::dtype(input.dtype()).device(input.device()));
@@ -1521,25 +1521,25 @@ std::vector<at::Tensor> bbt_conv2d_forward_backward(
   const int64_t w_out = w_in + 2 * padding - (kernel_size - 1);
   // const int64_t b_out = b_in * h_out * w_out;  // Unused
   const int64_t nstack = grad.size(1);
-  AT_CHECK(n <= 1024, "bbt_conv2d_forward_backward: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "bbt_conv2d_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle.size(1) / (2 * log_n);
-  AT_CHECK(nblocks <= 14, "bbt_multiply_untied_forward_backward: nblocks must be <= 14");
-  AT_CHECK(twiddle.dim() == 5 && input.dim() == 4 && grad.dim() == 3,
+  TORCH_CHECK(nblocks <= 14, "bbt_multiply_untied_forward_backward: nblocks must be <= 14");
+  TORCH_CHECK(twiddle.dim() == 5 && input.dim() == 4 && grad.dim() == 3,
            "bbt_conv2d_forward_backward: twiddle, input, and grad must have dimension 5,4,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
-  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(),
+  TORCH_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(),
     "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == nblocks * 2 * log_n
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == nblocks * 2 * log_n
     && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
      "bbt_conv2d_forward_backward: twiddle must have shape (nstack, nblocks * 2 * log n, n/2, 2, 2)");
-  // AT_CHECK(grad.size(0) == b_out && grad.size(2) == n,
+  // TORCH_CHECK(grad.size(0) == b_out && grad.size(2) == n,
   //   "bbt_conv2d_forward_backward: grad must have shape (batch_size, nstack, n)");
   auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::zeros_like(input);
-  AT_CHECK(input.is_cuda(), "bbt_conv2d_forward_backward: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "bbt_conv2d_forward_backward: only supports CUDA");
   bbt_conv2d_forward_backward_cuda(twiddle, input, grad, d_twiddle, d_input,
                                    kernel_size, padding, h_out, w_out);
   return {d_twiddle, d_input} ;
@@ -1569,12 +1569,12 @@ at::Tensor butterfly_multiply_untied_svd(const at::Tensor& twiddle, const at::Te
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double) n));
-  AT_CHECK((twiddle.dim() == 5 && input.dim() == 3),
+  TORCH_CHECK((twiddle.dim() == 5 && input.dim() == 3),
            "butterfly_multiply_untied_svd: twiddle and input must have dimension 5,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
-  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_svd: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  TORCH_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_svd: twiddle must have shape (nstack, log n, n/2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
   auto output = torch::empty({output_first_dim, batch_size, nstack, n}, torch::dtype(input.dtype()).device(input.device()));
   if (!return_intermediates) {
@@ -1636,14 +1636,14 @@ std::vector<at::Tensor> butterfly_multiply_untied_svd_backward(const at::Tensor&
   const auto nstack = grad.size(1);
   const auto n = grad.size(2);
   const int log_n = int(log2((double) n));
-  AT_CHECK((grad.dim() == 3 && twiddle.dim() == 5 && output.dim() == 4),
+  TORCH_CHECK((grad.dim() == 3 && twiddle.dim() == 5 && output.dim() == 4),
            "butterfly_multiply_untied_svd_backward: grad, twiddle, and output must have dimension 3,5,4");
   CHECK_DEVICE(grad);
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(output);
-  AT_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_svd_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
-  AT_CHECK(output.size(0) == log_n + 1 && output.size(1) == batch_size && output.size(2) == nstack && output.size(3) == n, "butterfly_multiply_untied_svd_backward: output must have shape (log n + 1, batch_size, nstack, n)");
+  TORCH_CHECK(grad.device() == twiddle.device() && twiddle.device() == output.device(), "device of grad (", grad.device(), ")twiddle (", twiddle.device(), "), and output (", output.device(), ") must match");
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_svd_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  TORCH_CHECK(output.size(0) == log_n + 1 && output.size(1) == batch_size && output.size(2) == nstack && output.size(3) == n, "butterfly_multiply_untied_svd_backward: output must have shape (log n + 1, batch_size, nstack, n)");
   auto d_input = grad.clone();
   auto d_twiddle = torch::zeros_like(twiddle);
   if (output.is_cuda()) {
@@ -1721,19 +1721,19 @@ std::vector<at::Tensor> butterfly_multiply_untied_svd_forward_backward(const at:
   const auto batch_size = input.size(0);
   const auto nstack = input.size(1);
   const auto n = input.size(2);
-  AT_CHECK(n <= 1024, "butterfly_multiply_untied_svd_forward_backward: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "butterfly_multiply_untied_svd_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
-  AT_CHECK(twiddle.dim() == 5 && input.dim() == 3 && grad.dim() == 3,
+  TORCH_CHECK(twiddle.dim() == 5 && input.dim() == 3 && grad.dim() == 3,
            "butterfly_multiply_untied_svd_forward_backward: twiddle, input, and grad must have dimension 5,3,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
-  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_svd_forward_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
-  AT_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "butterfly_multiply_untied_svd_forward_backward: grad must have shape (batch_size, nstack, n)");
+  TORCH_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_untied_svd_forward_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  TORCH_CHECK(grad.size(0) == batch_size && grad.size(1) == nstack && grad.size(2) == n, "butterfly_multiply_untied_svd_forward_backward: grad must have shape (batch_size, nstack, n)");
   auto d_input = grad.clone();
   auto d_twiddle = torch::zeros_like(twiddle);
-  AT_CHECK(input.is_cuda(), "butterfly_multiply_untied_svd_forward_backward: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_multiply_untied_svd_forward_backward: only supports CUDA");
   butterfly_multiply_untied_svd_forward_backward_cuda(twiddle, input, d_twiddle, d_input, increasing_stride);
   return {d_twiddle, d_input} ;
 }
@@ -1768,10 +1768,10 @@ at::Tensor butterfly_conv2d_svd(const at::Tensor& twiddle, const at::Tensor& inp
   int64_t w_out = w + 2 * padding - (kernel_size - 1);
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
-  AT_CHECK((twiddle.dim() == 5 && input.dim() == 4),
+  TORCH_CHECK((twiddle.dim() == 5 && input.dim() == 4),
             "butterfly_conv2d_svd: twiddle and input must have dimension 5,4");
-  AT_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
-  AT_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_conv2d_svd: twiddle must have shape (nstack, log n, n/2, 2, 2)");
+  TORCH_CHECK(twiddle.device() == input.device(), "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ")");
+  TORCH_CHECK(twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2, "butterfly_multiply_conv2d_svd: twiddle must have shape (nstack, log n, n/2, 2, 2)");
   const int output_first_dim = return_intermediates ? log_n + 1 : 1;
   // return unfolded output
   auto output = torch::zeros({output_first_dim, b_in*h_out*w_out, bstack, c_in},
@@ -1813,24 +1813,24 @@ std::vector<at::Tensor> butterfly_conv2d_svd_forward_backward(
   const int w_out = w_in + 2 * padding - (kernel_size - 1);
   // const int b_out = b_in * h_out * w_out;  // Unused
   const int nstack = grad.size(1);
-  AT_CHECK(n <= 1024, "butterfly_conv2d_svd_forward_backward: only supports n <= 1024");
+  TORCH_CHECK(n <= 1024, "butterfly_conv2d_svd_forward_backward: only supports n <= 1024");
   const int log_n = int(log2((double) n));
-  AT_CHECK(twiddle.dim() == 5 && input.dim() == 4 && grad.dim() == 3,
+  TORCH_CHECK(twiddle.dim() == 5 && input.dim() == 4 && grad.dim() == 3,
            "butterfly_conv2d_svd_forward_backward: twiddle, input, and grad must have dimension 5,4,3");
   CHECK_DEVICE(twiddle);
   CHECK_DEVICE(input);
   CHECK_DEVICE(grad);
-  AT_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(),
+  TORCH_CHECK(twiddle.device() == input.device() && twiddle.device() == grad.device(),
     "device of twiddle (", twiddle.device(), ") must match device of input (", input.device(), ") and grad (", grad.device(), ")");
-  AT_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n
+  TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n
     && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
      "butterfly_conv2d_svd_forward_backward: twiddle must have shape (nstack, log n, n/2, 2, 2)");
-  // AT_CHECK(grad.size(0) == b_out && grad.size(2) == n,
+  // TORCH_CHECK(grad.size(0) == b_out && grad.size(2) == n,
   //   "butterfly_conv2d_svd_forward_backward: grad must have shape (batch_size, nstack, n)");
   auto d_twiddle = torch::zeros_like(twiddle);
   auto d_input = torch::zeros({b_in, c_in, h_in, w_in},
     torch::dtype(grad.dtype()).device(grad.device()));
-  AT_CHECK(input.is_cuda(), "butterfly_conv2d_svd_forward_backward: only supports CUDA");
+  TORCH_CHECK(input.is_cuda(), "butterfly_conv2d_svd_forward_backward: only supports CUDA");
   butterfly_conv2d_svd_forward_backward_cuda(twiddle, input, grad, d_twiddle,
                                              d_input, kernel_size,
                                              padding, h_out, w_out, increasing_stride);
@@ -1846,11 +1846,11 @@ at::Tensor permutation_factor_even_odd_multiply(const at::Tensor& p, const at::T
   */
   auto output = torch::empty_like(input);
   if (input.is_cuda()) {
-    AT_CHECK(p.is_cuda(), "permutation_factor_even_odd_multiply: Expected p to be CUDA tensor");
+    TORCH_CHECK(p.is_cuda(), "permutation_factor_even_odd_multiply: Expected p to be CUDA tensor");
     permutation_factor_even_odd_multiply_cuda(p, input, output);
     return output;
   }
-  AT_CHECK(!p.is_cuda(), "permutation_factor_even_odd_multiply: Expected p to be CPU tensor");
+  TORCH_CHECK(!p.is_cuda(), "permutation_factor_even_odd_multiply: Expected p to be CPU tensor");
   const auto batch_size = input.size(0);
   const auto n = input.size(1);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_even_odd_multiply", [&] {
@@ -1914,7 +1914,7 @@ std::vector<at::Tensor> permutation_factor_even_odd_multiply_backward(const at::
   auto d_input = torch::empty_like(input);
   auto d_p = torch::zeros_like(p);
   if (input.is_cuda()) {
-    AT_CHECK(grad.is_cuda() && p.is_cuda(), "permutation_factor_even_odd_multiply_backward: Expected grad and p to be CUDA tensor");
+    TORCH_CHECK(grad.is_cuda() && p.is_cuda(), "permutation_factor_even_odd_multiply_backward: Expected grad and p to be CUDA tensor");
     // CUDA kernel will compute the expanded gradient of @p, then we'll call sum.
     // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
     auto d_p_expanded = torch::empty({batch_size, n / 2}, torch::dtype(input.dtype()).device(input.device()));
@@ -1922,7 +1922,7 @@ std::vector<at::Tensor> permutation_factor_even_odd_multiply_backward(const at::
     d_p[0] = d_p_expanded.sum();
     return {d_p, d_input};
   }
-  AT_CHECK((!grad.is_cuda()) && (!p.is_cuda()), "permutation_factor_even_odd_multiply_backward: Expected grad and p to be CPU tensor");
+  TORCH_CHECK((!grad.is_cuda()) && (!p.is_cuda()), "permutation_factor_even_odd_multiply_backward: Expected grad and p to be CPU tensor");
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_even_odd_multiply_backward", [&] {
     const scalar_t p_a = p.accessor<scalar_t, 1>()[0];
     auto d_p_a = d_p.accessor<scalar_t, 1>();
@@ -2000,13 +2000,13 @@ at::Tensor permutation_factor_reverse_multiply(const at::Tensor& p, const at::Te
          p input + (1 - p) input_reversed: (batch_size, n) if real or (batch_size, n, 2) if complex
   */
   auto output = torch::empty_like(input);
-  AT_CHECK(input.size(1) > 2, "permutation_factor_reverse_multiply: n must be bigger than 2");
+  TORCH_CHECK(input.size(1) > 2, "permutation_factor_reverse_multiply: n must be bigger than 2");
   if (input.is_cuda()) {
-    AT_CHECK(p.is_cuda(), "permutation_factor_reverse_multiply: Expected p to be CUDA tensor");
+    TORCH_CHECK(p.is_cuda(), "permutation_factor_reverse_multiply: Expected p to be CUDA tensor");
     permutation_factor_reverse_multiply_cuda(p, input, output);
     return output;
   }
-  AT_CHECK(!p.is_cuda(), "permutation_factor_reverse_multiply: Expected p to be CPU tensor");
+  TORCH_CHECK(!p.is_cuda(), "permutation_factor_reverse_multiply: Expected p to be CPU tensor");
   const auto batch_size = input.size(0);
   const auto n = input.size(1);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_reverse_multiply", [&] {
@@ -2076,17 +2076,17 @@ std::vector<at::Tensor> permutation_factor_reverse_multiply_backward(const at::T
   */
   const auto batch_size = grad.size(0);
   const auto n = grad.size(1);
-  AT_CHECK(n > 2, "permutation_factor_reverse_multiply_backward: n must be bigger than 2");
+  TORCH_CHECK(n > 2, "permutation_factor_reverse_multiply_backward: n must be bigger than 2");
   auto d_input = torch::empty_like(input);
   if (input.is_cuda()) {
-    AT_CHECK(grad.is_cuda() && p.is_cuda(), "permutation_factor_reverse_multiply_backward: Expected grad and p to be CUDA tensor");
+    TORCH_CHECK(grad.is_cuda() && p.is_cuda(), "permutation_factor_reverse_multiply_backward: Expected grad and p to be CUDA tensor");
     // CUDA kernel will compute the expanded gradient of @p, then we'll call sum.
     // This is because I haven't figured out how to write efficient reduction kernel in CUDA.
     auto d_p_expanded = torch::empty({2, batch_size, n / 4}, torch::dtype(input.dtype()).device(input.device()));
     permutation_factor_reverse_multiply_backward_cuda(grad, p, input, d_p_expanded, d_input);
     return {d_p_expanded.sum(/*dim=*/{1, 2}), d_input};
   }
-  AT_CHECK((!grad.is_cuda()) && (!p.is_cuda()), "permutation_factor_reverse_multiply_backward: Expected grad and p to be CPU tensor");
+  TORCH_CHECK((!grad.is_cuda()) && (!p.is_cuda()), "permutation_factor_reverse_multiply_backward: Expected grad and p to be CPU tensor");
   auto d_p = torch::zeros_like(p);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "permutation_factor_reverse_multiply_backward", [&] {
     const scalar_t p_a[2] = {p.accessor<scalar_t, 1>()[0], p.accessor<scalar_t, 1>()[1]};
@@ -2175,7 +2175,7 @@ void real_to_complex_strides(at::Tensor& x) {
   /*
     Change from real strides (array of size (..., 2)) to complex strides (array of size (...)).
    */
-  AT_CHECK(x.size(-1) == 2 && x.stride(-1) == 1, "x must have last dimension == 2, which must be contiguous");
+  TORCH_CHECK(x.size(-1) == 2 && x.stride(-1) == 1, "x must have last dimension == 2, which must be contiguous");
   auto strides_ptr = const_cast<int64_t*>(x.strides().data());
   for (int64_t i = 0; i < x.dim() - 1; ++i) {
     strides_ptr[i] /= 2;
@@ -2186,7 +2186,7 @@ void complex_to_real_strides(at::Tensor& x) {
   /*
     Change from complex strides (array of size (...)) to real strides (array of size (..., 2)).
   */
-  AT_CHECK(x.size(-1) == 2 && x.stride(-1) == 1, "x must have last dimension == 2, which must be contiguous");
+  TORCH_CHECK(x.size(-1) == 2 && x.stride(-1) == 1, "x must have last dimension == 2, which must be contiguous");
   auto strides_ptr = const_cast<int64_t*>(x.strides().data());
   for (int64_t i = 0; i < x.dim() - 1; ++i) {
     strides_ptr[i] *= 2;

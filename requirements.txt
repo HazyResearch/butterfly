@@ -1,5 +1,5 @@
 python>=3.6
-pytorch>=1.0
+pytorch>=1.2
 ray>=0.6.5
 sacred
 numpy
