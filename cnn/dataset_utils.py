@@ -66,3 +66,13 @@ def get_dataset(config_dataset):
         return dataloaders['train'], dataloaders['val', dataloaders['test']]
     else:
         assert False, 'Dataset not implemented'
+
+
+def get_mmap_files(traindir, layer):
+    input_size = torch.load(f'{traindir}/{layer}_input_sz.pt')
+    output_size = torch.load(f'{traindir}/{layer}_output_sz.pt')
+    teacher_input = torch.from_file(f'{traindir}/{layer}_input.pt',
+        size=int(np.prod(input_size))).view(input_size)
+    teacher_output = torch.from_file(f'{traindir}/{layer}_output.pt',
+        size=int(np.prod(output_size))).view(output_size)
+    return teacher_input, teacher_output
