@@ -79,13 +79,18 @@ def get_teacher_intermediates(teacher_model, train_loader, layers_to_replace):
         x, = input
         b, c, h, w = x.shape
         x = x.permute(0, 2, 3, 1).reshape(b * h * w, c)
-        # Compute the covariance (actually 2nd moment) E[X^T X].
-        # Average over batches.
         if not hasattr(module, '_count'):
             module._count = 1
         else:
             module._count += 1
-        current_cov = x.t() @ x
+        # Compute the first moment E[X], averaged over batches.
+        current_mean = x.mean(dim=0)
+        if not hasattr(module, '_mean'):
+            module._mean = current_mean
+        else:
+            module._mean += (current_mean - module._mean) / module._count
+        # Compute the covariance (actually 2nd moment) E[X^T X], averaged over batches.
+        current_cov = (x.t() @ x) / x.shape[0]
         if not hasattr(module, '_cov'):
             module._cov = current_cov
         else:
@@ -113,9 +118,10 @@ def get_teacher_intermediates(teacher_model, train_loader, layers_to_replace):
         if args.max_batches is not None and batch_idx == args.max_batches:
             break
     logging.info("Computed teacher intermediates. ")
+    saved_mean = {layer_name + '.mean': module_dict[layer_name]._mean for layer_name in layers_to_replace}
     saved_cov = {layer_name: module_dict[layer_name]._cov for layer_name in layers_to_replace}
     with open(f'{args.output_dir}/input_cov.pt', 'wb') as f:
-        torch.save(saved_cov, f)
+        torch.save({**saved_mean, **saved_cov}, f)
 
 def main():
     # resnet models are different for imagenet
