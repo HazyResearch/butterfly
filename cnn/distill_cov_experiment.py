@@ -81,13 +81,16 @@ class TrainableDistillCovModel(Trainable):
                 param=model_args['param'], nblocks=model_args['nblocks'])
         self.student_module = self.student_module.to(device)
 
-        input_cov = torch.load(config['input_cov_path'], map_location=self.device)[self.layer]
-        # input_cov /= torch.norm(input_cov)
-        # Normalized so that each entry of cholesky factor has magnitude about 1.0
-        # iid standard Gaussian has spectral norm about sqrt(in_channels) + sqrt(out_channels) (Bai-Yin's law)
-        # So we normalize the eigenvalues of input_cov to have size (sqrt(in_channels) + sqrt(out_channels))^2.
-        input_cov *= (math.sqrt(in_channels) + math.sqrt(out_channels)) ** 2 / torch.symeig(input_cov)[0].max()
-        self.input = torch.cholesky(input_cov, upper=True)
+        if config['objective'] == 'frob':
+            self.input = torch.eye(in_channels, device=self.device)
+        else:  # config['objective'] == 'cov'
+            input_cov = torch.load(config['input_cov_path'], map_location=self.device)[self.layer]
+            # input_cov /= torch.norm(input_cov)
+            # Normalized so that each entry of cholesky factor has magnitude about 1.0
+            # iid standard Gaussian has spectral norm about sqrt(in_channels) + sqrt(out_channels) (Bai-Yin's law)
+            # So we normalize the eigenvalues of input_cov to have size (sqrt(in_channels) + sqrt(out_channels))^2.
+            input_cov *= (math.sqrt(in_channels) + math.sqrt(out_channels)) ** 2 / torch.symeig(input_cov)[0].max()
+            self.input = torch.cholesky(input_cov, upper=True)
         self.input = self.input.reshape(in_channels, in_channels, 1, 1)  # To be compatible with conv2d
         with torch.no_grad():
             self.target = teacher_module(self.input)
@@ -170,6 +173,7 @@ def default_config():
                   'param': 'odo',
                   'tied_weight': False,
                   'layer': 'layers.6.conv2'}  # Arguments to be passed to the model, as a dictionary
+    objective = 'cov'  # 'cov' means minimize wrt input covariance, 'frob' means minimize wrt identity input
     optimizer = 'SGD'  # Which optimizer to use, either Adam or SGD
     ntrials = 20  # Number of trials for hyperparameter tuning
     nmaxepochs = 100  # Maximum number of epochs
@@ -178,8 +182,8 @@ def default_config():
     smoke_test = False  # Finish quickly for testing
     dataset = 'imagenet'
     teacher_model = 'mobilenetv1_0.5'
-    teacher_model_path = project_root + '/cnn/mobilenetv1_0.5/checkpoint.pth.tar'
-    input_cov_path = project_root + '/cnn/mobilenetv1_0.5/input_cov.pt'
+    teacher_model_path = project_root + '/cnn/' + teacher_model + '/checkpoint.pth.tar'
+    input_cov_path = project_root + '/cnn/' + teacher_model + '/input_cov.pt'
     min_lr = 1e-4
     max_lr = 1e-2
     grace_period = 10
@@ -188,12 +192,13 @@ def default_config():
     nepochsvalid = nmaxepochs  # Frequency of validation (polishing), in terms of epochs
 
 @ex.capture
-def distillation_experiment(model_args, optimizer, ntrials, result_dir,
+def distillation_experiment(model_args, objective, optimizer, ntrials, result_dir,
                             cuda, smoke_test, teacher_model, teacher_model_path,
                             input_cov_path, dataset, min_lr, max_lr, momentum,
                             nsteps, nepochsvalid):
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
+        'objective': objective,
         'optimizer': optimizer,
         'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(min_lr), math.log(max_lr)) if optimizer == 'Adam'
                                            else random.uniform(math.log(min_lr), math.log(max_lr)))),
@@ -210,7 +215,7 @@ def distillation_experiment(model_args, optimizer, ntrials, result_dir,
         }
     model_args_print = '_'.join([f'{key}_{value}' for key,value in model_args.items()])
     experiment = RayExperiment(
-        name=f'{model_args_print}_{optimizer}',
+        name=f'{teacher_model}_{objective}_{model_args_print}_{optimizer}',
         run=TrainableDistillCovModel,
         local_dir=result_dir,
         num_samples=ntrials,
@@ -225,7 +230,7 @@ def distillation_experiment(model_args, optimizer, ntrials, result_dir,
 
 
 @ex.automain
-def run(model_args, result_dir, nmaxepochs, grace_period):
+def run(model_args, objective, teacher_model, result_dir, nmaxepochs, grace_period):
     experiment = distillation_experiment()
     try:
         with open('../config/redis_address', 'r') as f:
@@ -241,4 +246,4 @@ def run(model_args, result_dir, nmaxepochs, grace_period):
     trials = [trial for trial in trials if trial.last_result is not None]
     loss = [trial.last_result.get('mean_loss', float('inf')) for trial in trials]
 
-    return model_args, min(loss)
+    return teacher_model, model_args, objective, min(loss)

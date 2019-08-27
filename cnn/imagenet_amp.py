@@ -199,7 +199,9 @@ def main():
                 checkpoint = torch.load(args.resume, map_location = lambda storage, loc: storage.cuda(args.gpu))
                 args.start_epoch = checkpoint['epoch']
                 best_prec1 = checkpoint['best_prec1']
-                model.load_state_dict(checkpoint['state_dict'])
+                # Strip names to be compatible with Pytorch 1.2, i.e. 'module.conv1.weight' -> 'conv1.weight'
+                # model.load_state_dict(checkpoint['state_dict'])
+                model.load_state_dict({name.replace('module.', ''): weight for name, weight in checkpoint['state_dict'].items()})
                 optimizer.load_state_dict(checkpoint['optimizer'])
                 print("=> loaded checkpoint '{}' (epoch {})"
                       .format(args.resume, checkpoint['epoch']))
