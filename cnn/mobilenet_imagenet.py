@@ -139,6 +139,21 @@ class MobileNet(nn.Module):
         out = self.linear(out)
         return out
 
+    def mixed_model_state_dict(self, full_model_path, distilled_param_path):
+        current_state_dict_keys = self.state_dict().keys()
+        full_model_state_dict = torch.load(full_model_path, map_location='cpu')['state_dict']
+        full_model_state_dict = {name.replace('module.', ''): param for name, param in full_model_state_dict.items()}
+        distilled_params = torch.load(distilled_param_path, map_location='cpu')
+        state_dict = {name: param for name, param in full_model_state_dict.items() if name in current_state_dict_keys}
+        for i, struct in enumerate(self.structure):
+            # Only support butterfly for now
+            if struct.startswith('odo') or struct.startswith('regular'):
+                layer = f'layers.{i}.conv2'
+                nblocks = int(struct.split('_')[1])
+                structured_param = distilled_params[layer, nblocks]
+                state_dict.update({layer + '.' + name: param for name, param in structured_param.items()})
+        return state_dict
+
 
 def test():
     net = MobileNet()

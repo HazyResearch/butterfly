@@ -53,6 +53,10 @@ parser.add_argument('--n-struct-layers', default=7, type=int,
                     metavar='NSL', help='Number of structured layer (default 7)')
 parser.add_argument('--width', default=1.0, type=float,
                     metavar='WIDTH', help='Width multiplier of the CNN (default 1.0)')
+parser.add_argument('--distilled-param-path', default='', type=str, metavar='PATH',
+                    help='path to distilled parameters (default: none)')
+parser.add_argument('--full-model-path', default='', type=str, metavar='PATH',
+                    help='path to full model checkpoint (default: none)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
@@ -139,6 +143,8 @@ def main():
         elif args.arch == 'mobilenetv1_struct':
             model = MobileNet(width_mult=args.width, structure=[args.struct] * args.n_struct_layers,
                               softmax_structure=args.softmax_struct)
+            if args.distilled_param_path:
+                model.load_state_dict(model.mixed_model_state_dict(args.full_model_path, args.distilled_param_path))
         else:
             model = models.__dict__[args.arch]()
     if args.local_rank == 0:
