@@ -76,23 +76,30 @@ class TrainableDistillCovModel(Trainable):
 
         # create butterfly for specific layer and train
         if model_args['structure_type'] == 'B':
+            param = model_args['param']
+            self.residual = param.endswith('res')
+            param = param.replace('res', '')
             self.student_module = Butterfly1x1Conv(in_channels, out_channels,
                 bias=False, tied_weight=model_args['tied_weight'], ortho_init=True,
-                param=model_args['param'], nblocks=model_args['nblocks'])
+                param=param, nblocks=model_args['nblocks'])
         self.student_module = self.student_module.to(device)
 
         if config['objective'] == 'frob':
             self.input = torch.eye(in_channels, device=self.device)
         else:  # config['objective'] == 'cov'
-            input_cov = torch.load(config['input_cov_path'], map_location=self.device)[self.layer]
-            # input_cov /= torch.norm(input_cov)
-            # Normalized so that each entry of cholesky factor has magnitude about 1.0
+            input_cov = torch.load(config['input_cov_path'], map_location='cpu')[self.layer].numpy()
+            Sigma, U = np.linalg.eigh(input_cov)
+            # Normalized so that each entry of sqrt of input_cov has magnitude about 1.0
             # iid standard Gaussian has spectral norm about sqrt(in_channels) + sqrt(out_channels) (Bai-Yin's law)
             # So we normalize the eigenvalues of input_cov to have size (sqrt(in_channels) + sqrt(out_channels))^2.
-            input_cov *= (math.sqrt(in_channels) + math.sqrt(out_channels)) ** 2 / torch.symeig(input_cov)[0].max()
-            self.input = torch.cholesky(input_cov, upper=True)
-        self.input = self.input.reshape(in_channels, in_channels, 1, 1)  # To be compatible with conv2d
+            # Sigma *= (math.sqrt(in_channels) + math.sqrt(out_channels)) ** 2 / Sigma.max()
+            Sigma = Sigma.clip(0)  # avoid small negative eigenvalues
+            self.input = torch.tensor(np.diag(np.sqrt(Sigma)) @ U.T, dtype=torch.float, device=self.device)
         with torch.no_grad():
+            self.input = self.input.reshape(in_channels, in_channels, 1, 1)  # To be compatible with conv2d
+            self.target = teacher_module(self.input)
+            # Normalize input so that output has MSE 1.0
+            self.input /= math.sqrt((self.target ** 2).mean())
             self.target = teacher_module(self.input)
         if config['optimizer'] == 'Adam':
             self.optimizer = optim.Adam(self.student_module.parameters(), lr=config['lr'])
@@ -103,6 +110,12 @@ class TrainableDistillCovModel(Trainable):
 
     def loss(self):
         output = self.student_module(self.input)
+        if getattr(self, 'residual', False):
+            if output.shape[1] == 2 * self.input.shape[1]:
+                b, c, h, w = self.input.shape
+                output = (output.reshape(b, 2, c, h, w) + self.input.reshape(b, 1, c, h, w)).reshape(b, 2 * c, h, w)
+            else:
+                output = output + self.input
         return F.mse_loss(output, self.target)
 
     def _train(self):
@@ -162,8 +175,8 @@ class TrainableDistillCovModel(Trainable):
 ex = Experiment('ImageNet covariance distillation_experiment')
 ex.observers.append(FileStorageObserver.create('distill_cov_logs'))
 slack_config_path = Path('../config/slack.json')  # Add webhook_url there for Slack notification
-if slack_config_path.exists():
-    ex.observers.append(SlackObserver.from_config(str(slack_config_path)))
+# if slack_config_path.exists():
+#     ex.observers.append(SlackObserver.from_config(str(slack_config_path)))
 
 
 @ex.config
