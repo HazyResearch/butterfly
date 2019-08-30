@@ -134,7 +134,9 @@ class TrainableDistillCovModel(Trainable):
         if not save_to_self_model:
             student_module_bak = self.student_module
             self.student_module = copy.deepcopy(self.student_module)
-        optimizer = optim.LBFGS(filter(lambda p: p.requires_grad, self.student_module.parameters()))
+        optimizer = optim.LBFGS(filter(lambda p: p.requires_grad, self.student_module.parameters()),
+                                tolerance_grad=1e-7,  # Pytorch 1.2 sets this too high https://github.com/pytorch/pytorch/pull/25240
+                                line_search_fn='strong_wolfe')
         def closure():
             optimizer.zero_grad()
             loss = self.loss()
@@ -149,6 +151,7 @@ class TrainableDistillCovModel(Trainable):
                 n_bad_steps = 0
             else:
                 n_bad_steps += 1
+            # print(loss.item())
             if n_bad_steps > patience:
                 break
         if not save_to_self_model:
@@ -209,6 +212,7 @@ def distillation_experiment(model_args, objective, optimizer, ntrials, result_di
                             cuda, smoke_test, teacher_model, teacher_model_path,
                             input_cov_path, dataset, min_lr, max_lr, momentum,
                             nsteps, nepochsvalid):
+    # config={'objective': objective, 'optimizer': optimizer, 'lr': 0.001, 'seed': 42, 'device': 'cuda', 'model_args': dict(model_args), 'teacher_model': teacher_model, 'teacher_model_path': teacher_model_path, 'input_cov_path': input_cov_path, 'dataset': dataset, 'momentum': momentum, 'n_steps_per_epoch': nsteps, 'n_epochs_per_validation': nepochsvalid,}
     assert optimizer in ['Adam', 'SGD'], 'Only Adam and SGD are supported'
     config={
         'objective': objective,
