@@ -25,29 +25,22 @@ try:
 except ImportError:
     raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this example.")
 
-# import imagenet.resnet as models
 import imagenet.logger as log
-
 from imagenet.smoothing import LabelSmoothing
 from imagenet.mixup import NLLMultiLabelSmooth, MixUpWrapper
 from imagenet.dataloaders import DATA_BACKEND_CHOICES
 from imagenet.dataloaders import get_pytorch_train_loader, get_pytorch_val_loader
 from imagenet.dataloaders import get_dali_train_loader, get_dali_val_loader
-# from imagenet.dataloaders import *
 from imagenet.training import ModelAndLoss, get_optimizer, train_loop
 from imagenet.training import lr_step_policy, lr_cosine_policy, lr_linear_policy
-# from imagenet.training import *
 from imagenet.utils import should_backup_checkpoint, save_checkpoint
-# from imagenet.utils import *
 
 
 def add_parser_arguments(parser):
-    # model_names = models.resnet_versions.keys()
     custom_model_names = ['mobilenetv1']
     model_names = sorted(name for name in models.__dict__
                         if name.islower() and not name.startswith("__")
                         and callable(models.__dict__[name])) + custom_model_names
-    # model_configs = models.resnet_configs.keys()
 
     parser.add_argument('data', metavar='DIR',
                         help='path to dataset')
@@ -59,11 +52,6 @@ def add_parser_arguments(parser):
                         help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet50)')
-
-    # parser.add_argument('--model-config', '-c', metavar='CONF', default='classic',
-    #                     choices=model_configs,
-    #                     help='model configs: ' +
-    #                     ' | '.join(model_configs) + '(default: classic)')
 
     parser.add_argument('--struct', metavar='STRUCT', default='odo_4',
                         type=str,
@@ -243,7 +231,6 @@ def main(args):
         loss = lambda: LabelSmoothing(args.label_smoothing)
 
     model_and_loss = ModelAndLoss(
-            # (args.arch, args.model_config),
             args.arch,
             loss,
             pretrained_weights=pretrained_weights,
@@ -304,8 +291,8 @@ def main(args):
 
     if args.amp:
         model_and_loss, optimizer = amp.initialize(
-                model_and_loss, optimizer, 
-                opt_level="O2", 
+                model_and_loss, optimizer,
+                opt_level="O2",
                 loss_scale="dynamic" if args.dynamic_loss_scale else args.static_loss_scale)
 
     if args.distributed:
