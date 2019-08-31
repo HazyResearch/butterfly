@@ -125,10 +125,11 @@ def lr_policy(lr_fn, logger=None):
     return _alr
 
 
-def lr_step_policy(base_lr, steps, decay_factor, warmup_length, logger=None):
+def lr_step_policy(base_lr, steps, decay_factor, warmup_length, epoch_length, logger=None):
     def _lr_fn(iteration, epoch):
         if epoch < warmup_length:
-            lr = base_lr * (epoch + 1) / warmup_length
+            # lr = base_lr * (epoch + 1) / warmup_length
+            lr = base_lr * (1 + iteration + epoch * epoch_length) / (warmup_length * epoch_length)
         else:
             lr = base_lr
             for s in steps:
@@ -139,10 +140,11 @@ def lr_step_policy(base_lr, steps, decay_factor, warmup_length, logger=None):
     return lr_policy(_lr_fn, logger=logger)
 
 
-def lr_linear_policy(base_lr, warmup_length, epochs, logger=None):
+def lr_linear_policy(base_lr, warmup_length, epochs, epoch_length, logger=None):
     def _lr_fn(iteration, epoch):
         if epoch < warmup_length:
-            lr = base_lr * (epoch + 1) / warmup_length
+            # lr = base_lr * (epoch + 1) / warmup_length
+            lr = base_lr * (1 + iteration + epoch * epoch_length) / (warmup_length * epoch_length)
         else:
             e = epoch - warmup_length
             es = epochs - warmup_length
@@ -152,10 +154,11 @@ def lr_linear_policy(base_lr, warmup_length, epochs, logger=None):
     return lr_policy(_lr_fn, logger=logger)
 
 
-def lr_cosine_policy(base_lr, warmup_length, epochs, logger=None):
+def lr_cosine_policy(base_lr, warmup_length, epochs, epoch_length, logger=None):
     def _lr_fn(iteration, epoch):
         if epoch < warmup_length:
-            lr = base_lr * (epoch + 1) / warmup_length
+            # lr = base_lr * (epoch + 1) / warmup_length
+            lr = base_lr * (1 + iteration + epoch * epoch_length) / (warmup_length * epoch_length)
         else:
             e = epoch - warmup_length
             es = epochs - warmup_length

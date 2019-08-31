@@ -296,11 +296,11 @@ def main(args):
             dynamic_loss_scale = args.dynamic_loss_scale)
 
     if args.lr_schedule == 'step':
-        lr_policy = lr_step_policy(args.lr, [30,60,80], 0.1, args.warmup, logger=logger)
+        lr_policy = lr_step_policy(args.lr, [30,60,80], 0.1, args.warmup, train_loader_len, logger=logger)
     elif args.lr_schedule == 'cosine':
-        lr_policy = lr_cosine_policy(args.lr, args.warmup, args.epochs, logger=logger)
+        lr_policy = lr_cosine_policy(args.lr, args.warmup, args.epochs, train_loader_len, logger=logger)
     elif args.lr_schedule == 'linear':
-        lr_policy = lr_linear_policy(args.lr, args.warmup, args.epochs, logger=logger)
+        lr_policy = lr_linear_policy(args.lr, args.warmup, args.epochs, train_loader_len, logger=logger)
 
     if args.amp:
         model_and_loss, optimizer = amp.initialize(
