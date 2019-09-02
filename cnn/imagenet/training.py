@@ -61,7 +61,12 @@ class ModelAndLoss(nn.Module):
 
     def forward(self, data, target):
         output = self.model(data)
-        loss = self.loss(output, target)
+        if hasattr(self, '_teacher_model'):
+            with torch.no_grad():
+                teacher_output = self._teacher_model(data)
+            loss = self.loss(output, teacher_output, target)
+        else:
+            loss = self.loss(output, target)
 
         return loss, output
 

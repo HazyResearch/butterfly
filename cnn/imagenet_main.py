@@ -26,7 +26,7 @@ except ImportError:
     raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this example.")
 
 import imagenet.logger as log
-from imagenet.smoothing import LabelSmoothing
+from imagenet.smoothing import LabelSmoothing, KnowledgeDistillationLoss
 from imagenet.mixup import NLLMultiLabelSmooth, MixUpWrapper
 from imagenet.dataloaders import DATA_BACKEND_CHOICES
 from imagenet.dataloaders import get_pytorch_train_loader, get_pytorch_val_loader
@@ -67,6 +67,11 @@ def add_parser_arguments(parser):
                         help='path to distilled parameters (default: none)')
     parser.add_argument('--full-model-path', default='', type=str, metavar='PATH',
                         help='path to full model checkpoint (default: none)')
+
+    parser.add_argument("--temperature", default=1., type=float,
+                        help="Temperature for the softmax temperature.")
+    parser.add_argument("--alpha-ce", default=0.0, type=float,
+                        help="Linear weight for the distillation loss. Must be >=0.")
 
     parser.add_argument('-j', '--workers', default=5, type=int, metavar='N',
                         help='number of data loading workers (default: 5)')
@@ -229,6 +234,9 @@ def main(args):
         loss = lambda: NLLMultiLabelSmooth(args.label_smoothing)
     elif args.label_smoothing > 0.0:
         loss = lambda: LabelSmoothing(args.label_smoothing)
+    if args.alpha_ce > 0.0:
+        loss_og = loss()
+        loss = lambda: KnowledgeDistillationLoss(loss_og, args.temperature, args.alpha_ce)
 
     model_and_loss = ModelAndLoss(
             args.arch,
@@ -240,6 +248,20 @@ def main(args):
 
     if args.arch == 'mobilenetv1' and args.distilled_param_path:
         model_state = model_and_loss.model.mixed_model_state_dict(args.full_model_path, args.distilled_param_path)
+
+    if args.alpha_ce > 0.0:
+        teacher_model_and_loss = ModelAndLoss(
+                args.arch,
+                loss,
+                pretrained_weights=pretrained_weights,
+                cuda = True, fp16 = args.fp16,
+                width=args.width, n_struct_layers=0)
+        checkpoint = torch.load(args.full_model_path, map_location = lambda storage, loc: storage.cuda(args.gpu))
+        teacher_model_state = checkpoint['state_dict']
+        # Strip names to be compatible with Pytorch 1.2, i.e. 'module.conv1.weight' -> 'conv1.weight'
+        teacher_model_state = {name.replace('module.', ''): weight for name, weight in teacher_model_state.items()}
+        teacher_model_and_loss.model.load_state_dict(teacher_model_state)
+        model_and_loss._teacher_model = teacher_model_and_loss.model
 
     # Create data loaders and optimizers as needed
     if args.data_backend == 'pytorch':

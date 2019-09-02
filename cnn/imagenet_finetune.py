@@ -26,7 +26,7 @@ except ImportError:
     raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this example.")
 
 import imagenet.logger as log
-from imagenet.smoothing import LabelSmoothing
+from imagenet.smoothing import LabelSmoothing, KnowledgeDistillationLoss
 from imagenet.mixup import NLLMultiLabelSmooth, MixUpWrapper
 from imagenet.dataloaders import DATA_BACKEND_CHOICES
 from imagenet.dataloaders import get_pytorch_train_loader, get_pytorch_val_loader
@@ -68,6 +68,11 @@ def add_parser_arguments(parser):
                         help='path to distilled parameters (default: none)')
     parser.add_argument('--full-model-path', default='', type=str, metavar='PATH',
                         help='path to full model checkpoint (default: none)')
+
+    parser.add_argument("--temperature", default=1., type=float,
+                        help="Temperature for the softmax temperature.")
+    parser.add_argument("--alpha-ce", default=0.0, type=float,
+                        help="Linear weight for the distillation loss. Must be >=0.")
 
     parser.add_argument('-j', '--workers', default=5, type=int, metavar='N',
                         help='number of data loading workers (default: 5)')
@@ -230,6 +235,9 @@ def main(args):
         loss = lambda: NLLMultiLabelSmooth(args.label_smoothing)
     elif args.label_smoothing > 0.0:
         loss = lambda: LabelSmoothing(args.label_smoothing)
+    if args.alpha_ce > 0.0:
+        loss_og = loss()
+        loss = lambda: KnowledgeDistillationLoss(loss_og, args.temperature, args.alpha_ce)
 
     # Create data loaders and optimizers as needed
     if args.data_backend == 'pytorch':
@@ -287,6 +295,7 @@ def main(args):
     model_and_loss.model.load_state_dict(model_state)
     if args.distributed:
         model_and_loss.distributed()
+    teacher_model = model_and_loss.model
     layers_to_replace = ['layers.12.conv2', 'layers.11.conv2', 'layers.10.conv2', 'layers.9.conv2',
                          'layers.8.conv2', 'layers.7.conv2', 'layers.6.conv2']
     for n_struct_layers in range(1, args.n_struct_layers + 1):
@@ -340,6 +349,9 @@ def main(args):
 
         if args.distributed:
             model_and_loss.distributed()
+        if args.alpha_ce > 0.0:
+            model_and_loss._teacher_model = teacher_model
+            model_and_loss._teacher_model.eval()
 
         train_loop(
             model_and_loss, optimizer,
