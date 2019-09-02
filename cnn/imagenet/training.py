@@ -454,9 +454,8 @@ def butterfly_projection_cov(teacher_module, input_cov, butterfly_structure='odo
     except:
         raise ValueError("Only convolutional layers currently supported.")
     param = butterfly_structure.split('_')[0]
-    residual = param.endswith('res')
-    param = param.replace('res', '')
     nblocks = 0 if len(butterfly_structure.split('_')) <= 1 else int(butterfly_structure.split('_')[1])
+    residual = False if len(butterfly_structure.split('_')) <= 2 else (butterfly_structure.split('_')[2] == 'res')
     student_module = Butterfly1x1Conv(in_channels, out_channels,
         bias=False, tied_weight=False, ortho_init=True,
         param=param, nblocks=nblocks)
