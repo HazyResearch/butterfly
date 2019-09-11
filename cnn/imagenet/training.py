@@ -78,7 +78,7 @@ class ModelAndLoss(nn.Module):
             self.model.load_state_dict(state)
 
 
-def get_optimizer(parameters, fp16, lr, momentum, weight_decay,
+def get_optimizer(parameters, fp16, lr, momentum, structured_momentum, weight_decay,
                   nesterov=False,
                   state=None,
                   static_loss_scale=1., dynamic_loss_scale=False,
@@ -90,7 +90,7 @@ def get_optimizer(parameters, fp16, lr, momentum, weight_decay,
         no_wd_params = [v for n, v in parameters if getattr(v, '_no_wd', False)]
         unstructured_params = [v for n, v in parameters
                                if not getattr(v, '_is_structured', False) and not getattr(v, '_no_wd', False)]
-        params_dict = [{'params': structured_params, 'weight_decay': 0.0},
+        params_dict = [{'params': structured_params, 'weight_decay': 0.0, 'momentum': structured_momentum},
                        {'params': no_wd_params, 'weight_decay': 0.0},
                        {'params': unstructured_params}]
     else:
@@ -99,7 +99,7 @@ def get_optimizer(parameters, fp16, lr, momentum, weight_decay,
         no_wd_params = [v for n, v in parameters if getattr(v, '_no_wd', False) or 'bn' in n]
         unstructured_params = [v for n, v in parameters
                                if not getattr(v, '_is_structured', False) and not getattr(v, '_no_wd', False) and 'bn' not in n]
-        params_dict = [{'params': structured_params, 'weight_decay': 0.0},
+        params_dict = [{'params': structured_params, 'weight_decay': 0.0, 'momentum': structured_momentum},
                        {'params': no_wd_params, 'weight_decay': 0.0},
                        {'params': unstructured_params}]
     optimizer = torch.optim.SGD(params_dict, lr,

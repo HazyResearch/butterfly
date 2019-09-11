@@ -334,7 +334,7 @@ def main(args):
 
         optimizer = get_optimizer(list(model_and_loss.model.named_parameters()),
                 args.fp16,
-                args.lr, args.momentum, args.weight_decay,
+                args.lr, args.momentum, args.momentum, args.weight_decay,
                 nesterov = args.nesterov,
                 bn_weight_decay = args.bn_weight_decay,
                 state=optimizer_state,

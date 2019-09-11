@@ -99,6 +99,8 @@ def add_parser_arguments(parser):
 
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                         help='momentum')
+    parser.add_argument('--structured-momentum', default=0.9, type=float, metavar='M',
+                        help='momentum for structured layers')
     parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                         metavar='W', help='weight decay (default: 1e-4)')
     parser.add_argument('--bn-weight-decay', action='store_true',
@@ -296,8 +298,7 @@ def main(args):
     # Scale learning rate based on global batch size
     args.lr = args.lr*float(args.batch_size*args.world_size)/256.
     optimizer = get_optimizer(list(model_and_loss.model.named_parameters()),
-            args.fp16,
-            args.lr, args.momentum, args.weight_decay,
+            args.fp16, args.lr, args.momentum, args.structured_momentum, args.weight_decay,
             nesterov = args.nesterov,
             bn_weight_decay = args.bn_weight_decay,
             state=optimizer_state,
