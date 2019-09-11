@@ -77,7 +77,12 @@ class TrainableModel(Trainable):
         train_args += ['--keep-last-epochs', '10']
         # Always train from scratch, to overwrite previous runs, so point to nonexistent checkpoint file
         # train_args += ['--restore-file', 'nonexistent_checkpoint.pt']
-        train_args += ['-a', 'lightconv_butterfly_iwslt_de_en'] if model['name'] == 'DynamicConv' else ['-a', 'transformer_butterfly_iwslt_de_en']
+        if model['name'] == 'DynamicConv':
+            train_args += ['-a', 'lightconv_butterfly_iwslt_de_en']
+        elif model['name'] == 'TransformerBasic':
+            train_args += ['-a', 'transformer_iwslt_de_en']
+        elif model['name'] == 'Transformer':
+            train_args += ['-a', 'transformer_butterfly_iwslt_de_en']
         train_args += ['--dropout', str(config['dropout'])]
         train_args += ['--attention-dropout', '0.1'] if model['name'] == 'DynamicConv' else []
         train_args += ['--weight-dropout', '0.1'] if model['name'] == 'DynamicConv' else []
@@ -88,9 +93,11 @@ class TrainableModel(Trainable):
         train_args += ['--save-dir', str(self._save_dir)]
         train_args += ['--encoder-layers', str(len(config['encoder']))]
         train_args += ['--decoder-layers', str(len(config['decoder']))]
-        train_args += ['--encoder-structure-type-list', str(config['encoder'])]
-        train_args += ['--decoder-structure-type-list', str(config['decoder'])]
+        train_args += ['--encoder-structure-type-list', str(config['encoder'])] if model['name'] == 'Transformer' else []
+        train_args += ['--decoder-structure-type-list', str(config['decoder'])] if model['name'] == 'Transformer' else []
         train_args += ['--structure-lr-multiplier', str(config['structure-lr-multiplier'])]
+        if config['density'] < 1.0:
+            train_args += ['--sparse', '--density', str(config['density']), '--redistribution', 'none', '--force-qkv-separate']
         print(f'Host: {socket.gethostname()}, save_dir: {self._save_dir}')
 
         avg_args = [
@@ -164,6 +171,7 @@ def default_config():
     model_args = {}  # Arguments to be passed to the model, as a dictionary
     encoder = ['D'] * (7 if model == 'DynamicConv' else 6)  # Layers in the encoder
     decoder = ['D'] * 6  # Layers in the decoder
+    density = 1.0  # if less than 1.0, use sparse
     structure_lr_multiplier = 1.0  # Learning rate multiplier for structured parameters
     ntrials = 3  # Number of trials for hyperparameter tuning
     nmaxupdates = 50000  # Maximum number of updates
@@ -173,9 +181,9 @@ def default_config():
 
 
 @ex.capture
-def dynamic_conv_experiment(model, model_args, encoder, decoder, structure_lr_multiplier,
+def dynamic_conv_experiment(model, model_args, encoder, decoder, density, structure_lr_multiplier,
                             nmaxupdates, ntrials, result_dir, cuda, smoke_test):
-    name=f"{model}_{model_args}_encoder_[{'-'.join(encoder)}]_decoder_[{'-'.join(decoder)}]_structlr_{structure_lr_multiplier}"
+    name=f"{model}_{model_args}_encoder_[{'-'.join(encoder)}]_decoder_[{'-'.join(decoder)}]"
     config={
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
         # 'lr': grid_search([5e-4, 7e-4, 9e-4, 11e-4]),
@@ -187,6 +195,7 @@ def dynamic_conv_experiment(model, model_args, encoder, decoder, structure_lr_mu
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'encoder': list(encoder),  # Need to copy @encoder as sacred created a read-only list
         'decoder': list(decoder),
+        'density': density,
         # 'structure-lr-multiplier': structure_lr_multiplier,
         # 'structure-lr-multiplier': grid_search([0.25, 0.5, 1.0, 2.0, 4.0]),
         'structure-lr-multiplier': grid_search([0.25, 0.5, 2.0, 4.0]),

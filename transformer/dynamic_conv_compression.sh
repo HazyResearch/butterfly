@@ -212,3 +212,10 @@ python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["LR
 python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["LR_36", "LR_36", "LR_36", "LR_36", "LR_36", "LR_36"]' 'decoder=["LR_36", "LR_36", "LR_36", "LR_36", "LR_36", "LR_36"]'
 python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["LR_72", "LR_72", "LR_72", "LR_72", "LR_72", "LR_72"]' 'decoder=["LR_72", "LR_72", "LR_72", "LR_72", "LR_72", "LR_72"]'
 python dynamic_conv_experiment.py with ntrials=1 model=Transformer 'encoder=["LR_108", "LR_108", "LR_108", "LR_108", "LR_108", "LR_108"]' 'decoder=["LR_108", "LR_108", "LR_108", "LR_108", "LR_108", "LR_108"]'
+
+# Sparse
+python dynamic_conv_experiment.py with ntrials=1 model=TransformerBasic density=0.0703125
+python dynamic_conv_experiment.py with ntrials=1 model=TransformerBasic density=0.140625
+python dynamic_conv_experiment.py with ntrials=1 model=TransformerBasic density=0.28125
+python dynamic_conv_experiment.py with ntrials=1 model=TransformerBasic density=0.5625
+python dynamic_conv_experiment.py with ntrials=1 model=TransformerBasic density=0.84375
