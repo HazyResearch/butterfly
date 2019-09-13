@@ -35,6 +35,9 @@ from imagenet.training import ModelAndLoss, get_optimizer, train_loop
 from imagenet.training import lr_step_policy, lr_cosine_policy, lr_linear_policy
 from imagenet.utils import should_backup_checkpoint, save_checkpoint
 
+import sparselearning
+from sparselearning.core import Masking, CosineDecay
+
 
 def add_parser_arguments(parser):
     custom_model_names = ['mobilenetv1']
@@ -145,6 +148,7 @@ def add_parser_arguments(parser):
     parser.add_argument('--no-checkpoints', action='store_false', dest='save_checkpoints')
 
     parser.add_argument('--workspace', type=str, default='./')
+    sparselearning.core.add_sparse_args(parser)
 
 
 def main(args):
@@ -243,7 +247,7 @@ def main(args):
             loss,
             pretrained_weights=pretrained_weights,
             cuda = True, fp16 = args.fp16,
-            width=args.width, n_struct_layers=args.n_struct_layers,
+            width=args.width, n_struct_layers=args.n_struct_layers if args.dense else 0,
             struct=args.struct, softmax_struct=args.softmax_struct)
 
     if args.arch == 'mobilenetv1' and args.distilled_param_path:
@@ -321,6 +325,24 @@ def main(args):
         model_and_loss.distributed()
 
     model_and_loss.load_model_state(model_state)
+    decay = CosineDecay(args.prune_rate, train_loader_len*args.epochs)
+    mask = Masking(optimizer, prune_mode=args.prune, prune_rate_decay=decay, growth_mode=args.growth, redistribution_mode='none', verbose=args.verbose)
+    model_and_loss.mask = None
+    print(model_and_loss.model)
+    if not args.dense:
+        model_and_loss.mask = mask
+        for i, block in enumerate(model_and_loss.model.module.layers[-args.n_struct_layers:]):
+            block_ind = len(model_and_loss.model.module.layers) - args.n_struct_layers + i
+            conv = block.conv2
+            m, n = conv.weight.size()[:2]
+            assert (m == n or m//n == 2)
+            logn = int(round(np.log2(n)))
+            n_odo4 = n*(logn+1)*4*(m//n)
+            mask.add_module(conv, density=n_odo4/(m*n), sparse_init='trueconstant', name_prefix=f'block{block_ind}', last_mask=i==args.n_struct_layers-1)
+        for name in mask.masks:
+            torch.distributed.broadcast(mask.masks[name], 0)
+        mask.apply_mask()
+        mask.print_nonzero_counts()
 
     train_loop(
         model_and_loss, optimizer,
@@ -332,6 +354,7 @@ def main(args):
         skip_training = args.evaluate, skip_validation = args.training_only,
         save_checkpoints=args.save_checkpoints and not args.evaluate, checkpoint_dir=args.workspace)
     exp_duration = time.time() - exp_start_time
+    print('Experiment duration:', exp_duration)
     if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
         logger.end()
     print("Experiment ended")
