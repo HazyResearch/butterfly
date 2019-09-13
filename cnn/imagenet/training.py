@@ -400,6 +400,7 @@ def train_loop(model_and_loss, optimizer, lr_scheduler, train_loader, val_loader
 # }}}
 
 def get_input_cov(model, train_loader, layer_names, max_batches=None):
+    model = model.float()
     # hook to capture intermediate inputs
     def hook(module, input):
         x, = input
@@ -448,6 +449,8 @@ def get_input_cov(model, train_loader, layer_names, max_batches=None):
 
 def butterfly_projection_cov(teacher_module, input_cov, butterfly_structure='odo_1',
                              n_Adam_steps=20000, n_LBFGS_steps=50):
+    teacher_module = teacher_module.float()
+    input_cov = input_cov.float()
     try:
         in_channels = teacher_module.in_channels
         out_channels = teacher_module.out_channels
@@ -462,7 +465,12 @@ def butterfly_projection_cov(teacher_module, input_cov, butterfly_structure='odo
     student_module = student_module.to(input_cov.device)
 
     with torch.no_grad():
-        Sigma, U = torch.symeig(input_cov, eigenvectors=True)
+        try:  # torch.symeig sometimes fail to converge on CUDA
+            Sigma, U = torch.symeig(input_cov, eigenvectors=True)
+        except:  # Move to CPU and use numpy's function
+            Sigma, U = np.linalg.eigh(input_cov.cpu().numpy())
+            Sigma = torch.tensor(Sigma, dtype=input_cov.dtype, device=input_cov.device)
+            U = torch.tensor(U, dtype=input_cov.dtype, device=input_cov.device)
         Sigma = Sigma.clamp(0)  # avoid small negative eigenvalues
         input = torch.diag(Sigma.sqrt()) @ U.t()
         input = input.reshape(in_channels, in_channels, 1, 1)  # To be compatible with conv2d

@@ -344,7 +344,7 @@ def main(args):
         if args.amp:
             model_and_loss, optimizer = amp.initialize(
                     model_and_loss, optimizer,
-                    opt_level="O2",
+                    opt_level="O1",
                     loss_scale="dynamic" if args.dynamic_loss_scale else args.static_loss_scale)
 
         if args.distributed:
