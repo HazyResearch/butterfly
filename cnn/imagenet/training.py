@@ -224,7 +224,11 @@ def get_train_step(model_and_loss, optimizer, fp16, use_amp = False, batch_size_
                 for param in param_group['params']:
                     param.grad /= batch_size_multiplier
 
-            optimizer.step()
+            if model_and_loss.mask is None:
+                optimizer.step()
+            else:
+                model_and_loss.mask.step()
+
             optimizer.zero_grad()
 
         torch.cuda.synchronize()
@@ -378,6 +382,15 @@ def train_loop(model_and_loss, optimizer, lr_scheduler, train_loader, val_loader
         if not skip_training:
             train(train_loader, model_and_loss, optimizer, lr_scheduler, fp16, logger, epoch, print_freq,
                   use_amp = use_amp, prof = prof, register_metrics=epoch==start_epoch, batch_size_multiplier=batch_size_multiplier)
+
+        if model_and_loss.mask is not None and epoch < epochs:
+            mask = model_and_loss.mask
+            total_nonzero_new = mask.at_end_of_epoch(full=False)
+            for module in mask.modules:
+                for name, weight in module.named_parameters():
+                    if name in mask.masks:
+                        torch.distributed.broadcast(mask.masks[name], 0)
+            mask.at_end_2(total_nonzero_new, full=False)
 
         if not skip_validation:
             prec1 = validate(val_loader, model_and_loss, fp16, logger, epoch, prof = prof, register_metrics=epoch==start_epoch)
