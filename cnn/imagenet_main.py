@@ -59,6 +59,9 @@ def add_parser_arguments(parser):
     parser.add_argument('--softmax-struct', metavar='SMSTRUCT', default='D',
                         type=str,
                         help='structure for softmax layer: ' + ' (default: D)')
+    parser.add_argument('--sm-pooling', metavar='SMPOOL', default=1,
+                        type=int,
+                        help='pooling before the softmax layer: ' + ' (default: 1)')
     parser.add_argument('--n-struct-layers', default=0, type=int,
                         metavar='NSL', help='Number of structured layer (default 7)')
     parser.add_argument('--width', default=1.0, type=float,
@@ -246,7 +249,7 @@ def main(args):
             pretrained_weights=pretrained_weights,
             cuda = True, fp16 = args.fp16,
             width=args.width, n_struct_layers=args.n_struct_layers,
-            struct=args.struct, softmax_struct=args.softmax_struct)
+            struct=args.struct, softmax_struct=args.softmax_struct, sm_pooling=args.sm_pooling)
 
     if args.arch == 'mobilenetv1' and args.distilled_param_path:
         model_state = model_and_loss.model.mixed_model_state_dict(args.full_model_path, args.distilled_param_path)
@@ -315,7 +318,7 @@ def main(args):
     if args.amp:
         model_and_loss, optimizer = amp.initialize(
                 model_and_loss, optimizer,
-                opt_level="O2",
+                opt_level="O1",
                 loss_scale="dynamic" if args.dynamic_loss_scale else args.static_loss_scale)
 
     if args.distributed:

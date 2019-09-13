@@ -28,7 +28,7 @@ except ImportError:
 
 class ModelAndLoss(nn.Module):
     def __init__(self, arch, loss, pretrained_weights=None, cuda=True, fp16=False,
-                 width=1.0, n_struct_layers=0, struct='D', softmax_struct='D'):
+                 width=1.0, n_struct_layers=0, struct='D', softmax_struct='D', sm_pooling=1):
         super(ModelAndLoss, self).__init__()
         self.arch = arch
 
@@ -36,7 +36,7 @@ class ModelAndLoss(nn.Module):
         # model = models.build_resnet(arch[0], arch[1])
         if arch == 'mobilenetv1':
             model = MobileNet(width_mult=width, structure=[struct] * n_struct_layers,
-                              softmax_structure=softmax_struct)
+                              softmax_structure=softmax_struct, sm_pooling=sm_pooling)
             # if args.distilled_param_path:
             #     model.load_state_dict(model.mixed_model_state_dict(args.full_model_path, args.distilled_param_path))
         else:
