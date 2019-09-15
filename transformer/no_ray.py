@@ -6,16 +6,11 @@ sys.path.insert(2, project_root + '/fairseq/scripts')
 # Add to $PYTHONPATH in addition to sys.path so that ray workers can see
 os.environ['PYTHONPATH'] = project_root + ":" + project_root + '/fairseq:' + project_root + '/fairseq/scripts' + os.environ.get('PYTHONPATH', '')
 
-import math
 from pathlib import Path
-import pickle
 import random
 import subprocess  # To run fairseq-generate
 import re  # To extract BLEU score from output of fairseq-generate
-import socket  # For hostname
-
-import numpy as np
-
+import json
 import torch
 
 from sacred import Experiment
@@ -23,7 +18,6 @@ from sacred.observers import FileStorageObserver, SlackObserver
 
 import ray
 from ray.tune import Trainable, Experiment as RayExperiment, sample_from, grid_search
-from ray.tune.schedulers import AsyncHyperBandScheduler
 
 # Fairseq scripts
 from train import train_translation
@@ -47,7 +41,6 @@ def evaluate_translation(gen_args):
 class TrainableModel(Trainable):
     """Trainable object for a Pytorch model, to be used with Ray's Hyperband tuning.
     """
-
     def _setup(self, config):
         device = config['device']
         self.device = device
@@ -75,8 +68,6 @@ class TrainableModel(Trainable):
         train_args += ['--warmup-init-lr', "1e-07"]
         train_args += ['--adam-betas=(0.9, 0.98)']
         train_args += ['--keep-last-epochs', '10']
-        # Always train from scratch, to overwrite previous runs, so point to nonexistent checkpoint file
-        # train_args += ['--restore-file', 'nonexistent_checkpoint.pt']
         if model['name'] == 'DynamicConv':
             train_args += ['-a', 'lightconv_butterfly_iwslt_de_en']
         elif model['name'] == 'TransformerBasic':
@@ -98,7 +89,7 @@ class TrainableModel(Trainable):
         train_args += ['--structure-lr-multiplier', str(config['structure-lr-multiplier'])]
         if config['density'] < 1.0:
             train_args += ['--sparse', '--density', str(config['density']), '--redistribution', 'none', '--force-qkv-separate', '--verbose']
-        print(f'Host: {socket.gethostname()}, save_dir: {self._save_dir}')
+        print(f'save_dir: {self._save_dir}')
 
         avg_args = [
             '--inputs=' + str(self._save_dir), '--num-epoch-checkpoints=10',
@@ -111,27 +102,22 @@ class TrainableModel(Trainable):
         self._train_args = train_args
         self._avg_args = avg_args
         self._gen_args = gen_args
+        self._save_dir.mkdir(parents=True, exist_ok=True)
 
     def _train(self):
-        self._save_dir.mkdir(parents=True, exist_ok=True)
         stdout = sys.stdout
         with open(self._save_dir / 'logs.txt', 'w+') as log:
             sys.stdout = log
-            # [2019-08-02] For some reason ray gets stuck when I call train_translation
-            # or generate_translation.
-            # Workaround: use subprocess to call fairseq-generate in another process
-            # train_translation(self._train_args)
-            subprocess.run([sys.executable, str(Path(project_root) / 'fairseq/train.py')] + self._train_args,
-                           stdout=log)
+            train_translation(self._train_args)
             avg_checkpoints(cmdline_args=self._avg_args)
             last_model = self._save_dir / 'checkpoint_last.pt'
             best_model = self._save_dir / 'checkpoint_best.pt'
             ensemble_model = self._save_dir / 'model.pt'
             # Delete checkpoints to save disk space
-            # for ckpt_file in Path(self._save_dir).glob('*.pt'):
-            #     if ckpt_file != last_model and ckpt_file != ensemble_model \
-            #                             and ckpt_file != best_model:
-            #         ckpt_file.unlink()
+            for ckpt_file in Path(self._save_dir).glob('*.pt'):
+                if ckpt_file != last_model and ckpt_file != ensemble_model \
+                                        and ckpt_file != best_model:
+                    ckpt_file.unlink()
             if self.device == 'cuda':
                 torch.cuda.empty_cache()
             _, BLEU_last_valid = evaluate_translation(
@@ -165,72 +151,44 @@ if slack_config_path.exists():
     ex.observers.append(SlackObserver.from_config(str(slack_config_path)))
 
 
-@ex.config
-def default_config():
-    model = 'DynamicConv'  # Name of model, either 'DynamicConv' or 'Transformer'
-    model_args = {}  # Arguments to be passed to the model, as a dictionary
-    encoder = ['D'] * (7 if model == 'DynamicConv' else 6)  # Layers in the encoder
-    decoder = ['D'] * 6  # Layers in the decoder
-    density = 1.0  # if less than 1.0, use sparse
-    structure_lr_multiplier = 1.0  # Learning rate multiplier for structured parameters
-    ntrials = 3  # Number of trials for hyperparameter tuning
-    nmaxupdates = 50000  # Maximum number of updates
-    result_dir = project_root + '/transformer/results'  # Directory to store results
-    cuda = torch.cuda.is_available()  # Whether to use GPU
-    smoke_test = False  # Finish quickly for testing
+class default_config:
+  def __init__(self):
+    self.model = 'TransformerBasic'
+    self.model_args = {}  # Arguments to be passed to the model, as a dictionary
+    self.encoder = ['D'] * 6
+    self.decoder = ['D'] * 6  # Layers in the decoder
+    self.density = 1.0  # if less than 1.0, use sparse
+    self.structure_lr_multiplier = 1.0  # Learning rate multiplier for structured parameters
+    self.ntrials = 3  # Number of trials for hyperparameter tuning
+    self.nmaxupdates = 50000  # Maximum number of updates
+    self.result_dir = project_root + '/transformer/results'  # Directory to store results
+    self.cuda = torch.cuda.is_available()  # Whether to use GPU
+    self.smoke_test = False  # Finish quickly for testing
 
-
-@ex.capture
-def dynamic_conv_experiment(model, model_args, encoder, decoder, density, structure_lr_multiplier,
-                            nmaxupdates, ntrials, result_dir, cuda, smoke_test):
-    name=f"{model}_{density}"
-    config={
-        # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
-        # 'lr': grid_search([5e-4, 7e-4, 9e-4, 11e-4]),
-        # 'lr': grid_search([1e-4, 2.5e-4, 5e-4, 7.5e-4]),
+def main():
+    trainable_cls = TrainableModel
+    trainable = trainable_cls.__new__(trainable_cls)
+    config = default_config().__dict__
+    config['ntrials'] = int(sys.argv[1].split('=')[1])
+    config['density'] = float(sys.argv[2].split('=')[1])
+    config['structure-lr-multiplier'] = float(sys.argv[3].split('=')[1])
+    c2 = {
         'lr': 5e-4,
-        'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if model == 'DynamicConv' else 1e-4,
-        # Transformer seems to need dropout 0.3
-        'dropout': sample_from(lambda spec: random.uniform(0.1, 0.3)) if model == 'DynamicConv' else 0.3,
-        'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
-        'encoder': list(encoder),  # Need to copy @encoder as sacred created a read-only list
-        'decoder': list(decoder),
-        'density': density,
-        # 'structure-lr-multiplier': structure_lr_multiplier,
-        # 'structure-lr-multiplier': grid_search([0.25, 0.5, 1.0, 2.0, 4.0]),
-        'structure-lr-multiplier': grid_search([0.25, 0.5, 2.0, 4.0]),
-        'device': 'cuda' if cuda else 'cpu',
-        'model': {'name': model, 'args': model_args},
-        'nmaxupdates': nmaxupdates,
-        'result_dir': result_dir + '/' + name
-     }
-    experiment = RayExperiment(
-        name=name,
-        run=TrainableModel,
-        local_dir=result_dir,
-        num_samples=ntrials,
-        checkpoint_at_end=False,
-        checkpoint_freq=1000,  # Just to enable recovery with @max_failures
-        max_failures=-1,
-        resources_per_trial={'cpu': 2, 'gpu': 1 if cuda else 0},
-        stop={"training_iteration": 1},
-        config=config,
-    )
-    return experiment
+        'weight_decay': 1e-4,
+        'dropout': 0.3,
+        'seed': random.randint(0, 1<<16),
+        'device': 'cuda' if config['cuda'] else 'cpu',
+        'model': {'name': config['model'], 'args': config['model_args']},
+        'result_dir': config['result_dir'] + '/' + f"{config['model']}_{config['density']}"
+    }
+    config.update(**c2)
+    trainable._setup(config)
+    savedir = trainable._save_dir
+    with open(savedir / 'params.json', 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=4)
+    result = trainable._train()
+    with open(savedir / 'result.json', 'w', encoding='utf-8') as f:
+        json.dump(result, f, ensure_ascii=False, indent=4)
 
-
-@ex.automain
-def run(model, encoder, decoder, result_dir):
-    experiment = dynamic_conv_experiment()
-    try:
-        with open('../config/redis_address', 'r') as f:
-            address = f.read().strip()
-            ray.init(redis_address=address)
-    except:
-        ray.init()
-    trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True).trials
-    trials = [trial for trial in trials if trial.last_result is not None]
-    bleu = [(trial.last_result.get('ensemble_bleu_valid', float('-inf')),
-             trial.last_result.get('ensemble_bleu_test', float('-inf'))) for trial in trials]
-    max_bleu = max(bleu, key=lambda x: x[0])[1]
-    return model, encoder, decoder, max_bleu
+if __name__ == '__main__':
+  main()
