@@ -17,6 +17,7 @@ from . import utils
 
 from cnn.mobilenet_imagenet import MobileNet
 from cnn.mobilenet_imagenet import Butterfly1x1Conv
+from cnn.shufflenet_imagenet import ShuffleNet
 
 try:
     from apex.parallel import DistributedDataParallel as DDP
@@ -28,7 +29,8 @@ except ImportError:
 
 class ModelAndLoss(nn.Module):
     def __init__(self, arch, loss, pretrained_weights=None, cuda=True, fp16=False,
-                 width=1.0, n_struct_layers=0, struct='D', softmax_struct='D', sm_pooling=1):
+                 width=1.0, n_struct_layers=0, struct='D', softmax_struct='D', sm_pooling=1,
+                 groups=8):
         super(ModelAndLoss, self).__init__()
         self.arch = arch
 
@@ -39,6 +41,8 @@ class ModelAndLoss(nn.Module):
                               softmax_structure=softmax_struct, sm_pooling=sm_pooling)
             # if args.distilled_param_path:
             #     model.load_state_dict(model.mixed_model_state_dict(args.full_model_path, args.distilled_param_path))
+        elif arch == 'shufflenetv1':
+            model = ShuffleNet(width_mult=width, groups=groups)
         else:
             model = models.__dict__[arch]()
         if pretrained_weights is not None:

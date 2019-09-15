@@ -37,7 +37,7 @@ from imagenet.utils import should_backup_checkpoint, save_checkpoint
 
 
 def add_parser_arguments(parser):
-    custom_model_names = ['mobilenetv1']
+    custom_model_names = ['mobilenetv1', 'shufflenetv1']
     model_names = sorted(name for name in models.__dict__
                         if name.islower() and not name.startswith("__")
                         and callable(models.__dict__[name])) + custom_model_names
@@ -66,6 +66,8 @@ def add_parser_arguments(parser):
                         metavar='NSL', help='Number of structured layer (default 7)')
     parser.add_argument('--width', default=1.0, type=float,
                         metavar='WIDTH', help='Width multiplier of the CNN (default 1.0)')
+    parser.add_argument('--groups', default=8, type=int,
+                        metavar='GROUPS', help='Group parameter of ShuffleNet (default 8)')
     parser.add_argument('--distilled-param-path', default='', type=str, metavar='PATH',
                         help='path to distilled parameters (default: none)')
     parser.add_argument('--full-model-path', default='', type=str, metavar='PATH',
@@ -249,7 +251,8 @@ def main(args):
             pretrained_weights=pretrained_weights,
             cuda = True, fp16 = args.fp16,
             width=args.width, n_struct_layers=args.n_struct_layers,
-            struct=args.struct, softmax_struct=args.softmax_struct, sm_pooling=args.sm_pooling)
+            struct=args.struct, softmax_struct=args.softmax_struct, sm_pooling=args.sm_pooling,
+            groups=args.groups)
 
     if args.arch == 'mobilenetv1' and args.distilled_param_path:
         model_state = model_and_loss.model.mixed_model_state_dict(args.full_model_path, args.distilled_param_path)
