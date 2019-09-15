@@ -52,7 +52,7 @@ class Bottleneck(nn.Module):
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)), inplace=True)
         out = self.shuffle1(out)
-        out = F.relu(self.bn2(self.conv2(out)), inplace=True)
+        out = self.bn2(self.conv2(out))
         out = self.bn3(self.conv3(out))
         res = self.shortcut(x)
         out = F.relu(torch.cat([out,res], 1), inplace=True) if self.stride==2 else F.relu(out+res, inplace=True)
