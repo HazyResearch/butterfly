@@ -8,8 +8,6 @@ os.environ['PYTHONPATH'] = project_root + ":" + project_root + '/fairseq:' + pro
 
 from pathlib import Path
 import random
-import subprocess  # To run fairseq-generate
-import re  # To extract BLEU score from output of fairseq-generate
 import json
 import torch
 
@@ -17,7 +15,7 @@ from sacred import Experiment
 from sacred.observers import FileStorageObserver, SlackObserver
 
 import ray
-from ray.tune import Trainable, Experiment as RayExperiment, sample_from, grid_search
+from ray.tune import Trainable
 
 # Fairseq scripts
 from train import train_translation
@@ -80,7 +78,7 @@ class TrainableModel(Trainable):
         train_args += ['--encoder-glu', '0'] if model['name'] == 'DynamicConv' else []
         train_args += ['--decoder-glu', '0 '] if model['name'] == 'DynamicConv' else []
         train_args += ['--seed', str(config['seed'])]
-        self._save_dir = Path(config['result_dir']) / f"seed={config['seed']}"
+        self._save_dir = Path(config['result_dir']) / f"structlr={config['structure-lr-multiplier']}_seed={config['seed']}"
         train_args += ['--save-dir', str(self._save_dir)]
         train_args += ['--encoder-layers', str(len(config['encoder']))]
         train_args += ['--decoder-layers', str(len(config['decoder']))]
@@ -110,6 +108,7 @@ class TrainableModel(Trainable):
             sys.stdout = log
             train_translation(self._train_args)
             avg_checkpoints(cmdline_args=self._avg_args)
+
             last_model = self._save_dir / 'checkpoint_last.pt'
             best_model = self._save_dir / 'checkpoint_best.pt'
             ensemble_model = self._save_dir / 'model.pt'
@@ -118,8 +117,7 @@ class TrainableModel(Trainable):
                 if ckpt_file != last_model and ckpt_file != ensemble_model \
                                         and ckpt_file != best_model:
                     ckpt_file.unlink()
-            if self.device == 'cuda':
-                torch.cuda.empty_cache()
+            evaluate_translation = generate_translation
             _, BLEU_last_valid = evaluate_translation(
                 self._gen_args + ['--gen-subset=valid', '--path=' + str(last_model)])
             _, BLEU_ensm_valid = evaluate_translation(
@@ -172,23 +170,24 @@ def main():
     config['ntrials'] = int(sys.argv[1].split('=')[1])
     config['density'] = float(sys.argv[2].split('=')[1])
     config['structure-lr-multiplier'] = float(sys.argv[3].split('=')[1])
-    c2 = {
-        'lr': 5e-4,
-        'weight_decay': 1e-4,
-        'dropout': 0.3,
-        'seed': random.randint(0, 1<<16),
-        'device': 'cuda' if config['cuda'] else 'cpu',
-        'model': {'name': config['model'], 'args': config['model_args']},
-        'result_dir': config['result_dir'] + '/' + f"{config['model']}_{config['density']}"
-    }
-    config.update(**c2)
-    trainable._setup(config)
-    savedir = trainable._save_dir
-    with open(savedir / 'params.json', 'w', encoding='utf-8') as f:
-        json.dump(config, f, ensure_ascii=False, indent=4)
-    result = trainable._train()
-    with open(savedir / 'result.json', 'w', encoding='utf-8') as f:
-        json.dump(result, f, ensure_ascii=False, indent=4)
+    for i in range(config['ntrials']):
+        c2 = {
+            'lr': 5e-4,
+            'weight_decay': 1e-4,
+            'dropout': 0.3,
+            'seed': random.randint(0, 1<<16),
+            'device': 'cuda' if config['cuda'] else 'cpu',
+            'model': {'name': config['model'], 'args': config['model_args']},
+            'result_dir': config['result_dir'] + '/' + f"{config['model']}_{config['density']}"
+        }
+        config.update(**c2)
+        trainable._setup(config)
+        savedir = trainable._save_dir
+        with open(savedir / 'params.json', 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=4)
+        result = trainable._train()
+        with open(savedir / 'result.json', 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=4)
 
 if __name__ == '__main__':
   main()
