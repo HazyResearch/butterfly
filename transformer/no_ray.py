@@ -14,6 +14,9 @@ import torch
 from sacred import Experiment
 from sacred.observers import FileStorageObserver, SlackObserver
 
+import re
+import subprocess
+
 import ray
 from ray.tune import Trainable
 
@@ -107,7 +110,7 @@ class TrainableModel(Trainable):
         with open(self._save_dir / 'logs.txt', 'w+') as log:
             sys.stdout = log
             train_translation(self._train_args)
-            avg_checkpoints(cmdline_args=self._avg_args)
+            subprocess.run([sys.executable, str(Path(project_root) / 'fairseq/average_checkpoints.py')] + self._avg_args, stdout=log)
 
             last_model = self._save_dir / 'checkpoint_last.pt'
             best_model = self._save_dir / 'checkpoint_best.pt'
@@ -117,7 +120,6 @@ class TrainableModel(Trainable):
                 if ckpt_file != last_model and ckpt_file != ensemble_model \
                                         and ckpt_file != best_model:
                     ckpt_file.unlink()
-            evaluate_translation = generate_translation
             _, BLEU_last_valid = evaluate_translation(
                 self._gen_args + ['--gen-subset=valid', '--path=' + str(last_model)])
             _, BLEU_ensm_valid = evaluate_translation(
@@ -157,37 +159,35 @@ class default_config:
     self.decoder = ['D'] * 6  # Layers in the decoder
     self.density = 1.0  # if less than 1.0, use sparse
     self.structure_lr_multiplier = 1.0  # Learning rate multiplier for structured parameters
-    self.ntrials = 3  # Number of trials for hyperparameter tuning
     self.nmaxupdates = 50000  # Maximum number of updates
     self.result_dir = project_root + '/transformer/results'  # Directory to store results
     self.cuda = torch.cuda.is_available()  # Whether to use GPU
     self.smoke_test = False  # Finish quickly for testing
 
 def main():
+    config = default_config().__dict__
+    config['density'] = float(sys.argv[1].split('=')[1])
+    config['structure-lr-multiplier'] = float(sys.argv[2].split('=')[1])
+    c2 = {
+        'lr': 5e-4,
+        'weight_decay': 1e-4,
+        'dropout': 0.3,
+        'device': 'cuda' if config['cuda'] else 'cpu',
+        'model': {'name': config['model'], 'args': config['model_args']},
+        'result_dir': config['result_dir'] + '/' + f"{config['model']}_{config['density']}"
+    }
+    config.update(**c2)
+
     trainable_cls = TrainableModel
     trainable = trainable_cls.__new__(trainable_cls)
-    config = default_config().__dict__
-    config['ntrials'] = int(sys.argv[1].split('=')[1])
-    config['density'] = float(sys.argv[2].split('=')[1])
-    config['structure-lr-multiplier'] = float(sys.argv[3].split('=')[1])
-    for i in range(config['ntrials']):
-        c2 = {
-            'lr': 5e-4,
-            'weight_decay': 1e-4,
-            'dropout': 0.3,
-            'seed': random.randint(0, 1<<16),
-            'device': 'cuda' if config['cuda'] else 'cpu',
-            'model': {'name': config['model'], 'args': config['model_args']},
-            'result_dir': config['result_dir'] + '/' + f"{config['model']}_{config['density']}"
-        }
-        config.update(**c2)
-        trainable._setup(config)
-        savedir = trainable._save_dir
-        with open(savedir / 'params.json', 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=4)
-        result = trainable._train()
-        with open(savedir / 'result.json', 'w', encoding='utf-8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=4)
+    config.update(seed=random.randint(0, 1<<16))
+    trainable._setup(config)
+    savedir = trainable._save_dir
+    with open(savedir / 'params.json', 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=4)
+    result = trainable._train()
+    with open(savedir / 'result.json', 'w', encoding='utf-8') as f:
+        json.dump(result, f, ensure_ascii=False, indent=4)
 
 if __name__ == '__main__':
   main()
