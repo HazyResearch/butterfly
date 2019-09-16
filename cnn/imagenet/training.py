@@ -30,7 +30,7 @@ except ImportError:
 class ModelAndLoss(nn.Module):
     def __init__(self, arch, loss, pretrained_weights=None, cuda=True, fp16=False,
                  width=1.0, n_struct_layers=0, struct='D', softmax_struct='D', sm_pooling=1,
-                 groups=8):
+                 groups=8, shuffle='P'):
         super(ModelAndLoss, self).__init__()
         self.arch = arch
 
@@ -42,7 +42,7 @@ class ModelAndLoss(nn.Module):
             # if args.distilled_param_path:
             #     model.load_state_dict(model.mixed_model_state_dict(args.full_model_path, args.distilled_param_path))
         elif arch == 'shufflenetv1':
-            model = ShuffleNet(width_mult=width, groups=groups)
+            model = ShuffleNet(width_mult=width, groups=groups, shuffle=shuffle)
         else:
             model = models.__dict__[arch]()
         if pretrained_weights is not None:

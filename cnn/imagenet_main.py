@@ -68,6 +68,8 @@ def add_parser_arguments(parser):
                         metavar='WIDTH', help='Width multiplier of the CNN (default 1.0)')
     parser.add_argument('--groups', default=8, type=int,
                         metavar='GROUPS', help='Group parameter of ShuffleNet (default 8)')
+    parser.add_argument('--shuffle', default='P', type=str,
+                        metavar='SHUFFLE', help='Type of shuffle (P for usual channel shuffle, odo_1 for butterfly)')
     parser.add_argument('--distilled-param-path', default='', type=str, metavar='PATH',
                         help='path to distilled parameters (default: none)')
     parser.add_argument('--full-model-path', default='', type=str, metavar='PATH',
@@ -252,7 +254,7 @@ def main(args):
             cuda = True, fp16 = args.fp16,
             width=args.width, n_struct_layers=args.n_struct_layers,
             struct=args.struct, softmax_struct=args.softmax_struct, sm_pooling=args.sm_pooling,
-            groups=args.groups)
+            groups=args.groups, shuffle=args.shuffle)
 
     if args.arch == 'mobilenetv1' and args.distilled_param_path:
         model_state = model_and_loss.model.mixed_model_state_dict(args.full_model_path, args.distilled_param_path)
