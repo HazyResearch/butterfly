@@ -6,12 +6,69 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import math
+
 import os, sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
+from butterfly.utils import twiddle_normal_to_fast_format
+
 from cnn.mobilenet_imagenet import _make_divisible
 from cnn.mobilenet_imagenet import Butterfly1x1Conv
+
+from factor_multiply_fast import butterfly_multiply_untied_forward_fast
+
+class HadamardTransformCuda(torch.autograd.Function):
+    '''The unnormalized Hadamard transform (i.e. without dividing by sqrt(2))
+    '''
+    @staticmethod
+    def forward(ctx, twiddle, x):
+        ctx.save_for_backward(twiddle)
+        return butterfly_multiply_untied_forward_fast(twiddle, x, True)
+
+    @staticmethod
+    def backward(ctx, grad):
+        twiddle, = ctx.saved_tensors
+        return None, HadamardTransformCuda.apply(twiddle, grad)
+
+hadamard_transform_cuda = HadamardTransformCuda.apply
+
+class Hadamard(nn.Module):
+
+    def __init__(self, n):
+        super().__init__()
+        m = int(math.ceil(math.log2(n)))
+        self.n = n
+        self.extended_n = 1 << m
+        with torch.no_grad():
+            twiddle = torch.tensor([[1, 1], [1, -1]], dtype=torch.float) / math.sqrt(2)
+            twiddle = twiddle.reshape(1, 1, 1, 2, 2).expand((1, m, self.extended_n//2, 2, 2))
+            twiddle = twiddle_normal_to_fast_format(twiddle)
+        self.register_buffer('twiddle', twiddle)
+
+    def forward(self, x):
+        if self.n < self.extended_n:  # Zero-pad
+            x = F.pad(x, (0, self.extended_n - self.n))
+        output = hadamard_transform_cuda(self.twiddle, x.unsqueeze(1)).squeeze(1)
+        if self.n < self.extended_n:  # Zero-pad
+            output = output[:, :self.n]
+        return output
+
+
+class Hadamard1x1Conv(Hadamard):
+
+    def forward(self, input):
+        """
+        Parameters:
+            input: (batch, c, h, w)
+        Return:
+            output: (batch, c, h, w)
+        """
+        batch, c, h, w = input.shape
+        input_reshape = input.view(batch, c, h * w).transpose(1, 2).reshape(-1, c)
+        output = super(Hadamard1x1Conv, self).forward(input_reshape)
+        return output.view(batch, h * w, c).transpose(1, 2).view(batch, c, h, w)
 
 
 class ShuffleBlock(nn.Module):
@@ -41,6 +98,9 @@ class Bottleneck(nn.Module):
         if shuffle == 'P':
             self.shuffle0 = nn.Identity()
             self.shuffle1 = ShuffleBlock(groups=g)
+        elif shuffle == 'Hadamard':
+            self.shuffle0 = Hadamard1x1Conv(in_planes)
+            self.shuffle1 = Hadamard1x1Conv(mid_planes)
         else:
             param = shuffle.split('_')[0]
             nblocks = 0 if len(shuffle.split('_')) <= 1 else int(shuffle.split('_')[1])
