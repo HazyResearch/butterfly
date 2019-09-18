@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 import os, sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -8,6 +9,8 @@ import time
 from cnn.shufflenet_imagenet import ShuffleNet
 
 def benchmark(nets, runs):
+    # use same seed for all nets
+    torch.manual_seed(1234)
     # generate data in advance
     x_all =  torch.randn(runs, 1, 3, 224, 224)
     start = time.perf_counter()
@@ -35,10 +38,6 @@ def main():
 
     print('Using BBT ShuffleNet')
     nets = [ShuffleNet(shuffle='regular_1') for i in range(runs)]
-    benchmark(nets, runs)
-
-    print('Using BBT ShuffleNet with eval')
-    nets = [nets[i].eval() for i in range(runs)]
     benchmark(nets, runs)
 
 if __name__ == "__main__":

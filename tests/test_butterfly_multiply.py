@@ -97,19 +97,19 @@ class ButterflyMultTest(unittest.TestCase):
                                          (batch_size, n), device, complex, increasing_stride))
 
     def test_butterfly_untied_eval(self):
-        for batch_size, n in [(1, 256), (2, 512), (8, 512), (10, 512)]:
+        for batch_size, n in [(1, 256), (2, 512), (8, 512), (10, 512), (49, 512), (196, 1024)]:
             m = int(math.log2(n))
-            nstack = 2
             for device in ['cpu']:
                 for complex in [ True]:
                     for increasing_stride in [True, False]:
-                        scaling = 1 / math.sqrt(2)
-                        twiddle = torch.randn((nstack, m, n // 2, 2, 2), requires_grad=True, device=device) * scaling
-                        input = torch.randn((batch_size, nstack, n), requires_grad=True, device=twiddle.device)
-                        output = butterfly_multiply_untied_eval(twiddle, input, increasing_stride)
-                        output_torch = butterfly_mult_untied_torch(twiddle, input, increasing_stride)
-                        self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
-                                        ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
+                        for nstack in [1, 2]:
+                            scaling = 1 / math.sqrt(2)
+                            twiddle = torch.randn((nstack, m, n // 2, 2, 2), requires_grad=True, device=device) * scaling
+                            input = torch.randn((batch_size, nstack, n), requires_grad=True, device=twiddle.device)
+                            output = butterfly_multiply_untied_eval(twiddle, input, increasing_stride)
+                            output_torch = butterfly_mult_untied_torch(twiddle, input, increasing_stride)
+                            self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
+                                            ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
 
     def test_butterfly_ortho_tied(self):
         for batch_size, n in [(10, 4096), (8192, 256)]:  # Test size smaller than 1024 and large batch size for race conditions

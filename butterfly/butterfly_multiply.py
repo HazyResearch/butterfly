@@ -169,7 +169,7 @@ def butterfly_mult_untied_torch(twiddle, input, increasing_stride=True, return_i
 class ButterflyMultUntied(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, twiddle, input, increasing_stride=True, is_training=True, fast=True):
+    def forward(ctx, twiddle, input, increasing_stride=True, is_training=True, fast=True, cpu_fast=True):
         """
         Parameters:
             twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
@@ -181,9 +181,14 @@ class ButterflyMultUntied(torch.autograd.Function):
         Returns:
             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
-        # use optimized code for CPU inference
-        if not is_training and not input.is_cuda and input.dim() == 3 and input.dtype == torch.float and input.shape[-1] > 8:
-            output = butterfly_multiply_untied_eval(twiddle, input, increasing_stride)
+        # cpu code
+        if not input.is_cuda:
+            # use optimized code for CPU inference
+            if cpu_fast and input.dim() == 3 and input.dtype == torch.float and input.shape[-1] > 8:
+                output = butterfly_multiply_untied_eval(twiddle, input, increasing_stride)
+            else:
+                output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
+        # gpu code
         else:
             if not fast:
                 output = butterfly_multiply_untied(twiddle, input, increasing_stride, False)
@@ -360,7 +365,7 @@ class BbtMultUntied(torch.autograd.Function):
         return d_coefficients, d_input, None
 
 
-def bbt_mult_untied(twiddle, input, fast=True, is_training=True):
+def bbt_mult_untied(twiddle, input, fast=True, is_training=True, cpu_fast=True):
     n = input.shape[2]
     m = int(math.log2(n))
     nblocks = twiddle.shape[1] // (2 * m)
@@ -373,8 +378,8 @@ def bbt_mult_untied(twiddle, input, fast=True, is_training=True):
         for t in twiddle.chunk(nblocks, dim=1):
             # output = butterfly_mult_untied(t[:, :m].flip(1), output, False)
             # flip is crazy slow, advanced indexing is slightly faster
-            output = butterfly_mult_untied(t[:, reverse_idx], output, False, is_training, False)
-            output = butterfly_mult_untied(t[:, m:], output, True, is_training, False)
+            output = butterfly_mult_untied(t[:, reverse_idx], output, False, True, False, cpu_fast)
+            output = butterfly_mult_untied(t[:, m:], output, True, True, False, cpu_fast)
         return output
 
 

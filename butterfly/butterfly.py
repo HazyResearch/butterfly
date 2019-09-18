@@ -47,7 +47,7 @@ class Butterfly(nn.Module):
     def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
                  increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
                  nblocks=0, diag_constraint=None, expansion=1, diag_init='normal', double=False, diag_bookends=False,
-                 fast=False):
+                 fast=False, cpu_fast=True):
         super().__init__()
         self.double = double
         if double:
@@ -74,6 +74,7 @@ class Butterfly(nn.Module):
         self.diag_init = diag_init
         self.diag_bookends = diag_bookends
         self.fast = fast
+        self.cpu_fast = cpu_fast
         self.nstack *= self.expansion
         if nblocks > 0:
             assert not complex, 'native BBT with complex is not supported, use two separate Butterflies (e.g. nn.Sequential)'
@@ -219,7 +220,7 @@ class Butterfly(nn.Module):
             if self.tied_weight:
                 output = butterfly_mult(self.twiddle, output, self.increasing_stride)
             else:
-                output = butterfly_mult_untied(self.twiddle, output, self.increasing_stride, self.training, self.fast) if self.nblocks == 0 else bbt_mult_untied(self.twiddle, output, self.fast, self.training)
+                output = butterfly_mult_untied(self.twiddle, output, self.increasing_stride, self.training, self.fast, self.cpu_fast) if self.nblocks == 0 else bbt_mult_untied(self.twiddle, output, self.fast, self.training, self.cpu_fast)
         elif self.param == 'ortho':
             if self.tied_weight:
                 output = butterfly_ortho_mult_tied(self.twiddle, output, self.increasing_stride)
