@@ -121,8 +121,7 @@ class Bottleneck(nn.Module):
             self.shortcut = nn.Sequential(nn.AvgPool2d(3, stride=2, padding=1))
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(self.shuffle0(x))), inplace=True)
-        out = self.shuffle1(out)
+        out = F.relu(self.bn1(self.shuffle1(self.conv1(self.shuffle0(x)))), inplace=True)
         out = self.bn2(self.conv2(out))
         out = self.bn3(self.conv3(out))
         res = self.shortcut(x)
