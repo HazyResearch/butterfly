@@ -20,7 +20,7 @@ from butterfly.butterfly_multiply import butterfly_mult_conv2d_torch, butterfly_
 from butterfly.butterfly_multiply import bbt_mult_conv2d_torch, bbt_mult_conv2d
 from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
 from butterfly.butterfly_multiply import butterfly_mult_conv2d_svd_torch, butterfly_mult_conv2d_svd
-# from factor_multiply import butterfly_multiply_untied_eval
+from factor_multiply import butterfly_multiply_untied_eval
 
 from factor_multiply_fast import butterfly_multiply_untied_forward_fast
 from factor_multiply_fast import butterfly_multiply_untied_forward_backward_fast

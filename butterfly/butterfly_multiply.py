@@ -22,7 +22,7 @@ try:
     from factor_multiply import butterfly_conv2d, butterfly_conv2d_backward, butterfly_conv2d_forward_backward
     from factor_multiply import bbt_conv2d, bbt_conv2d_forward_backward
     from factor_multiply import butterfly_conv2d_svd, butterfly_conv2d_svd_forward_backward
-    # from factor_multiply import butterfly_multiply_untied_eval
+    from factor_multiply import butterfly_multiply_untied_eval
 
     import factor_multiply_fast as fmf
     from factor_multiply_fast import butterfly_multiply_untied_forward_fast
@@ -181,9 +181,8 @@ class ButterflyMultUntied(torch.autograd.Function):
         Returns:
             output: (batch_size, nstack, n) if real or (batch_size, nstack, n, 2) if complex
         """
-        # use optimized code for inference
-        # if not is_training and not input.is_cuda and input.dim() == 3 and input.dtype == torch.float and input.shape[-1] > 8:
-        if False:
+        # use optimized code for CPU inference
+        if not is_training and not input.is_cuda and input.dim() == 3 and input.dtype == torch.float and input.shape[-1] > 8:
             output = butterfly_multiply_untied_eval(twiddle, input, increasing_stride)
         else:
             if not fast:
@@ -361,7 +360,7 @@ class BbtMultUntied(torch.autograd.Function):
         return d_coefficients, d_input, None
 
 
-def bbt_mult_untied(twiddle, input, fast=True):
+def bbt_mult_untied(twiddle, input, fast=True, is_training=True):
     n = input.shape[2]
     m = int(math.log2(n))
     nblocks = twiddle.shape[1] // (2 * m)
@@ -374,8 +373,8 @@ def bbt_mult_untied(twiddle, input, fast=True):
         for t in twiddle.chunk(nblocks, dim=1):
             # output = butterfly_mult_untied(t[:, :m].flip(1), output, False)
             # flip is crazy slow, advanced indexing is slightly faster
-            output = butterfly_mult_untied(t[:, reverse_idx], output, False, True, False)
-            output = butterfly_mult_untied(t[:, m:], output, True, True, False)
+            output = butterfly_mult_untied(t[:, reverse_idx], output, False, is_training, False)
+            output = butterfly_mult_untied(t[:, m:], output, True, is_training, False)
         return output
 
 

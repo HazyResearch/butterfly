@@ -47,7 +47,7 @@ class Butterfly(nn.Module):
     def __init__(self, in_size, out_size, bias=True, complex=False, tied_weight=True,
                  increasing_stride=True, ortho_init=False, param='regular', max_gain=10.0,
                  nblocks=0, diag_constraint=None, expansion=1, diag_init='normal', double=False, diag_bookends=False,
-                 fast=True):
+                 fast=False):
         super().__init__()
         self.double = double
         if double:
@@ -219,7 +219,7 @@ class Butterfly(nn.Module):
             if self.tied_weight:
                 output = butterfly_mult(self.twiddle, output, self.increasing_stride)
             else:
-                output = butterfly_mult_untied(self.twiddle, output, self.increasing_stride, self.training, self.fast) if self.nblocks == 0 else bbt_mult_untied(self.twiddle, output, self.fast)
+                output = butterfly_mult_untied(self.twiddle, output, self.increasing_stride, self.training, self.fast) if self.nblocks == 0 else bbt_mult_untied(self.twiddle, output, self.fast, self.training)
         elif self.param == 'ortho':
             if self.tied_weight:
                 output = butterfly_ortho_mult_tied(self.twiddle, output, self.increasing_stride)
