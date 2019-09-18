@@ -98,13 +98,16 @@ class Bottleneck(nn.Module):
         if shuffle == 'P':
             self.shuffle0 = nn.Identity()
             self.shuffle1 = ShuffleBlock(groups=g)
-        elif shuffle == 'Hadamard':
-            self.shuffle0 = Hadamard1x1Conv(in_planes)
+        elif shuffle.startswith('Hadamard'):
+            self.shuffle0 = nn.Identity() if shuffle.endswith('onesided') else Hadamard1x1Conv(in_planes)
             self.shuffle1 = Hadamard1x1Conv(mid_planes)
         else:
             param = shuffle.split('_')[0]
             nblocks = 0 if len(shuffle.split('_')) <= 1 else int(shuffle.split('_')[1])
-            self.shuffle0 = Butterfly1x1Conv(in_planes, in_planes, bias=False, tied_weight=False, ortho_init=True, param=param, nblocks=nblocks)
+            if shuffle.endswith('onesided'):
+                self.shuffle0 = nn.Identity()
+            else:
+                self.shuffle0 = Butterfly1x1Conv(in_planes, in_planes, bias=False, tied_weight=False, ortho_init=True, param=param, nblocks=nblocks)
             self.shuffle1 = Butterfly1x1Conv(mid_planes, mid_planes, bias=False, tied_weight=False, ortho_init=True, param=param, nblocks=nblocks)
 
         self.conv2 = nn.Conv2d(mid_planes, mid_planes, kernel_size=3, stride=stride, padding=1, groups=mid_planes, bias=False)
