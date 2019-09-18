@@ -70,6 +70,8 @@ def add_parser_arguments(parser):
                         metavar='GROUPS', help='Group parameter of ShuffleNet (default 8)')
     parser.add_argument('--shuffle', default='P', type=str,
                         metavar='SHUFFLE', help='Type of shuffle (P for usual channel shuffle, odo_1 for butterfly)')
+    parser.add_argument('--preact', action='store_true',
+                        help='Whether to use pre-activation of ShuffleNet')
     parser.add_argument('--distilled-param-path', default='', type=str, metavar='PATH',
                         help='path to distilled parameters (default: none)')
     parser.add_argument('--full-model-path', default='', type=str, metavar='PATH',

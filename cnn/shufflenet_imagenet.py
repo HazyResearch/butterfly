@@ -84,17 +84,18 @@ class ShuffleBlock(nn.Module):
 
 
 class Bottleneck(nn.Module):
-    def __init__(self, in_planes, out_planes, stride, groups, grouped_conv_1st_layer=True, shuffle='P'):
+    def __init__(self, in_planes, out_planes, stride, groups, grouped_conv_1st_layer=True, shuffle='P', preact=False):
         super(Bottleneck, self).__init__()
         self.stride = stride
         self.shuffle = shuffle
+        self.preact = preact
 
         mid_planes = _make_divisible(out_planes // 4, groups)
         if stride == 2:  # Reduce out_planes due to concat
             out_planes -= in_planes
         g = groups if grouped_conv_1st_layer else 1  # No grouped conv for the first layer of stage 2
         self.conv1 = nn.Conv2d(in_planes, mid_planes, kernel_size=1, groups=g, bias=False)
-        self.bn1 = nn.BatchNorm2d(mid_planes)
+        self.bn1 = nn.BatchNorm2d(mid_planes if not self.preact else in_planes)
         if shuffle == 'P':
             self.shuffle0 = nn.Identity()
             self.shuffle1 = ShuffleBlock(groups=g)
@@ -114,23 +115,31 @@ class Bottleneck(nn.Module):
         self.conv2.weight._no_wd = True
         self.bn2 = nn.BatchNorm2d(mid_planes)
         self.conv3 = nn.Conv2d(mid_planes, out_planes, kernel_size=1, groups=groups, bias=False)
-        self.bn3 = nn.BatchNorm2d(out_planes)
+        self.bn3 = nn.BatchNorm2d(out_planes if not self.preact else mid_planes)
 
         self.shortcut = nn.Sequential()
         if stride == 2:
             self.shortcut = nn.Sequential(nn.AvgPool2d(3, stride=2, padding=1))
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.shuffle1(self.conv1(self.shuffle0(x)))), inplace=True)
-        out = self.bn2(self.conv2(out))
-        out = self.bn3(self.conv3(out))
-        res = self.shortcut(x)
-        out = F.relu(torch.cat([out,res], 1), inplace=True) if self.stride==2 else F.relu(out+res, inplace=True)
+        if not self.preact:
+            out = F.relu(self.bn1(self.shuffle1(self.conv1(self.shuffle0(x)))), inplace=True)
+            out = self.bn2(self.conv2(out))
+            out = self.bn3(self.conv3(out))
+            res = self.shortcut(x)
+            out = F.relu(torch.cat([out,res], 1), inplace=True) if self.stride==2 else F.relu(out+res, inplace=True)
+        else:
+            out = F.relu(self.bn1(x), inplace=True)
+            res = self.shortcut(out)
+            out = self.shuffle1(self.conv1(self.shuffle0(x)))
+            out = self.conv2(F.relu(self.bn2(out), inplace=True))
+            out = self.conv3(self.bn3(out))
+            out = torch.cat([out,res], 1) if self.stride==2 else out+res
         return out
 
 
 class ShuffleNet(nn.Module):
-    def __init__(self, num_classes=1000, groups=8, width_mult=1.0, shuffle='P'):
+    def __init__(self, num_classes=1000, groups=8, width_mult=1.0, shuffle='P', preact=False):
         super(ShuffleNet, self).__init__()
         num_blocks = [4, 8, 4]
         groups_to_outplanes = {1: [144, 288, 576],
@@ -146,17 +155,17 @@ class ShuffleNet(nn.Module):
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.bn1 = nn.BatchNorm2d(input_channel)
         self.in_planes = input_channel
-        self.stage2 = self._make_layer(out_planes[0], num_blocks[0], groups, grouped_conv_1st_layer=False, shuffle=shuffle)
-        self.stage3 = self._make_layer(out_planes[1], num_blocks[1], groups, shuffle=shuffle)
-        self.stage4 = self._make_layer(out_planes[2], num_blocks[2], groups, shuffle=shuffle)
+        self.stage2 = self._make_layer(out_planes[0], num_blocks[0], groups, grouped_conv_1st_layer=False, shuffle=shuffle, preact=preact)
+        self.stage3 = self._make_layer(out_planes[1], num_blocks[1], groups, shuffle=shuffle, preact=preact)
+        self.stage4 = self._make_layer(out_planes[2], num_blocks[2], groups, shuffle=shuffle, preact=preact)
         self.linear = nn.Linear(out_planes[2], num_classes)
 
-    def _make_layer(self, out_planes, num_blocks, groups, grouped_conv_1st_layer=True, shuffle='P'):
+    def _make_layer(self, out_planes, num_blocks, groups, grouped_conv_1st_layer=True, shuffle='P', preact=False):
         layers = []
         for i in range(num_blocks):
             stride = 2 if i == 0 else 1
             layers.append(Bottleneck(self.in_planes, out_planes, stride=stride, groups=groups,
-                                     grouped_conv_1st_layer=grouped_conv_1st_layer, shuffle=shuffle))
+                                     grouped_conv_1st_layer=grouped_conv_1st_layer, shuffle=shuffle, preact=preact))
             self.in_planes = out_planes
         return nn.Sequential(*layers)
 
