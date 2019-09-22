@@ -67,7 +67,7 @@ class Block(nn.Module):
             self.conv2 = nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0, bias=False)
         elif structure.startswith('LR'):
             odo_nblocks = int(structure.split('_')[1])
-            rank = int(odo_nblocks * math.log2(in_planes) / 2)
+            rank = int(odo_nblocks * math.log2(out_planes) / 2)
             self.conv2 = LowRankConv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0, bias=False, rank=rank)
         else:
             param = structure.split('_')[0]
