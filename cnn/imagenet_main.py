@@ -40,7 +40,7 @@ from sparselearning.core import Masking, CosineDecay
 
 
 def add_parser_arguments(parser):
-    custom_model_names = ['mobilenetv1']
+    custom_model_names = ['mobilenetv1', 'shufflenetv1']
     model_names = sorted(name for name in models.__dict__
                         if name.islower() and not name.startswith("__")
                         and callable(models.__dict__[name])) + custom_model_names
@@ -62,10 +62,19 @@ def add_parser_arguments(parser):
     parser.add_argument('--softmax-struct', metavar='SMSTRUCT', default='D',
                         type=str,
                         help='structure for softmax layer: ' + ' (default: D)')
+    parser.add_argument('--sm-pooling', metavar='SMPOOL', default=1,
+                        type=int,
+                        help='pooling before the softmax layer: ' + ' (default: 1)')
     parser.add_argument('--n-struct-layers', default=0, type=int,
                         metavar='NSL', help='Number of structured layer (default 7)')
     parser.add_argument('--width', default=1.0, type=float,
                         metavar='WIDTH', help='Width multiplier of the CNN (default 1.0)')
+    parser.add_argument('--groups', default=8, type=int,
+                        metavar='GROUPS', help='Group parameter of ShuffleNet (default 8)')
+    parser.add_argument('--shuffle', default='P', type=str,
+                        metavar='SHUFFLE', help='Type of shuffle (P for usual channel shuffle, odo_1 for butterfly)')
+    parser.add_argument('--preact', action='store_true',
+                        help='Whether to use pre-activation of ShuffleNet')
     parser.add_argument('--distilled-param-path', default='', type=str, metavar='PATH',
                         help='path to distilled parameters (default: none)')
     parser.add_argument('--full-model-path', default='', type=str, metavar='PATH',
@@ -250,7 +259,8 @@ def main(args):
             pretrained_weights=pretrained_weights,
             cuda = True, fp16 = args.fp16,
             width=args.width, n_struct_layers=args.n_struct_layers if args.dense else 0,
-            struct=args.struct, softmax_struct=args.softmax_struct)
+            struct=args.struct, softmax_struct=args.softmax_struct, sm_pooling=args.sm_pooling,
+            groups=args.groups, shuffle=args.shuffle)
 
     if args.arch == 'mobilenetv1' and args.distilled_param_path:
         model_state = model_and_loss.model.mixed_model_state_dict(args.full_model_path, args.distilled_param_path)
@@ -319,7 +329,7 @@ def main(args):
     if args.amp:
         model_and_loss, optimizer = amp.initialize(
                 model_and_loss, optimizer,
-                opt_level="O2",
+                opt_level="O1",
                 loss_scale="dynamic" if args.dynamic_loss_scale else args.static_loss_scale)
 
     if args.distributed:
