@@ -349,7 +349,7 @@ def main(args):
             assert (m == n or m//n == 2)
             logn = int(round(np.log2(n)))
             n_odo4 = n*(logn+1)*4*(m//n)
-            mask.add_module(conv, density=n_odo4/(m*n), sparse_init='trueconstant', name_prefix=f'block{block_ind}', last_mask=i==args.n_struct_layers-1)
+            mask.add_module(conv, density=n_odo4/(m*n), sparse_init='trueconstant', name_prefix=f'block{block_ind}', last_mask=i==args.n_struct_layers-1, apply_masks=False)
         for name in mask.masks:
             torch.distributed.broadcast(mask.masks[name], 0)
         mask.apply_mask()
