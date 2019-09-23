@@ -340,6 +340,11 @@ def main(args):
     mask = Masking(optimizer, prune_mode=args.prune, prune_rate_decay=decay, growth_mode=args.growth, redistribution_mode='none', verbose=args.verbose)
     model_and_loss.mask = None
     print(model_and_loss.model)
+    p_sum = 0
+    for n,p in model_and_loss.model.named_parameters():
+      print(f'{n}: {p.numel()}')
+      p_sum += p.numel()
+    print(f'Total parameters: {p_sum}')
     if not args.dense:
         model_and_loss.mask = mask
         for i, block in enumerate(model_and_loss.model.module.layers[-args.n_struct_layers:]):
