@@ -17,6 +17,8 @@ width_acc = [51.971, 61.770, 67.799]
 width_param = np.array([470072, 1019304, 2585560]) / 1e6
 lowrank_acc = [47.248, 56.064, 62.727]
 lowrank_param = np.array([426376, 997160, 2540136]) / 1e6
+sparse_ind_acc = [56.145]
+sparse_ind_param = np.array([439688+84992]) / 1e6
 
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
@@ -28,6 +30,7 @@ colors = ['red', 'orange', 'green', 'blue', 'black']
 plt.plot(width_param, width_acc, marker=markers[2], color=colors[2], label='Reducing width')
 plt.plot(butterfly_smpool_param, butterfly_smpool_acc, marker=markers[0], color=colors[0], label='Kaleidoscope')
 plt.plot(lowrank_param, lowrank_acc, marker=markers[1], color=colors[1], label='Low-rank')
+plt.plot(sparse_ind_param, sparse_ind_acc, marker=markers[3], color=colors[3], label='Sparse (values+indices)')
 # plt.plot(butterfly_smstruct_param, butterfly_smstruct_acc, marker=markers[3], color=colors[3], label='Butterfly w/ smstruct')
 # plt.plot(mobilenet_numparams / toeplitzlike_numparams[1:], all_accuracy[2, 1:], marker=markers[2], color=colors[2], label='Toeplitz-like')
 # plt.plot(mobilenet_numparams / resnet_numparams, resnet_accuracy, marker=markers[3], color=colors[3], label='Resnet18')
