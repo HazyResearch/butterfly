@@ -6,15 +6,17 @@ import numpy as np
 # butterfly_acc = [56.4, 65.0, 70.1, 71.2]
 # butterfly_param = [0.70, 1.54, 3.62, 4.04]
 # Butterfly w/ channel pooling
-butterfly_smpool_acc = [54.0, 62.8, 68.4]
-butterfly_smpool_param = [0.44, 1.02, 2.60]
+butterfly_smpool_acc = [54.027, 62.840, 68.418]
+butterfly_smpool_param = np.array([439688, 1024808, 2597480])  / 1e6
 # Butterfly w/ compressed softmax
 # butterfly_smstruct_acc = [59.0, 66.1, 70.5]
 # butterfly_smstruct_param = [0.60, 1.77, 5.69]
-width_acc = [51.6, 63.9, 70.9]
-width_param = [0.47, 1.33, 4.23]
-lowrank_acc = [47.3, 56.1, 62.7]
-lowrank_param = [0.43, 1.00, 2.54]
+# width_acc = [51.6, 63.9, 70.9]
+# width_param = [0.47, 1.33, 4.23]
+width_acc = [51.971, 61.770, 67.799]
+width_param = np.array([470072, 1019304, 2585560]) / 1e6
+lowrank_acc = [47.248, 56.064, 62.727]
+lowrank_param = np.array([426376, 997160, 2540136]) / 1e6
 
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
