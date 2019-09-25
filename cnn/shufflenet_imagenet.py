@@ -123,7 +123,9 @@ class Bottleneck(nn.Module):
 
     def forward(self, x):
         if not self.preact:
-            out = F.relu(self.bn1(self.shuffle1(self.conv1(self.shuffle0(x)))), inplace=True)
+            # out = F.relu(self.bn1(self.shuffle1(self.conv1(self.shuffle0(x)))), inplace=True)
+            out = F.relu(self.bn1(self.conv1(self.shuffle0(x))), inplace=True)
+            out = self.shuffle1(out)
             out = self.bn2(self.conv2(out))
             out = self.bn3(self.conv3(out))
             res = self.shortcut(x)
