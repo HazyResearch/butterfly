@@ -7,6 +7,11 @@
 #include <thrust/pair.h>
 #include <thrust/tuple.h>
 
+// For compatibility with Pytorch 1.1
+#ifndef TORCH_CHECK
+#define TORCH_CHECK AT_CHECK
+#endif
+
 // #define thc_cos THCNumerics<scalar_t>::cos
 // #define thc_sin THCNumerics<scalar_t>::sin
 #define thc_cos std::cos

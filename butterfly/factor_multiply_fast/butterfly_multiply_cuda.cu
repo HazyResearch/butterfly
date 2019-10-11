@@ -9,6 +9,11 @@
 #include <thrust/tuple.h>
 #include "map.h"  // For the MAP macro, i.e. for_each over the arguments
 
+// For compatibility with Pytorch 1.1
+#ifndef TORCH_CHECK
+#define TORCH_CHECK AT_CHECK
+#endif
+
 #define BFLY_BENCHMARK false
 
 #define thc_cos std::cos
