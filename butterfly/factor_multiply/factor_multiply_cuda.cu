@@ -25,7 +25,7 @@ static constexpr int ELEMENTARY_SIZE = MAX_BLOCK_SIZE / 2;
 static constexpr int MAX_N_FACTORS = 10;
 
 template <typename T, size_t N>
-using CudaAcsr = at::PackedTensorAccessor<T, N, at::RestrictPtrTraits, int32_t>;
+using CudaAcsr32 = at::PackedTensorAccessor32<T, N, at::RestrictPtrTraits>;
 
 __host__ __device__ static inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
@@ -56,9 +56,9 @@ static __device__  __forceinline__  thrust::pair<scalar_t, scalar_t> mult2x2(sca
 }
 
 template <typename scalar_t>
-__global__ void butterfly_factor_multiply_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                      const at::PackedTensorAccessor<scalar_t, 3> input_a,
-                                                      at::PackedTensorAccessor<scalar_t, 3> output_a) {
+__global__ void butterfly_factor_multiply_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 3> twiddle_a,
+                                                      const at::PackedTensorAccessor64<scalar_t, 3> input_a,
+                                                      at::PackedTensorAccessor64<scalar_t, 3> output_a) {
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
   for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
@@ -75,9 +75,9 @@ __global__ void butterfly_factor_multiply_cuda_kernel(const at::PackedTensorAcce
 }
 
 template <typename scalar_t>
-__global__ void butterfly_factor_multiply_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> twiddle_a,
-                                                              const at::PackedTensorAccessor<scalar_t, 4> input_a,
-                                                              at::PackedTensorAccessor<scalar_t, 4> output_a) {
+__global__ void butterfly_factor_multiply_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 4> twiddle_a,
+                                                              const at::PackedTensorAccessor64<scalar_t, 4> input_a,
+                                                              at::PackedTensorAccessor64<scalar_t, 4> output_a) {
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
   for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
@@ -110,18 +110,18 @@ void butterfly_factor_multiply_cuda(const at::Tensor& twiddle, const at::Tensor&
     switch (input.dim()) {
       case 3:  // real
         {
-          const auto twiddle_a = twiddle.packed_accessor<scalar_t, 3>();
-          const auto input_a = input.packed_accessor<scalar_t, 3>();
-          auto output_a = output.packed_accessor<scalar_t, 3>();
+          const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 3>();
+          const auto input_a = input.packed_accessor64<scalar_t, 3>();
+          auto output_a = output.packed_accessor64<scalar_t, 3>();
           butterfly_factor_multiply_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, output_a);
           break;
         }
       case 4:  // complex
         {
-          const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4>();
-          const auto input_a = input.packed_accessor<scalar_t, 4>();
-          auto output_a = output.packed_accessor<scalar_t, 4>();
+          const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 4>();
+          const auto input_a = input.packed_accessor64<scalar_t, 4>();
+          auto output_a = output.packed_accessor64<scalar_t, 4>();
           butterfly_factor_multiply_complex_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, output_a);
           break;
@@ -162,12 +162,12 @@ __device__ __forceinline__ T sum_strided(T val, T *temp, int stride, int len, in
 }
 
 template <typename scalar_t>
-__global__ void butterfly_factor_multiply_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> grad_a,
-                                                               const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                               const at::PackedTensorAccessor<scalar_t, 3> input_a,
-                                                               // at::PackedTensorAccessor<scalar_t, 4> d_twiddle_expanded_a,
-                                                               at::PackedTensorAccessor<scalar_t, 3> d_twiddle_expanded_a,
-                                                               at::PackedTensorAccessor<scalar_t, 3> d_input_a) {
+__global__ void butterfly_factor_multiply_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 3> grad_a,
+                                                               const at::PackedTensorAccessor64<scalar_t, 3> twiddle_a,
+                                                               const at::PackedTensorAccessor64<scalar_t, 3> input_a,
+                                                               // at::PackedTensorAccessor64<scalar_t, 4> d_twiddle_expanded_a,
+                                                               at::PackedTensorAccessor64<scalar_t, 3> d_twiddle_expanded_a,
+                                                               at::PackedTensorAccessor64<scalar_t, 3> d_input_a) {
   const int batch_size = input_a.size(0);
   const int n = input_a.size(2);
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
@@ -327,11 +327,11 @@ __global__ void butterfly_factor_multiply_backward_cuda_kernel(const at::PackedT
 }
 
 template <typename scalar_t>
-__global__ void butterfly_factor_multiply_complex_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> grad_a,
-                                                                       const at::PackedTensorAccessor<scalar_t, 4> twiddle_a,
-                                                                       const at::PackedTensorAccessor<scalar_t, 4> input_a,
-                                                                       at::PackedTensorAccessor<scalar_t, 5> d_twiddle_expanded_a,
-                                                                       at::PackedTensorAccessor<scalar_t, 4> d_input_a) {
+__global__ void butterfly_factor_multiply_complex_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 4> grad_a,
+                                                                       const at::PackedTensorAccessor64<scalar_t, 4> twiddle_a,
+                                                                       const at::PackedTensorAccessor64<scalar_t, 4> input_a,
+                                                                       at::PackedTensorAccessor64<scalar_t, 5> d_twiddle_expanded_a,
+                                                                       at::PackedTensorAccessor64<scalar_t, 4> d_input_a) {
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
   for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
@@ -372,23 +372,23 @@ void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::T
     switch (input.dim()) {
       case 3:  // real
         {
-          const auto grad_a = grad.packed_accessor<scalar_t, 3>();
-          const auto twiddle_a = twiddle.packed_accessor<scalar_t, 3>();
-          const auto input_a = input.packed_accessor<scalar_t, 3>();
-          // auto d_twiddle_expanded_a = d_twiddle_expanded.packed_accessor<scalar_t, 4>();
-          auto d_twiddle_expanded_a = d_twiddle_expanded.packed_accessor<scalar_t, 3>();
-          auto d_input_a = d_input.packed_accessor<scalar_t, 3>();
+          const auto grad_a = grad.packed_accessor64<scalar_t, 3>();
+          const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 3>();
+          const auto input_a = input.packed_accessor64<scalar_t, 3>();
+          // auto d_twiddle_expanded_a = d_twiddle_expanded.packed_accessor64<scalar_t, 4>();
+          auto d_twiddle_expanded_a = d_twiddle_expanded.packed_accessor64<scalar_t, 3>();
+          auto d_input_a = d_input.packed_accessor64<scalar_t, 3>();
           butterfly_factor_multiply_backward_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(grad_a, twiddle_a, input_a, d_twiddle_expanded_a, d_input_a);
           break;
         }
       case 4:  // complex
         {
-          const auto grad_a = grad.packed_accessor<scalar_t, 4>();
-          const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4>();
-          const auto input_a = input.packed_accessor<scalar_t, 4>();
-          auto d_twiddle_expanded_a = d_twiddle_expanded.packed_accessor<scalar_t, 5>();
-          auto d_input_a = d_input.packed_accessor<scalar_t, 4>();
+          const auto grad_a = grad.packed_accessor64<scalar_t, 4>();
+          const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 4>();
+          const auto input_a = input.packed_accessor64<scalar_t, 4>();
+          auto d_twiddle_expanded_a = d_twiddle_expanded.packed_accessor64<scalar_t, 5>();
+          auto d_input_a = d_input.packed_accessor64<scalar_t, 4>();
           butterfly_factor_multiply_complex_backward_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(grad_a, twiddle_a, input_a, d_twiddle_expanded_a, d_input_a);
           break;
@@ -403,8 +403,8 @@ void butterfly_factor_multiply_backward_cuda(const at::Tensor& grad, const at::T
 }
 
 template <typename scalar_t>
-__global__ void butterfly_multiply_inplace_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                       at::PackedTensorAccessor<scalar_t, 2> input_a,
+__global__ void butterfly_multiply_inplace_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 3> twiddle_a,
+                                                       at::PackedTensorAccessor64<scalar_t, 2> input_a,
                                                        int max_stride) {
   const int batch_size = input_a.size(0);
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
@@ -442,8 +442,8 @@ __global__ void butterfly_multiply_inplace_cuda_kernel(const at::PackedTensorAcc
 }
 
 template <typename scalar_t>
-__global__ void butterfly_multiply_inplace_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                               at::PackedTensorAccessor<scalar_t, 2> input_a,
+__global__ void butterfly_multiply_inplace_onestep_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 3> twiddle_a,
+                                                               at::PackedTensorAccessor64<scalar_t, 2> input_a,
                                                                int stride) {
   const int batch_size = input_a.size(0);
   int twiddle_start_idx = stride - 1;
@@ -467,8 +467,8 @@ void butterfly_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tensor& inpu
     switch (input.dim()) {
       case 2:  // real
         {
-          const auto twiddle_a = twiddle.packed_accessor<scalar_t, 3>();
-          auto input_a = input.packed_accessor<scalar_t, 2>();
+          const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 3>();
+          auto input_a = input.packed_accessor64<scalar_t, 2>();
           int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
           dim3 block(stride);
           dim3 grid(div_up(n / 2, stride), batch_size);
@@ -484,8 +484,8 @@ void butterfly_multiply_inplace_cuda(const at::Tensor& twiddle, at::Tensor& inpu
         }
       case 3:  // complex
         {
-          const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4>();
-          auto input_a = input.packed_accessor<scalar_t, 3>();
+          const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 4>();
+          auto input_a = input.packed_accessor64<scalar_t, 3>();
           AT_ERROR("Not implemented");
           // butterfly_multiply_inplace_complex_cuda_kernel<scalar_t>
           //   <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, input_a, output_a);
@@ -571,10 +571,10 @@ __device__ __forceinline__ void sum_strided_exchange(T (&val)[LENGTH], T *storag
 }
 
 template <typename scalar_t>
-__global__ void butterfly_multiply_inplace_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                                at::PackedTensorAccessor<double, 2> output_a,
-                                                                at::PackedTensorAccessor<scalar_t, 3> d_twiddle_a,
-                                                                at::PackedTensorAccessor<scalar_t, 2> d_input_a,
+__global__ void butterfly_multiply_inplace_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 3> twiddle_a,
+                                                                at::PackedTensorAccessor64<double, 2> output_a,
+                                                                at::PackedTensorAccessor64<scalar_t, 3> d_twiddle_a,
+                                                                at::PackedTensorAccessor64<scalar_t, 2> d_input_a,
                                                                 int max_stride) {
   const int batch_size = output_a.size(0);
   const int input_base_idx = blockIdx.x * blockDim.x * 2;
@@ -634,10 +634,10 @@ __global__ void butterfly_multiply_inplace_backward_cuda_kernel(const at::Packed
 }
 
 template <typename scalar_t>
-__global__ void butterfly_multiply_inplace_backward_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> twiddle_a,
-                                                                        at::PackedTensorAccessor<double, 2> output_a,
-                                                                        at::PackedTensorAccessor<scalar_t, 3> d_twiddle_a,
-                                                                        at::PackedTensorAccessor<scalar_t, 2> d_input_a,
+__global__ void butterfly_multiply_inplace_backward_onestep_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 3> twiddle_a,
+                                                                        at::PackedTensorAccessor64<double, 2> output_a,
+                                                                        at::PackedTensorAccessor64<scalar_t, 3> d_twiddle_a,
+                                                                        at::PackedTensorAccessor64<scalar_t, 2> d_input_a,
                                                                         int stride) {
   const int batch_size = output_a.size(0);
   const int n = output_a.size(1);
@@ -679,10 +679,10 @@ void butterfly_multiply_inplace_backward_cuda(const at::Tensor& grad, const at::
     switch (grad.dim()) {
       case 2:  // real
         {
-          const auto twiddle_a = twiddle.packed_accessor<scalar_t, 3>();
-          auto output_a = output.packed_accessor<double, 2>();
-          auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3>();
-          auto d_input_a = d_input.packed_accessor<scalar_t, 2>();
+          const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 3>();
+          auto output_a = output.packed_accessor64<double, 2>();
+          auto d_twiddle_a = d_twiddle.packed_accessor64<scalar_t, 3>();
+          auto d_input_a = d_input.packed_accessor64<scalar_t, 2>();
           int stride = n/2;
           for (; stride > ELEMENTARY_SIZE; stride /= 2) {
           // for (; stride > 0; stride /= 2) {
@@ -699,8 +699,8 @@ void butterfly_multiply_inplace_backward_cuda(const at::Tensor& grad, const at::
         }
       case 3:  // complex
         {
-          const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4>();
-          auto output_a = output.packed_accessor<scalar_t, 3>();
+          const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 4>();
+          auto output_a = output.packed_accessor64<scalar_t, 3>();
           AT_ERROR("Not implemented");
           // butterfly_multiply_inplace_backward_complex_cuda_kernel<scalar_t>
           //   <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, output_a);
@@ -716,8 +716,8 @@ void butterfly_multiply_inplace_backward_cuda(const at::Tensor& grad, const at::
 }
 
 template <typename scalar_t, bool increasing_stride, bool return_intermediates>
-__global__ void butterfly_multiply_intermediate_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> twiddle_a,
-                                                            at::PackedTensorAccessor<scalar_t, 4> output_a,
+__global__ void butterfly_multiply_intermediate_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 4> twiddle_a,
+                                                            at::PackedTensorAccessor64<scalar_t, 4> output_a,
                                                             int log_max_stride,
                                                             int log_n) {
   const int batch_size = output_a.size(1);
@@ -762,8 +762,8 @@ __global__ void butterfly_multiply_intermediate_cuda_kernel(const at::PackedTens
 }
 
 template <typename scalar_t, bool increasing_stride, bool return_intermediates>
-__global__ void butterfly_multiply_intermediate_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                                    at::PackedTensorAccessor<scalar_t, 5> output_a,
+__global__ void butterfly_multiply_intermediate_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                                    at::PackedTensorAccessor64<scalar_t, 5> output_a,
                                                                     int log_max_stride,
                                                                     int log_n) {
   using complex_t = thrust::complex<scalar_t>;
@@ -815,8 +815,8 @@ __global__ void butterfly_multiply_intermediate_complex_cuda_kernel(const at::Pa
 }
 
 template <typename scalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_intermediate_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> twiddle_a,
-                                                                    at::PackedTensorAccessor<scalar_t, 4> output_a,
+__global__ void butterfly_multiply_intermediate_onestep_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 4> twiddle_a,
+                                                                    at::PackedTensorAccessor64<scalar_t, 4> output_a,
                                                                     int log_stride,
                                                                     int log_n) {
   const int batch_size = output_a.size(1);
@@ -838,8 +838,8 @@ __global__ void butterfly_multiply_intermediate_onestep_cuda_kernel(const at::Pa
 }
 
 template <typename scalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_intermediate_onestep_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                                            at::PackedTensorAccessor<scalar_t, 5> output_a,
+__global__ void butterfly_multiply_intermediate_onestep_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                                            at::PackedTensorAccessor64<scalar_t, 5> output_a,
                                                                             int log_stride,
                                                                             int log_n) {
   using complex_t = thrust::complex<scalar_t>;
@@ -879,8 +879,8 @@ void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor&
   const bool complex = output.dim() == 5;
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_intermediate_cuda", [&] {
     if (!complex) {  // real
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4>();
-      auto output_a = output.packed_accessor<scalar_t, 4>();
+      const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 4>();
+      auto output_a = output.packed_accessor64<scalar_t, 4>();
       if (increasing_stride) {
         int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
         int log_stride = int(log2((double) stride));
@@ -913,8 +913,8 @@ void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor&
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n);
       }
     } else {  // complex
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
-      auto output_a = output.packed_accessor<scalar_t, 5>();
+      const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 5>();
+      auto output_a = output.packed_accessor64<scalar_t, 5>();
       if (increasing_stride) {
         int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
         int log_stride = int(log2((double) stride));
@@ -954,10 +954,10 @@ void butterfly_multiply_intermediate_cuda(const at::Tensor& twiddle, at::Tensor&
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_intermediate_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> twiddle_a,
-                                                                     const at::PackedTensorAccessor<scalar_t, 4> output_a,
-                                                                     at::PackedTensorAccessor<scalar_t, 4> d_twiddle_a,
-                                                                     at::PackedTensorAccessor<scalar_t, 3> d_input_a,
+__global__ void butterfly_multiply_intermediate_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 4> twiddle_a,
+                                                                     const at::PackedTensorAccessor64<scalar_t, 4> output_a,
+                                                                     at::PackedTensorAccessor64<scalar_t, 4> d_twiddle_a,
+                                                                     at::PackedTensorAccessor64<scalar_t, 3> d_input_a,
                                                                      int log_max_stride,
                                                                      int log_n) {
   const int batch_size = output_a.size(1);
@@ -1031,10 +1031,10 @@ __global__ void butterfly_multiply_intermediate_backward_cuda_kernel(const at::P
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_intermediate_backward_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                                             const at::PackedTensorAccessor<scalar_t, 5> output_a,
-                                                                             at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-                                                                             at::PackedTensorAccessor<scalar_t, 4> d_input_a,
+__global__ void butterfly_multiply_intermediate_backward_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                                             const at::PackedTensorAccessor64<scalar_t, 5> output_a,
+                                                                             at::PackedTensorAccessor64<scalar_t, 5> d_twiddle_a,
+                                                                             at::PackedTensorAccessor64<scalar_t, 4> d_input_a,
                                                                              int log_max_stride,
                                                                              int log_n) {
   using complex_t = thrust::complex<scalar_t>;
@@ -1108,10 +1108,10 @@ __global__ void butterfly_multiply_intermediate_backward_complex_cuda_kernel(con
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_intermediate_backward_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> twiddle_a,
-                                                                             const at::PackedTensorAccessor<scalar_t, 4> output_a,
-                                                                             at::PackedTensorAccessor<scalar_t, 4> d_twiddle_a,
-                                                                             at::PackedTensorAccessor<scalar_t, 3> d_input_a,
+__global__ void butterfly_multiply_intermediate_backward_onestep_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 4> twiddle_a,
+                                                                             const at::PackedTensorAccessor64<scalar_t, 4> output_a,
+                                                                             at::PackedTensorAccessor64<scalar_t, 4> d_twiddle_a,
+                                                                             at::PackedTensorAccessor64<scalar_t, 3> d_input_a,
                                                                              int log_stride,
                                                                              int log_n) {
   const int batch_size = output_a.size(1);
@@ -1145,10 +1145,10 @@ __global__ void butterfly_multiply_intermediate_backward_onestep_cuda_kernel(con
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_intermediate_backward_onestep_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                                                     const at::PackedTensorAccessor<scalar_t, 5> output_a,
-                                                                                     at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-                                                                                     at::PackedTensorAccessor<scalar_t, 4> d_input_a,
+__global__ void butterfly_multiply_intermediate_backward_onestep_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                                                     const at::PackedTensorAccessor64<scalar_t, 5> output_a,
+                                                                                     at::PackedTensorAccessor64<scalar_t, 5> d_twiddle_a,
+                                                                                     at::PackedTensorAccessor64<scalar_t, 4> d_input_a,
                                                                                      int log_stride,
                                                                                      int log_n) {
   using complex_t = thrust::complex<scalar_t>;
@@ -1208,10 +1208,10 @@ void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, co
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_intermediate_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     if (!complex) {  // real
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4>();
-      const auto output_a = output.packed_accessor<scalar_t, 4>();
-      auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 4>();
-      auto d_input_a = d_input.packed_accessor<scalar_t, 3>();
+      const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 4>();
+      const auto output_a = output.packed_accessor64<scalar_t, 4>();
+      auto d_twiddle_a = d_twiddle.packed_accessor64<scalar_t, 4>();
+      auto d_input_a = d_input.packed_accessor64<scalar_t, 3>();
       if (increasing_stride) {
         int log_stride = log_n - 1;
         for (; (1 << log_stride) > ELEMENTARY_SIZE; --log_stride) {
@@ -1240,10 +1240,10 @@ void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, co
         }
       }
     } else {  // complex
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
-      const auto output_a = output.packed_accessor<scalar_t, 5>();
-      auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5>();
-      auto d_input_a = d_input.packed_accessor<scalar_t, 4>();
+      const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 5>();
+      const auto output_a = output.packed_accessor64<scalar_t, 5>();
+      auto d_twiddle_a = d_twiddle.packed_accessor64<scalar_t, 5>();
+      auto d_input_a = d_input.packed_accessor64<scalar_t, 4>();
       if (increasing_stride) {
         int log_stride = log_n - 1;
         for (; (1 << log_stride) > ELEMENTARY_SIZE; --log_stride) {
@@ -1279,8 +1279,8 @@ void butterfly_multiply_intermediate_backward_cuda(const at::Tensor& twiddle, co
 }
 
 template <typename scalar_t, bool increasing_stride, bool return_intermediates>
-__global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                      at::PackedTensorAccessor<scalar_t, 4> output_a,
+__global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                      at::PackedTensorAccessor64<scalar_t, 4> output_a,
                                                       int log_max_stride,
                                                       int log_n) {
   const int batch_size = output_a.size(1);
@@ -1329,8 +1329,8 @@ __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAcce
 
 // Trying out an implementation where consecutive threads process same input index, but different batch indices.
 // template <typename scalar_t, bool increasing_stride, bool return_intermediates>
-// __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-//                                                       at::PackedTensorAccessor<scalar_t, 4> output_a,
+// __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+//                                                       at::PackedTensorAccessor64<scalar_t, 4> output_a,
 //                                                       int log_max_stride,
 //                                                       int log_n) {
 //   const int batch_size = output_a.size(1);
@@ -1385,8 +1385,8 @@ __global__ void butterfly_multiply_untied_cuda_kernel(const at::PackedTensorAcce
 // }
 
 template <typename scalar_t, bool increasing_stride, bool return_intermediates>
-__global__ void butterfly_multiply_untied_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 6> twiddle_a,
-                                                              at::PackedTensorAccessor<scalar_t, 5> output_a,
+__global__ void butterfly_multiply_untied_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 6> twiddle_a,
+                                                              at::PackedTensorAccessor64<scalar_t, 5> output_a,
                                                               int log_max_stride,
                                                               int log_n) {
   using complex_t = thrust::complex<scalar_t>;
@@ -1429,8 +1429,8 @@ __global__ void butterfly_multiply_untied_complex_cuda_kernel(const at::PackedTe
 }
 
 template <typename scalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                              at::PackedTensorAccessor<scalar_t, 4> output_a,
+__global__ void butterfly_multiply_untied_onestep_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                              at::PackedTensorAccessor64<scalar_t, 4> output_a,
                                                               int log_stride,
                                                               int log_n) {
   const int batch_size = output_a.size(1);
@@ -1450,8 +1450,8 @@ __global__ void butterfly_multiply_untied_onestep_cuda_kernel(const at::PackedTe
 }
 
 template <typename scalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_onestep_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 6> twiddle_a,
-                                                                      at::PackedTensorAccessor<scalar_t, 5> output_a,
+__global__ void butterfly_multiply_untied_onestep_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 6> twiddle_a,
+                                                                      at::PackedTensorAccessor64<scalar_t, 5> output_a,
                                                                       int log_stride,
                                                                       int log_n) {
   using complex_t = thrust::complex<scalar_t>;
@@ -1489,8 +1489,8 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
   const bool complex = output.dim() == 5;
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_untied_cuda", [&] {
     if (!complex) {  // real
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
-      auto output_a = output.packed_accessor<scalar_t, 4>();
+      const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 5>();
+      auto output_a = output.packed_accessor64<scalar_t, 4>();
       if (increasing_stride) {
         int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
         int log_stride = int(log2((double) stride));
@@ -1527,8 +1527,8 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(twiddle_a, output_a, log_stride, log_n);
       }
     } else {  // complex
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 6>();
-      auto output_a = output.packed_accessor<scalar_t, 5>();
+      const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 6>();
+      auto output_a = output.packed_accessor64<scalar_t, 5>();
       if (increasing_stride) {
         int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
         int log_stride = int(log2((double) stride));
@@ -1569,10 +1569,10 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
 
 // Original implementation, with 1 batch per thread block
 // template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-// __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-//                                                                const at::PackedTensorAccessor<scalar_t, 4> output_a,
-//                                                                at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-//                                                                at::PackedTensorAccessor<scalar_t, 3> d_input_a,
+// __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+//                                                                const at::PackedTensorAccessor64<scalar_t, 4> output_a,
+//                                                                at::PackedTensorAccessor64<scalar_t, 5> d_twiddle_a,
+//                                                                at::PackedTensorAccessor64<scalar_t, 3> d_input_a,
 //                                                                int log_max_stride,
 //                                                                int log_n) {
 //   const int batch_size = output_a.size(1);
@@ -1614,10 +1614,10 @@ void butterfly_multiply_untied_cuda(const at::Tensor& twiddle, at::Tensor& outpu
 // }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                               const at::PackedTensorAccessor<scalar_t, 4> output_a,
-                                                               at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-                                                               at::PackedTensorAccessor<scalar_t, 3> d_input_a,
+__global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                               const at::PackedTensorAccessor64<scalar_t, 4> output_a,
+                                                               at::PackedTensorAccessor64<scalar_t, 5> d_twiddle_a,
+                                                               at::PackedTensorAccessor64<scalar_t, 3> d_input_a,
                                                                int log_max_stride,
                                                                int log_n) {
   const int batch_size = output_a.size(1);
@@ -1684,10 +1684,10 @@ __global__ void butterfly_multiply_untied_backward_cuda_kernel(const at::PackedT
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_backward_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 6> twiddle_a,
-                                                                       const at::PackedTensorAccessor<scalar_t, 5> output_a,
-                                                                       at::PackedTensorAccessor<scalar_t, 6> d_twiddle_a,
-                                                                       at::PackedTensorAccessor<scalar_t, 4> d_input_a,
+__global__ void butterfly_multiply_untied_backward_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 6> twiddle_a,
+                                                                       const at::PackedTensorAccessor64<scalar_t, 5> output_a,
+                                                                       at::PackedTensorAccessor64<scalar_t, 6> d_twiddle_a,
+                                                                       at::PackedTensorAccessor64<scalar_t, 4> d_input_a,
                                                                        int log_max_stride,
                                                                        int log_n) {
   using complex_t = thrust::complex<scalar_t>;
@@ -1744,10 +1744,10 @@ __global__ void butterfly_multiply_untied_backward_complex_cuda_kernel(const at:
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_backward_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                                       const at::PackedTensorAccessor<scalar_t, 4> output_a,
-                                                                       at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-                                                                       at::PackedTensorAccessor<scalar_t, 3> d_input_a,
+__global__ void butterfly_multiply_untied_backward_onestep_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                                       const at::PackedTensorAccessor64<scalar_t, 4> output_a,
+                                                                       at::PackedTensorAccessor64<scalar_t, 5> d_twiddle_a,
+                                                                       at::PackedTensorAccessor64<scalar_t, 3> d_input_a,
                                                                        int log_stride,
                                                                        int log_n) {
   const int batch_size = output_a.size(1);
@@ -1779,10 +1779,10 @@ __global__ void butterfly_multiply_untied_backward_onestep_cuda_kernel(const at:
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_backward_onestep_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 6> twiddle_a,
-                                                                               const at::PackedTensorAccessor<scalar_t, 5> output_a,
-                                                                               at::PackedTensorAccessor<scalar_t, 6> d_twiddle_a,
-                                                                               at::PackedTensorAccessor<scalar_t, 4> d_input_a,
+__global__ void butterfly_multiply_untied_backward_onestep_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 6> twiddle_a,
+                                                                               const at::PackedTensorAccessor64<scalar_t, 5> output_a,
+                                                                               at::PackedTensorAccessor64<scalar_t, 6> d_twiddle_a,
+                                                                               at::PackedTensorAccessor64<scalar_t, 4> d_input_a,
                                                                                int log_stride,
                                                                                int log_n) {
   using complex_t = thrust::complex<scalar_t>;
@@ -1840,10 +1840,10 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_untied_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     if (!complex) {  // real
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
-      const auto output_a = output.packed_accessor<scalar_t, 4>();
-      auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5>();
-      auto d_input_a = d_input.packed_accessor<scalar_t, 3>();
+      const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 5>();
+      const auto output_a = output.packed_accessor64<scalar_t, 4>();
+      auto d_twiddle_a = d_twiddle.packed_accessor64<scalar_t, 5>();
+      auto d_input_a = d_input.packed_accessor64<scalar_t, 3>();
       if (increasing_stride) {
         int log_stride = log_n - 1;
         for (; (1 << log_stride) > ELEMENTARY_SIZE; --log_stride) {
@@ -1876,10 +1876,10 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
         }
       }
     } else {  // complex
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 6>();
-      const auto output_a = output.packed_accessor<scalar_t, 5>();
-      auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 6>();
-      auto d_input_a = d_input.packed_accessor<scalar_t, 4>();
+      const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 6>();
+      const auto output_a = output.packed_accessor64<scalar_t, 5>();
+      auto d_twiddle_a = d_twiddle.packed_accessor64<scalar_t, 6>();
+      auto d_input_a = d_input.packed_accessor64<scalar_t, 4>();
       if (increasing_stride) {
         int log_stride = log_n - 1;
         for (; (1 << log_stride) > ELEMENTARY_SIZE; --log_stride) {
@@ -1916,10 +1916,10 @@ void butterfly_multiply_untied_backward_cuda(const at::Tensor& twiddle, const at
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride, int log_max_stride,
           typename Function0, typename Function1, typename Function2>
-__global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const CudaAcsr<scalar_t, 5> twiddle_a,
+__global__ void butterfly_multiply_untied_forward_backward_cuda_kernel(const CudaAcsr32<scalar_t, 5> twiddle_a,
                                                                        Function0 load_input,
                                                                        Function1 load_grad,
-                                                                       CudaAcsr<scalar_t, 5> d_twiddle_a,
+                                                                       CudaAcsr32<scalar_t, 5> d_twiddle_a,
                                                                        Function2 save_d_input,
                                                                        int batch_size) {
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
@@ -2021,11 +2021,11 @@ void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, 
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto grad_a = grad.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    const auto input_a = input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto grad_a = grad.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    auto d_input_a = d_input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -2117,8 +2117,8 @@ void butterfly_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, 
 }
 
 template <typename scalar_t, bool increasing_stride, typename Function0, typename Function1>
-__global__ void butterfly_ortho_multiply_tied_cuda_kernel(const CudaAcsr<scalar_t, 2> twiddle_cos_a,
-                                                          const CudaAcsr<scalar_t, 2> twiddle_sin_a,
+__global__ void butterfly_ortho_multiply_tied_cuda_kernel(const CudaAcsr32<scalar_t, 2> twiddle_cos_a,
+                                                          const CudaAcsr32<scalar_t, 2> twiddle_sin_a,
                                                           Function0 load_input,
                                                           Function1 save_output,
                                                           int log_max_stride,
@@ -2164,10 +2164,10 @@ void butterfly_ortho_multiply_tied_cuda(const at::Tensor& twiddle_cos, const at:
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_ortho_multiply_tied_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 2, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 2, at::RestrictPtrTraits, int32_t>();
-    const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto output_a = output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 2, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 2, at::RestrictPtrTraits>();
+    const auto input_a = input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -2202,11 +2202,11 @@ void butterfly_ortho_multiply_tied_cuda(const at::Tensor& twiddle_cos, const at:
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride,
           typename Function0, typename Function1, typename Function2>
-__global__ void butterfly_ortho_multiply_tied_backward_cuda_kernel(const CudaAcsr<scalar_t, 2> twiddle_cos_a,
-                                                                   const CudaAcsr<scalar_t, 2> twiddle_sin_a,
+__global__ void butterfly_ortho_multiply_tied_backward_cuda_kernel(const CudaAcsr32<scalar_t, 2> twiddle_cos_a,
+                                                                   const CudaAcsr32<scalar_t, 2> twiddle_sin_a,
                                                                    Function0 load_output,
                                                                    Function1 load_grad,
-                                                                   CudaAcsr<scalar_t, 2> d_twiddle_a,
+                                                                   CudaAcsr32<scalar_t, 2> d_twiddle_a,
                                                                    Function2 save_d_input,
                                                                    int log_max_stride,
                                                                    int batch_size) {
@@ -2269,12 +2269,12 @@ void butterfly_ortho_multiply_tied_backward_cuda(const at::Tensor& twiddle_cos, 
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_ortho_multiply_tied_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 2, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 2, at::RestrictPtrTraits, int32_t>();
-    const auto output_a = output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto grad_a = grad.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 2, at::RestrictPtrTraits, int32_t>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 2, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 2, at::RestrictPtrTraits>();
+    const auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto grad_a = grad.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 2, at::RestrictPtrTraits>();
+    auto d_input_a = d_input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -2318,8 +2318,8 @@ void butterfly_ortho_multiply_tied_backward_cuda(const at::Tensor& twiddle_cos, 
 
 
 template <typename scalar_t, bool increasing_stride, typename Function0, typename Function1>
-__global__ void butterfly_ortho_multiply_untied_cuda_kernel(const CudaAcsr<scalar_t, 3> twiddle_cos_a,
-                                                            const CudaAcsr<scalar_t, 3> twiddle_sin_a,
+__global__ void butterfly_ortho_multiply_untied_cuda_kernel(const CudaAcsr32<scalar_t, 3> twiddle_cos_a,
+                                                            const CudaAcsr32<scalar_t, 3> twiddle_sin_a,
                                                             Function0 load_input,
                                                             Function1 save_output,
                                                             int log_max_stride,
@@ -2364,10 +2364,10 @@ void butterfly_ortho_multiply_untied_cuda(const at::Tensor& twiddle_cos, const a
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_ortho_multiply_untied_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto output_a = output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto input_a = input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -2402,11 +2402,11 @@ void butterfly_ortho_multiply_untied_cuda(const at::Tensor& twiddle_cos, const a
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride,
           typename Function0, typename Function1, typename Function2>
-__global__ void butterfly_ortho_multiply_untied_backward_cuda_kernel(const CudaAcsr<scalar_t, 3> twiddle_cos_a,
-                                                                     const CudaAcsr<scalar_t, 3> twiddle_sin_a,
+__global__ void butterfly_ortho_multiply_untied_backward_cuda_kernel(const CudaAcsr32<scalar_t, 3> twiddle_cos_a,
+                                                                     const CudaAcsr32<scalar_t, 3> twiddle_sin_a,
                                                                      Function0 load_output,
                                                                      Function1 load_grad,
-                                                                     CudaAcsr<scalar_t, 3> d_twiddle_a,
+                                                                     CudaAcsr32<scalar_t, 3> d_twiddle_a,
                                                                      Function2 save_d_input,
                                                                      int log_max_stride,
                                                                      int batch_size) {
@@ -2471,12 +2471,12 @@ void butterfly_ortho_multiply_untied_backward_cuda(const at::Tensor& twiddle_cos
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_ortho_multiply_untied_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto output_a = output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto grad_a = grad.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto grad_a = grad.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_input_a = d_input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -2519,7 +2519,7 @@ void butterfly_ortho_multiply_untied_backward_cuda(const at::Tensor& twiddle_cos
 }
 
 template <typename scalar_t, typename Function0, typename Function1>
-__global__ void bbt_multiply_untied_cuda_kernel(const CudaAcsr<scalar_t, 5> twiddle_a,
+__global__ void bbt_multiply_untied_cuda_kernel(const CudaAcsr32<scalar_t, 5> twiddle_a,
                                                 Function0 load_input,
                                                 Function1 save_output,
                                                 int log_max_stride,
@@ -2571,9 +2571,9 @@ void bbt_multiply_untied_cuda(const at::Tensor& twiddle, const at::Tensor& input
   int nblocks = twiddle.size(1) / (2 * log_n);
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "bbt_multiply_untied_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto output_a = output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    const auto input_a = input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -2606,10 +2606,10 @@ void bbt_multiply_untied_cuda(const at::Tensor& twiddle, const at::Tensor& input
 
 template <typename scalar_t, typename accscalar_t, int nblocks,
           typename Function0, typename Function1, typename Function2>
-__global__ void bbt_multiply_untied_forward_backward_cuda_kernel(const CudaAcsr<scalar_t, 5> twiddle_a,
+__global__ void bbt_multiply_untied_forward_backward_cuda_kernel(const CudaAcsr32<scalar_t, 5> twiddle_a,
                                                                  Function0 load_input,
                                                                  Function1 load_grad,
-                                                                 CudaAcsr<scalar_t, 5> d_twiddle_a,
+                                                                 CudaAcsr32<scalar_t, 5> d_twiddle_a,
                                                                  Function2 save_d_input,
                                                                  int log_max_stride,
                                                                  int batch_size) {
@@ -2715,11 +2715,11 @@ void bbt_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const 
   int nblocks = twiddle.size(1) / (2 * log_n);
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "bbt_multiply_untied_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto grad_a = grad.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    const auto input_a = input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto grad_a = grad.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    auto d_input_a = d_input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -2803,8 +2803,8 @@ void bbt_multiply_untied_forward_backward_cuda(const at::Tensor& twiddle, const 
 }
 
 template <typename scalar_t, typename Function0, typename Function1>
-__global__ void bbt_ortho_multiply_untied_cuda_kernel(const CudaAcsr<scalar_t, 3> twiddle_cos_a,
-                                                      const CudaAcsr<scalar_t, 3> twiddle_sin_a,
+__global__ void bbt_ortho_multiply_untied_cuda_kernel(const CudaAcsr32<scalar_t, 3> twiddle_cos_a,
+                                                      const CudaAcsr32<scalar_t, 3> twiddle_sin_a,
                                                       Function0 load_input,
                                                       Function1 save_output,
                                                       int log_max_stride,
@@ -2854,10 +2854,10 @@ void bbt_ortho_multiply_untied_cuda(const at::Tensor& twiddle_cos, const at::Ten
   int nblocks = twiddle_cos.size(1) / (2 * log_n);
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "bbt_ortho_multiply_untied_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto output_a = output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto input_a = input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -2891,11 +2891,11 @@ void bbt_ortho_multiply_untied_cuda(const at::Tensor& twiddle_cos, const at::Ten
 
 template <typename scalar_t, typename accscalar_t,
           typename Function0, typename Function1, typename Function2>
-__global__ void bbt_ortho_multiply_untied_backward_cuda_kernel(const CudaAcsr<scalar_t, 3> twiddle_cos_a,
-                                                               const CudaAcsr<scalar_t, 3> twiddle_sin_a,
+__global__ void bbt_ortho_multiply_untied_backward_cuda_kernel(const CudaAcsr32<scalar_t, 3> twiddle_cos_a,
+                                                               const CudaAcsr32<scalar_t, 3> twiddle_sin_a,
                                                                Function0 load_output,
                                                                Function1 load_grad,
-                                                               CudaAcsr<scalar_t, 3> d_twiddle_a,
+                                                               CudaAcsr32<scalar_t, 3> d_twiddle_a,
                                                                Function2 save_d_input,
                                                                int log_max_stride,
                                                                int batch_size,
@@ -2964,12 +2964,12 @@ void bbt_ortho_multiply_untied_backward_cuda(const at::Tensor& twiddle_cos, cons
   int nblocks = twiddle_cos.size(1) / (2 * log_n);
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "bbt_ortho_multiply_untied_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto output_a = output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto grad_a = grad.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto grad_a = grad.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_input_a = d_input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -3010,9 +3010,9 @@ void bbt_ortho_multiply_untied_backward_cuda(const at::Tensor& twiddle_cos, cons
 }
 
 template <typename scalar_t, bool increasing_stride, bool return_intermediates>
-__global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                             const at::PackedTensorAccessor<scalar_t, 4> input_a,
-                                             at::PackedTensorAccessor<scalar_t, 4> output_a,
+__global__ void butterfly_conv2d_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                             const at::PackedTensorAccessor64<scalar_t, 4> input_a,
+                                             at::PackedTensorAccessor64<scalar_t, 4> output_a,
                                              int log_max_stride,
                                              int log_n,
                                              int kernel_size,
@@ -3098,11 +3098,11 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
   const int batch_size = output.size(1);
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(),
     "butterfly_conv2d_cuda", [&] {
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
+      const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 5>();
       // batch_size, c, h, w
-      const auto input_a = input.packed_accessor<scalar_t, 4>();
+      const auto input_a = input.packed_accessor64<scalar_t, 4>();
       // log c_in, h*w*batch_size, nstack, c_in
-      auto output_a = output.packed_accessor<scalar_t, 4>();
+      auto output_a = output.packed_accessor64<scalar_t, 4>();
       // assume in_channels <= 1024
       int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
       int log_stride = int(log2((double) stride));
@@ -3136,11 +3136,11 @@ void butterfly_conv2d_cuda(const at::Tensor& twiddle,
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
 __global__ void butterfly_conv2d_backward_cuda_kernel(
-    const at::PackedTensorAccessor<scalar_t, 3> grad_a,
-    const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-    const at::PackedTensorAccessor<scalar_t, 4> output_a,
-    at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-    at::PackedTensorAccessor<scalar_t, 4> d_input_a,
+    const at::PackedTensorAccessor64<scalar_t, 3> grad_a,
+    const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+    const at::PackedTensorAccessor64<scalar_t, 4> output_a,
+    at::PackedTensorAccessor64<scalar_t, 5> d_twiddle_a,
+    at::PackedTensorAccessor64<scalar_t, 4> d_input_a,
     int log_max_stride,
     int log_n,
     int kernel_size,
@@ -3243,11 +3243,11 @@ void butterfly_conv2d_backward_cuda(const at::Tensor&grad, const at::Tensor& twi
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(),
   "butterfly_conv2d_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto grad_a = grad.packed_accessor<scalar_t, 3>();
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
-    const auto output_a = output.packed_accessor<scalar_t, 4>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 4>();
+    const auto grad_a = grad.packed_accessor64<scalar_t, 3>();
+    const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 5>();
+    const auto output_a = output.packed_accessor64<scalar_t, 4>();
+    auto d_twiddle_a = d_twiddle.packed_accessor64<scalar_t, 5>();
+    auto d_input_a = d_input.packed_accessor64<scalar_t, 4>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     // to support out_channels > in_channels
@@ -3287,11 +3287,11 @@ void butterfly_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(),
   "butterfly_conv2d_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    const auto input_a = input.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
-    const auto grad_a = grad.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    const auto input_a = input.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
+    const auto grad_a = grad.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    auto d_input_a = d_input.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -3427,11 +3427,11 @@ void bbt_conv2d_cuda(const at::Tensor& twiddle,
   const int w_in = input.size(3);
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(),
     "bbt_conv2d_cuda", [&] {
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
+      const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
       // batch_size, c, h, w
-      const auto input_a = input.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+      const auto input_a = input.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
       // h*w*batch_size, nstack, c_in
-      auto output_a = output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+      auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
       // assume in_channels <= 1024
       int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
       int log_stride = int(log2((double) stride));
@@ -3498,11 +3498,11 @@ void bbt_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(),
   "bbt_conv2d_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    const auto input_a = input.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
-    const auto grad_a = grad.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    const auto input_a = input.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
+    const auto grad_a = grad.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    auto d_input_a = d_input.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -3615,8 +3615,8 @@ void bbt_conv2d_forward_backward_cuda(const at::Tensor& twiddle,
 }
 
 template <typename scalar_t, bool increasing_stride, bool return_intermediates>
-__global__ void butterfly_multiply_untied_svd_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                          at::PackedTensorAccessor<scalar_t, 4> output_a,
+__global__ void butterfly_multiply_untied_svd_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                          at::PackedTensorAccessor64<scalar_t, 4> output_a,
                                                           int log_max_stride,
                                                           int log_n) {
   const int batch_size = output_a.size(1);
@@ -3657,8 +3657,8 @@ __global__ void butterfly_multiply_untied_svd_cuda_kernel(const at::PackedTensor
 }
 
 template <typename scalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_svd_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                                  at::PackedTensorAccessor<scalar_t, 4> output_a,
+__global__ void butterfly_multiply_untied_svd_onestep_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                                  at::PackedTensorAccessor64<scalar_t, 4> output_a,
                                                                   int log_stride,
                                                                   int log_n) {
   const int batch_size = output_a.size(1);
@@ -3690,8 +3690,8 @@ void butterfly_multiply_untied_svd_cuda(const at::Tensor& twiddle, at::Tensor& o
   const int n = output.size(3);
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_untied_svd_cuda", [&] {
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
-    auto output_a = output.packed_accessor<scalar_t, 4>();
+    const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 5>();
+    auto output_a = output.packed_accessor64<scalar_t, 4>();
     if (increasing_stride) {
       int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
       int log_stride = int(log2((double) stride));
@@ -3730,10 +3730,10 @@ void butterfly_multiply_untied_svd_cuda(const at::Tensor& twiddle, at::Tensor& o
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_svd_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                                   const at::PackedTensorAccessor<scalar_t, 4> output_a,
-                                                                   at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-                                                                   at::PackedTensorAccessor<scalar_t, 3> d_input_a,
+__global__ void butterfly_multiply_untied_svd_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                                   const at::PackedTensorAccessor64<scalar_t, 4> output_a,
+                                                                   at::PackedTensorAccessor64<scalar_t, 5> d_twiddle_a,
+                                                                   at::PackedTensorAccessor64<scalar_t, 3> d_input_a,
                                                                    int log_max_stride,
                                                                    int log_n) {
   const int batch_size = output_a.size(1);
@@ -3795,10 +3795,10 @@ __global__ void butterfly_multiply_untied_svd_backward_cuda_kernel(const at::Pac
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_svd_backward_onestep_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                                           const at::PackedTensorAccessor<scalar_t, 4> output_a,
-                                                                           at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-                                                                           at::PackedTensorAccessor<scalar_t, 3> d_input_a,
+__global__ void butterfly_multiply_untied_svd_backward_onestep_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                                           const at::PackedTensorAccessor64<scalar_t, 4> output_a,
+                                                                           at::PackedTensorAccessor64<scalar_t, 5> d_twiddle_a,
+                                                                           at::PackedTensorAccessor64<scalar_t, 3> d_input_a,
                                                                            int log_stride,
                                                                            int log_n) {
   const int batch_size = output_a.size(1);
@@ -3854,10 +3854,10 @@ void butterfly_multiply_untied_svd_backward_cuda(const at::Tensor& twiddle, cons
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_multiply_untied_svd_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
-    const auto output_a = output.packed_accessor<scalar_t, 4>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 3>();
+    const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 5>();
+    const auto output_a = output.packed_accessor64<scalar_t, 4>();
+    auto d_twiddle_a = d_twiddle.packed_accessor64<scalar_t, 5>();
+    auto d_input_a = d_input.packed_accessor64<scalar_t, 3>();
     if (increasing_stride) {
       int log_stride = log_n - 1;
       for (; (1 << log_stride) > ELEMENTARY_SIZE; --log_stride) {
@@ -3892,10 +3892,10 @@ void butterfly_multiply_untied_svd_backward_cuda(const at::Tensor& twiddle, cons
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_multiply_untied_svd_forward_backward_cuda_kernel(const CudaAcsr<scalar_t, 5> twiddle_a,
-                                                                       const CudaAcsr<scalar_t, 3> input_a,
-                                                                       CudaAcsr<scalar_t, 5> d_twiddle_a,
-                                                                       CudaAcsr<scalar_t, 3> d_input_a,
+__global__ void butterfly_multiply_untied_svd_forward_backward_cuda_kernel(const CudaAcsr32<scalar_t, 5> twiddle_a,
+                                                                       const CudaAcsr32<scalar_t, 3> input_a,
+                                                                       CudaAcsr32<scalar_t, 5> d_twiddle_a,
+                                                                       CudaAcsr32<scalar_t, 3> d_input_a,
                                                                        int log_max_stride,
                                                                        int log_n) {
   const int batch_size = input_a.size(0);
@@ -4027,10 +4027,10 @@ void butterfly_multiply_untied_svd_forward_backward_cuda(const at::Tensor& twidd
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_svd_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    const auto input_a = input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5, at::RestrictPtrTraits, int32_t>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    const auto input_a = input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    auto d_input_a = d_input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -4046,9 +4046,9 @@ void butterfly_multiply_untied_svd_forward_backward_cuda(const at::Tensor& twidd
 }
 
 template <typename scalar_t, bool increasing_stride, bool return_intermediates>
-__global__ void butterfly_conv2d_svd_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                 const at::PackedTensorAccessor<scalar_t, 4> input_a,
-                                                 at::PackedTensorAccessor<scalar_t, 4> output_a,
+__global__ void butterfly_conv2d_svd_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                 const at::PackedTensorAccessor64<scalar_t, 4> input_a,
+                                                 at::PackedTensorAccessor64<scalar_t, 4> output_a,
                                                  int log_max_stride,
                                                  int log_n,
                                                  int kernel_size,
@@ -4140,11 +4140,11 @@ void butterfly_conv2d_svd_cuda(const at::Tensor& twiddle,
   const int batch_size = output.size(1);
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(),
     "butterfly_conv2d_svd_cuda", [&] {
-      const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
+      const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 5>();
       // batch_size, c, h, w
-      const auto input_a = input.packed_accessor<scalar_t, 4>();
+      const auto input_a = input.packed_accessor64<scalar_t, 4>();
       // log c_in, h*w*batch_size, nstack, c_in
-      auto output_a = output.packed_accessor<scalar_t, 4>();
+      auto output_a = output.packed_accessor64<scalar_t, 4>();
       // assume in_channels <= 1024
       int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
       int log_stride = int(log2((double) stride));
@@ -4177,11 +4177,11 @@ void butterfly_conv2d_svd_cuda(const at::Tensor& twiddle,
 }
 
 template <typename scalar_t, typename accscalar_t, bool increasing_stride>
-__global__ void butterfly_conv2d_svd_forward_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 5> twiddle_a,
-                                                                  const at::PackedTensorAccessor<scalar_t, 4> input_a,
-                                                                  const at::PackedTensorAccessor<scalar_t, 3> grad_a,
-                                                                  at::PackedTensorAccessor<scalar_t, 5> d_twiddle_a,
-                                                                  at::PackedTensorAccessor<scalar_t, 4> d_input_a,
+__global__ void butterfly_conv2d_svd_forward_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 5> twiddle_a,
+                                                                  const at::PackedTensorAccessor64<scalar_t, 4> input_a,
+                                                                  const at::PackedTensorAccessor64<scalar_t, 3> grad_a,
+                                                                  at::PackedTensorAccessor64<scalar_t, 5> d_twiddle_a,
+                                                                  at::PackedTensorAccessor64<scalar_t, 4> d_input_a,
                                                                   int log_max_stride,
                                                                   int log_n,
                                                                   int kernel_size,
@@ -4355,11 +4355,11 @@ void butterfly_conv2d_svd_forward_backward_cuda(const at::Tensor& twiddle,
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(),
   "butterfly_conv2d_svd_forward_backward_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 5>();
-    const auto input_a = input.packed_accessor<scalar_t, 4>();
-    const auto grad_a = grad.packed_accessor<scalar_t, 3>();
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 5>();
-    auto d_input_a = d_input.packed_accessor<scalar_t, 4>();
+    const auto twiddle_a = twiddle.packed_accessor64<scalar_t, 5>();
+    const auto input_a = input.packed_accessor64<scalar_t, 4>();
+    const auto grad_a = grad.packed_accessor64<scalar_t, 3>();
+    auto d_twiddle_a = d_twiddle.packed_accessor64<scalar_t, 5>();
+    auto d_input_a = d_input.packed_accessor64<scalar_t, 4>();
     int stride = std::min<int>(ELEMENTARY_SIZE, n / 2);
     int log_stride = int(log2((double) stride));
     dim3 block(stride, div_up(MAX_BLOCK_SIZE, stride * 2));
@@ -4381,10 +4381,10 @@ void butterfly_conv2d_svd_forward_backward_cuda(const at::Tensor& twiddle,
 
 
 template <typename scalar_t>
-__global__ void permutation_factor_even_odd_multiply_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 1> p_a,
-                                                                 const at::PackedTensorAccessor<scalar_t, 3> input_a,
-                                                                 const at::PackedTensorAccessor<scalar_t, 3> permuted_input_a,
-                                                                 at::PackedTensorAccessor<scalar_t, 3> output_a) {
+__global__ void permutation_factor_even_odd_multiply_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 1> p_a,
+                                                                 const at::PackedTensorAccessor64<scalar_t, 3> input_a,
+                                                                 const at::PackedTensorAccessor64<scalar_t, 3> permuted_input_a,
+                                                                 at::PackedTensorAccessor64<scalar_t, 3> output_a) {
   const auto p = p_a[0];
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);  // already divided by 2
@@ -4399,10 +4399,10 @@ __global__ void permutation_factor_even_odd_multiply_cuda_kernel(const at::Packe
 }
 
 template <typename scalar_t>
-__global__ void permutation_factor_even_odd_multiply_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 1> p_a,
-                                                                         const at::PackedTensorAccessor<scalar_t, 4> input_a,
-                                                                         const at::PackedTensorAccessor<scalar_t, 4> permuted_input_a,
-                                                                         at::PackedTensorAccessor<scalar_t, 4> output_a) {
+__global__ void permutation_factor_even_odd_multiply_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 1> p_a,
+                                                                         const at::PackedTensorAccessor64<scalar_t, 4> input_a,
+                                                                         const at::PackedTensorAccessor64<scalar_t, 4> permuted_input_a,
+                                                                         at::PackedTensorAccessor64<scalar_t, 4> output_a) {
   const auto p = p_a[0];
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
@@ -4427,16 +4427,16 @@ void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Te
   block.y = div_up(MAX_BLOCK_SIZE, block.x);
   dim3 grid(div_up(n / 2, block.x), div_up(batch_size, block.y * WORK_PER_THREAD));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "permutation_factor_even_odd_multiply", [&] {
-    const auto p_a = p.packed_accessor<scalar_t, 1>();
+    const auto p_a = p.packed_accessor64<scalar_t, 1>();
     switch (input.dim()) {
       case 2: // real
         {
           const auto permuted_input = input.reshape({batch_size, n / 2, 2}).transpose(1, 2);
           const auto input_folded = input.reshape({batch_size, 2, n / 2});
           output = output.view({batch_size, 2, n / 2});
-          const auto input_a = input_folded.packed_accessor<scalar_t, 3>();
-          const auto permuted_input_a = permuted_input.packed_accessor<scalar_t, 3>();
-          auto output_a = output.packed_accessor<scalar_t, 3>();
+          const auto input_a = input_folded.packed_accessor64<scalar_t, 3>();
+          const auto permuted_input_a = permuted_input.packed_accessor64<scalar_t, 3>();
+          auto output_a = output.packed_accessor64<scalar_t, 3>();
           permutation_factor_even_odd_multiply_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(p_a, input_a, permuted_input_a, output_a);
           output = output.view({batch_size, n});
@@ -4447,9 +4447,9 @@ void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Te
           const auto permuted_input = input.reshape({batch_size, n / 2, 2, 2}).transpose(1, 2);
           const auto input_folded = input.reshape({batch_size, 2, n / 2, 2});
           output = output.view({batch_size, 2, n / 2, 2});
-          const auto input_a = input_folded.packed_accessor<scalar_t, 4>();
-          const auto permuted_input_a = permuted_input.packed_accessor<scalar_t, 4>();
-          auto output_a = output.packed_accessor<scalar_t, 4>();
+          const auto input_a = input_folded.packed_accessor64<scalar_t, 4>();
+          const auto permuted_input_a = permuted_input.packed_accessor64<scalar_t, 4>();
+          auto output_a = output.packed_accessor64<scalar_t, 4>();
           permutation_factor_even_odd_multiply_complex_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(p_a, input_a, permuted_input_a, output_a);
           output = output.view({batch_size, n, 2});
@@ -4465,14 +4465,14 @@ void permutation_factor_even_odd_multiply_cuda(const at::Tensor& p, const at::Te
 }
 
 template <typename scalar_t>
-__global__ void permutation_factor_even_odd_multiply_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> grad_a,
-                                                                          const at::PackedTensorAccessor<scalar_t, 3> grad_reshaped_a,
-                                                                          const at::PackedTensorAccessor<scalar_t, 3> permuted_grad_a,
-                                                                          const at::PackedTensorAccessor<scalar_t, 1> p_a,
-                                                                          const at::PackedTensorAccessor<scalar_t, 3> input_a,
-                                                                          const at::PackedTensorAccessor<scalar_t, 3> permuted_input_a,
-                                                                          at::PackedTensorAccessor<scalar_t, 2> d_p_expanded_a,
-                                                                          at::PackedTensorAccessor<scalar_t, 3> d_input_a) {
+__global__ void permutation_factor_even_odd_multiply_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 3> grad_a,
+                                                                          const at::PackedTensorAccessor64<scalar_t, 3> grad_reshaped_a,
+                                                                          const at::PackedTensorAccessor64<scalar_t, 3> permuted_grad_a,
+                                                                          const at::PackedTensorAccessor64<scalar_t, 1> p_a,
+                                                                          const at::PackedTensorAccessor64<scalar_t, 3> input_a,
+                                                                          const at::PackedTensorAccessor64<scalar_t, 3> permuted_input_a,
+                                                                          at::PackedTensorAccessor64<scalar_t, 2> d_p_expanded_a,
+                                                                          at::PackedTensorAccessor64<scalar_t, 3> d_input_a) {
   const scalar_t p = p_a[0];
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
@@ -4487,14 +4487,14 @@ __global__ void permutation_factor_even_odd_multiply_backward_cuda_kernel(const 
 }
 
 template <typename scalar_t>
-__global__ void permutation_factor_even_odd_multiply_complex_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> grad_a,
-                                                                                  const at::PackedTensorAccessor<scalar_t, 4> grad_reshaped_a,
-                                                                                  const at::PackedTensorAccessor<scalar_t, 4> permuted_grad_a,
-                                                                                  const at::PackedTensorAccessor<scalar_t, 1> p_a,
-                                                                                  const at::PackedTensorAccessor<scalar_t, 4> input_a,
-                                                                                  const at::PackedTensorAccessor<scalar_t, 4> permuted_input_a,
-                                                                                  at::PackedTensorAccessor<scalar_t, 2> d_p_expanded_a,
-                                                                                  at::PackedTensorAccessor<scalar_t, 4> d_input_a) {
+__global__ void permutation_factor_even_odd_multiply_complex_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 4> grad_a,
+                                                                                  const at::PackedTensorAccessor64<scalar_t, 4> grad_reshaped_a,
+                                                                                  const at::PackedTensorAccessor64<scalar_t, 4> permuted_grad_a,
+                                                                                  const at::PackedTensorAccessor64<scalar_t, 1> p_a,
+                                                                                  const at::PackedTensorAccessor64<scalar_t, 4> input_a,
+                                                                                  const at::PackedTensorAccessor64<scalar_t, 4> permuted_input_a,
+                                                                                  at::PackedTensorAccessor64<scalar_t, 2> d_p_expanded_a,
+                                                                                  at::PackedTensorAccessor64<scalar_t, 4> d_input_a) {
   const scalar_t p = p_a[0];
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
@@ -4521,8 +4521,8 @@ void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, 
   block.y = div_up(MAX_BLOCK_SIZE, block.x);
   dim3 grid(div_up(n / 2, block.x), div_up(batch_size, block.y * WORK_PER_THREAD));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "permutation_factor_even_odd_multiply_backward", [&] {
-    const auto p_a = p.packed_accessor<scalar_t, 1>();
-    auto d_p_expanded_a = d_p_expanded.packed_accessor<scalar_t, 2>();
+    const auto p_a = p.packed_accessor64<scalar_t, 1>();
+    auto d_p_expanded_a = d_p_expanded.packed_accessor64<scalar_t, 2>();
     switch (input.dim()) {
       case 2: // real
         {
@@ -4533,12 +4533,12 @@ void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, 
           const auto grad_folded = grad.reshape({batch_size, n / 2, 2});
           d_input = d_input.view({batch_size, n/ 2, 2});
           // Accessors
-          const auto input_a = input_folded.packed_accessor<scalar_t, 3>();
-          const auto permuted_input_a = permuted_input.packed_accessor<scalar_t, 3>();
-          const auto grad_reshaped_a = grad_reshaped.packed_accessor<scalar_t, 3>();
-          const auto grad_a = grad_folded.packed_accessor<scalar_t, 3>();
-          const auto permuted_grad_a = permuted_grad.packed_accessor<scalar_t, 3>();
-          auto d_input_a = d_input.packed_accessor<scalar_t, 3>();
+          const auto input_a = input_folded.packed_accessor64<scalar_t, 3>();
+          const auto permuted_input_a = permuted_input.packed_accessor64<scalar_t, 3>();
+          const auto grad_reshaped_a = grad_reshaped.packed_accessor64<scalar_t, 3>();
+          const auto grad_a = grad_folded.packed_accessor64<scalar_t, 3>();
+          const auto permuted_grad_a = permuted_grad.packed_accessor64<scalar_t, 3>();
+          auto d_input_a = d_input.packed_accessor64<scalar_t, 3>();
           permutation_factor_even_odd_multiply_backward_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(grad_a, grad_reshaped_a, permuted_grad_a, p_a, input_a, permuted_input_a, d_p_expanded_a, d_input_a);
           d_input = d_input.view({batch_size, n});
@@ -4553,12 +4553,12 @@ void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, 
           const auto grad_folded = grad.reshape({batch_size, n / 2, 2, 2});
           d_input = d_input.view({batch_size, n/ 2, 2, 2});
           // Accessors
-          const auto input_a = input_folded.packed_accessor<scalar_t, 4>();
-          const auto permuted_input_a = permuted_input.packed_accessor<scalar_t, 4>();
-          const auto grad_reshaped_a = grad_reshaped.packed_accessor<scalar_t, 4>();
-          const auto grad_a = grad_folded.packed_accessor<scalar_t, 4>();
-          const auto permuted_grad_a = permuted_grad.packed_accessor<scalar_t, 4>();
-          auto d_input_a = d_input.packed_accessor<scalar_t, 4>();
+          const auto input_a = input_folded.packed_accessor64<scalar_t, 4>();
+          const auto permuted_input_a = permuted_input.packed_accessor64<scalar_t, 4>();
+          const auto grad_reshaped_a = grad_reshaped.packed_accessor64<scalar_t, 4>();
+          const auto grad_a = grad_folded.packed_accessor64<scalar_t, 4>();
+          const auto permuted_grad_a = permuted_grad.packed_accessor64<scalar_t, 4>();
+          auto d_input_a = d_input.packed_accessor64<scalar_t, 4>();
           permutation_factor_even_odd_multiply_complex_backward_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(grad_a, grad_reshaped_a, permuted_grad_a, p_a, input_a, permuted_input_a, d_p_expanded_a, d_input_a);
           d_input = d_input.view({batch_size, n, 2});
@@ -4574,9 +4574,9 @@ void permutation_factor_even_odd_multiply_backward_cuda(const at::Tensor& grad, 
 }
 
 template <typename scalar_t>
-__global__ void permutation_factor_reverse_multiply_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 1> p_a,
-                                                                const at::PackedTensorAccessor<scalar_t, 3> input_a,
-                                                                at::PackedTensorAccessor<scalar_t, 3> output_a) {
+__global__ void permutation_factor_reverse_multiply_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 1> p_a,
+                                                                const at::PackedTensorAccessor64<scalar_t, 3> input_a,
+                                                                at::PackedTensorAccessor64<scalar_t, 3> output_a) {
   const scalar_t p[2] = {p_a[0], p_a[1]};
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);  // already divided by 2
@@ -4593,9 +4593,9 @@ __global__ void permutation_factor_reverse_multiply_cuda_kernel(const at::Packed
 }
 
 template <typename scalar_t>
-__global__ void permutation_factor_reverse_multiply_complex_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 1> p_a,
-                                                                        const at::PackedTensorAccessor<scalar_t, 4> input_a,
-                                                                        at::PackedTensorAccessor<scalar_t, 4> output_a) {
+__global__ void permutation_factor_reverse_multiply_complex_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 1> p_a,
+                                                                        const at::PackedTensorAccessor64<scalar_t, 4> input_a,
+                                                                        at::PackedTensorAccessor64<scalar_t, 4> output_a) {
   const scalar_t p[2] = {p_a[0], p_a[1]};
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
@@ -4622,14 +4622,14 @@ void permutation_factor_reverse_multiply_cuda(const at::Tensor& p, const at::Ten
   block.y = div_up(MAX_BLOCK_SIZE, block.x);
   dim3 grid(div_up(n / 4, block.x), div_up(batch_size, block.y * WORK_PER_THREAD));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "permutation_factor_reverse_multiply", [&] {
-    const auto p_a = p.packed_accessor<scalar_t, 1>();
+    const auto p_a = p.packed_accessor64<scalar_t, 1>();
     switch (input.dim()) {
       case 2: // real
         {
           const auto input_folded = input.reshape({batch_size, 2, n / 2});
           output = output.view({batch_size, 2, n / 2});
-          const auto input_a = input_folded.packed_accessor<scalar_t, 3>();
-          auto output_a = output.packed_accessor<scalar_t, 3>();
+          const auto input_a = input_folded.packed_accessor64<scalar_t, 3>();
+          auto output_a = output.packed_accessor64<scalar_t, 3>();
           permutation_factor_reverse_multiply_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(p_a, input_a, output_a);
           output = output.view({batch_size, n});
@@ -4639,8 +4639,8 @@ void permutation_factor_reverse_multiply_cuda(const at::Tensor& p, const at::Ten
         {
           const auto input_folded = input.reshape({batch_size, 2, n / 2, 2});
           output = output.view({batch_size, 2, n / 2, 2});
-          const auto input_a = input_folded.packed_accessor<scalar_t, 4>();
-          auto output_a = output.packed_accessor<scalar_t, 4>();
+          const auto input_a = input_folded.packed_accessor64<scalar_t, 4>();
+          auto output_a = output.packed_accessor64<scalar_t, 4>();
           permutation_factor_reverse_multiply_complex_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(p_a, input_a, output_a);
           output = output.view({batch_size, n, 2});
@@ -4656,11 +4656,11 @@ void permutation_factor_reverse_multiply_cuda(const at::Tensor& p, const at::Ten
 }
 
 template <typename scalar_t>
-__global__ void permutation_factor_reverse_multiply_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 3> grad_a,
-                                                                         const at::PackedTensorAccessor<scalar_t, 1> p_a,
-                                                                         const at::PackedTensorAccessor<scalar_t, 3> input_a,
-                                                                         at::PackedTensorAccessor<scalar_t, 3> d_p_expanded_a,
-                                                                         at::PackedTensorAccessor<scalar_t, 3> d_input_a) {
+__global__ void permutation_factor_reverse_multiply_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 3> grad_a,
+                                                                         const at::PackedTensorAccessor64<scalar_t, 1> p_a,
+                                                                         const at::PackedTensorAccessor64<scalar_t, 3> input_a,
+                                                                         at::PackedTensorAccessor64<scalar_t, 3> d_p_expanded_a,
+                                                                         at::PackedTensorAccessor64<scalar_t, 3> d_input_a) {
   const scalar_t p[2] = {p_a[0], p_a[1]};
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
@@ -4679,11 +4679,11 @@ __global__ void permutation_factor_reverse_multiply_backward_cuda_kernel(const a
 }
 
 template <typename scalar_t>
-__global__ void permutation_factor_reverse_multiply_complex_backward_cuda_kernel(const at::PackedTensorAccessor<scalar_t, 4> grad_a,
-                                                                                 const at::PackedTensorAccessor<scalar_t, 1> p_a,
-                                                                                 const at::PackedTensorAccessor<scalar_t, 4> input_a,
-                                                                                 at::PackedTensorAccessor<scalar_t, 3> d_p_expanded_a,
-                                                                                 at::PackedTensorAccessor<scalar_t, 4> d_input_a) {
+__global__ void permutation_factor_reverse_multiply_complex_backward_cuda_kernel(const at::PackedTensorAccessor64<scalar_t, 4> grad_a,
+                                                                                 const at::PackedTensorAccessor64<scalar_t, 1> p_a,
+                                                                                 const at::PackedTensorAccessor64<scalar_t, 4> input_a,
+                                                                                 at::PackedTensorAccessor64<scalar_t, 3> d_p_expanded_a,
+                                                                                 at::PackedTensorAccessor64<scalar_t, 4> d_input_a) {
   const scalar_t p[2] = {p_a[0], p_a[1]};
   const auto batch_size = input_a.size(0);
   const auto n = input_a.size(2);
@@ -4715,8 +4715,8 @@ void permutation_factor_reverse_multiply_backward_cuda(const at::Tensor& grad, c
   block.y = div_up(MAX_BLOCK_SIZE, block.x);
   dim3 grid(div_up(n / 4, block.x), div_up(batch_size, block.y * WORK_PER_THREAD));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "permutation_factor_reverse_multiply_backward", [&] {
-    const auto p_a = p.packed_accessor<scalar_t, 1>();
-    auto d_p_expanded_a = d_p_expanded.packed_accessor<scalar_t, 3>();
+    const auto p_a = p.packed_accessor64<scalar_t, 1>();
+    auto d_p_expanded_a = d_p_expanded.packed_accessor64<scalar_t, 3>();
     switch (input.dim()) {
       case 2: // real
         {
@@ -4724,9 +4724,9 @@ void permutation_factor_reverse_multiply_backward_cuda(const at::Tensor& grad, c
           const auto grad_folded = grad.reshape({batch_size, 2, n / 2});
           d_input = d_input.view({batch_size, 2, n/ 2});
           // Accessors
-          const auto input_a = input_folded.packed_accessor<scalar_t, 3>();
-          const auto grad_a = grad_folded.packed_accessor<scalar_t, 3>();
-          auto d_input_a = d_input.packed_accessor<scalar_t, 3>();
+          const auto input_a = input_folded.packed_accessor64<scalar_t, 3>();
+          const auto grad_a = grad_folded.packed_accessor64<scalar_t, 3>();
+          auto d_input_a = d_input.packed_accessor64<scalar_t, 3>();
           permutation_factor_reverse_multiply_backward_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(grad_a, p_a, input_a, d_p_expanded_a, d_input_a);
           d_input = d_input.view({batch_size, n});
@@ -4738,9 +4738,9 @@ void permutation_factor_reverse_multiply_backward_cuda(const at::Tensor& grad, c
           const auto grad_folded = grad.reshape({batch_size, 2, n / 2, 2});
           d_input = d_input.view({batch_size, 2, n/ 2, 2});
           // Accessors
-          const auto input_a = input_folded.packed_accessor<scalar_t, 4>();
-          const auto grad_a = grad_folded.packed_accessor<scalar_t, 4>();
-          auto d_input_a = d_input.packed_accessor<scalar_t, 4>();
+          const auto input_a = input_folded.packed_accessor64<scalar_t, 4>();
+          const auto grad_a = grad_folded.packed_accessor64<scalar_t, 4>();
+          auto d_input_a = d_input.packed_accessor64<scalar_t, 4>();
           permutation_factor_reverse_multiply_complex_backward_cuda_kernel<scalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(grad_a, p_a, input_a, d_p_expanded_a, d_input_a);
           d_input = d_input.view({batch_size, n, 2});

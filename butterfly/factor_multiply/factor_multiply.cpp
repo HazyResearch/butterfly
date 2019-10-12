@@ -899,12 +899,12 @@ at::Tensor butterfly_multiply_untied_eval(const at::Tensor& twiddle, const at::T
   TORCH_CHECK(twiddle.size(0) == nstack && twiddle.size(1) == log_n && twiddle.size(2) == n / 2 && twiddle.size(3) == 2 && twiddle.size(4) == 2,
            "butterfly_multiply_untied: twiddle must have shape (nstack, log n, n/2, 2, 2)");
   const auto twiddle_a = twiddle.accessor<float, 5>();
-  const float* twiddle_data = twiddle.data<float>();
+  const float* twiddle_data = twiddle.data_ptr<float>();
   // vectorize over butterfly twiddles (n/2 total)
   if (batch_size < 8) {
     output = input.clone();
     auto output_a = output.accessor<float, 3>();
-    float* output_data = output.data<float>();
+    float* output_data = output.data_ptr<float>();
     if (increasing_stride){
       // do small strides first
       butterfly_multiply_untied_scalar_twiddle<float>(twiddle_a, output_a, 3 /*log_n*/, n, nstack, batch_size, increasing_stride);
@@ -918,7 +918,7 @@ at::Tensor butterfly_multiply_untied_eval(const at::Tensor& twiddle, const at::T
   // vectorize over batch for large batches
   else {
     output = input.permute({1,2,0}).contiguous();
-    float* output_data = output.data<float>();
+    float* output_data = output.data_ptr<float>();
     butterfly_multiply_untied_vector_batch<float>(twiddle_a, output_data, log_n, n,
       nstack, batch_size, increasing_stride);
     output = output.permute({2,0,1}); // change back to batch_size, nstack, n (leaves non-contiguous)
@@ -2212,7 +2212,7 @@ void complex_to_real_strides(at::Tensor& x) {
 //   })
 
 void complex_test(at::Tensor& input) {
-  auto ptr = reinterpret_cast<std::complex<float>*>(input.data<float>());
+  auto ptr = reinterpret_cast<std::complex<float>*>(input.data_ptr<float>());
   ptr[0] = std::complex<float>(0.0, 0.0);
   // auto output = at::CPU(at::kComplexFloat).tensorfromBlob(ptr, {2}); // doesn't compile
   // int64_t sizes[1] = {input.size(0)};

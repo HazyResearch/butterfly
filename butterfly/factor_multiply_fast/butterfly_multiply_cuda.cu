@@ -51,7 +51,7 @@ static constexpr int MIN_BLOCKS_PER_MP_BACKWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 1
 #endif
 
 template <typename T, size_t N>
-using CudaAcsr = at::PackedTensorAccessor<T, N, at::RestrictPtrTraits, int32_t>;
+using CudaAcsr = at::PackedTensorAccessor32<T, N, at::RestrictPtrTraits>;
 
 constexpr __host__ __device__ int min_const(int x, int y) { return x <= y ? x : y; }
 constexpr __host__ __device__ int min_const(int x, int y, int z) { return min_const(min_const(x, y), z); }
@@ -89,7 +89,7 @@ struct InputReader {
   const CudaAcsr<scalar_t, 3> input_a;
   const int batch_size;
   InputReader(const at::Tensor input):
-    input_a(input.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>()),
+    input_a(input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>()),
       batch_size(input.size(0)) {}
 
   template<int items_per_thread, int mult_per_warp=1>
@@ -114,7 +114,7 @@ struct OutputWriter {
   CudaAcsr<scalar_t, 3> output_a;
   const int batch_size;
   OutputWriter(at::Tensor output):
-    output_a(output.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>()),
+    output_a(output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>()),
       batch_size(output.size(0)) {}
 
   template<int items_per_thread, int mult_per_warp=1>
@@ -140,7 +140,7 @@ template<typename scalar_t>
 struct IntermediateStorage {
   CudaAcsr<scalar_t, 4> storage_a;
   IntermediateStorage(const at::Tensor storage):
-    storage_a(storage.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>()) {}
+    storage_a(storage.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>()) {}
 
   template<int items_per_thread, int mult_per_warp=1>
   __device__ __forceinline__ void save(scalar_t output_val[mult_per_warp][items_per_thread],
@@ -310,7 +310,7 @@ void butterfly_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
   const int n = input.size(2);
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_fast_cuda", [&] {
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
     const InputReader<scalar_t> input_reader(input);
     OutputWriter<scalar_t> output_writer(output);
     dim3 block(min(n, MAX_BLOCK_SIZE));
@@ -512,10 +512,10 @@ void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twid
   const int n = input.size(2);
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_backward_fast_cuda", [&] {
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
     const InputReader<scalar_t> input_reader(input);
     const InputReader<scalar_t> grad_reader(grad);
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
     OutputWriter<scalar_t> d_input_writer(d_input);
     dim3 block(min(n, MAX_BLOCK_SIZE));
     dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD[log_n - 1]), 1, nstack);
@@ -600,7 +600,7 @@ void butterfly_bbs_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle.size(1) / (2 * log_n);
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_bbs_multiply_untied_forward_fast_cuda", [&] {
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
     const InputReader<scalar_t> input_reader(input);
     OutputWriter<scalar_t> output_writer(output);
     dim3 block(min(n, MAX_BLOCK_SIZE));
@@ -734,11 +734,11 @@ void butterfly_bbs_multiply_untied_forward_backward_fast_cuda(const at::Tensor &
   auto intermediate_storage = at::empty({log_n <= 5 ? (nblocks - 1) * 2 : (nblocks - 1) * 4 + 2, batch_size, nstack, n},
                                         at::dtype(input.dtype()).device(input.device()));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_bbs_multiply_untied_forward_backward_fast_cuda", [&] {
-    const auto twiddle_a = twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
     const InputReader<scalar_t> input_reader(input);
     const InputReader<scalar_t> grad_reader(grad);
     IntermediateStorage<scalar_t> inter_storage(intermediate_storage);
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 4, at::RestrictPtrTraits, int32_t>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
     OutputWriter<scalar_t> d_input_writer(d_input);
     dim3 block(min(n, MAX_BLOCK_SIZE));
     dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD[log_n - 1]), 1, nstack);
@@ -890,8 +890,8 @@ void butterfly_ortho_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle
   const int n = input.size(2);
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_ortho_multiply_untied_forward_fast_cuda", [&] {
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     const InputReader<scalar_t> input_reader(input);
     OutputWriter<scalar_t> output_writer(output);
     dim3 block(min(n, MAX_BLOCK_SIZE));
@@ -1066,11 +1066,11 @@ void butterfly_ortho_multiply_untied_backward_fast_cuda(const at::Tensor &twiddl
   const int n = output.size(2);
   const int log_n = int(log2((double) n));
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_ortho_multiply_untied_backward_fast_cuda", [&] {
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     const InputReader<scalar_t> output_reader(output);
     const InputReader<scalar_t> grad_reader(grad);
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     OutputWriter<scalar_t> d_input_writer(d_input);
     dim3 block(min(n, MAX_BLOCK_SIZE));
     dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_ORTHO_BACKWARD[log_n - 1]), 1, nstack);
@@ -1177,9 +1177,9 @@ void butterfly_odo_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle_c
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_odo_multiply_untied_forward_fast_cuda", [&] {
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto diagonal_a = diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto diagonal_a = diagonal.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     const InputReader<scalar_t> input_reader(input);
     OutputWriter<scalar_t> output_writer(output);
     dim3 block(min(n, MAX_BLOCK_SIZE));
@@ -1302,13 +1302,13 @@ void butterfly_odo_multiply_untied_backward_fast_cuda(const at::Tensor &twiddle_
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_odo_multiply_untied_backward_fast_cuda", [&] {
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto diagonal_a = diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto diagonal_a = diagonal.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     const InputReader<scalar_t> output_reader(output);
     const InputReader<scalar_t> grad_reader(grad);
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_diagonal_a = d_diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_diagonal_a = d_diagonal.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     OutputWriter<scalar_t> d_input_writer(d_input);
     dim3 block(min(n, MAX_BLOCK_SIZE));
     dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_ORTHO_BACKWARD[log_n - 1]), 1, nstack);
@@ -1457,14 +1457,14 @@ void butterfly_odo_multiply_untied_forward_backward_fast_cuda(const at::Tensor &
   auto intermediate_storage = at::empty({nblocks, batch_size, nstack, n},
                                         at::dtype(input.dtype()).device(input.device()));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_odo_multiply_untied_forward_backward_fast_cuda", [&] {
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto diagonal_a = diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto diagonal_a = diagonal.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     const InputReader<scalar_t> input_reader(input);
     const InputReader<scalar_t> grad_reader(grad);
     IntermediateStorage<scalar_t> inter_storage(intermediate_storage);
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_diagonal_a = d_diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_diagonal_a = d_diagonal.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     OutputWriter<scalar_t> d_input_writer(d_input);
     dim3 block(min(n, MAX_BLOCK_SIZE));
     dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_ORTHO_BACKWARD[log_n - 1]), 1, nstack);
@@ -1496,9 +1496,9 @@ void butterfly_odo_multiply_untied_forward_fast_cuda_benchmark(const at::Tensor 
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_odo_multiply_untied_forward_fast_cuda_benchmark", [&] {
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto diagonal_a = diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto diagonal_a = diagonal.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     const InputReader<scalar_t> input_reader(input);
     OutputWriter<scalar_t> output_writer(output);
     dim3 block(min(n, MAX_BLOCK_SIZE));
@@ -1564,13 +1564,13 @@ void butterfly_odo_multiply_untied_backward_fast_cuda_benchmark(const at::Tensor
   const int log_n = int(log2((double) n));
   const int nblocks = twiddle_cos.size(1) / (2 * log_n);
   AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "butterfly_odo_multiply_untied_backward_fast_cuda_benchmark", [&] {
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto diagonal_a = diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto diagonal_a = diagonal.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     const InputReader<scalar_t> output_reader(output);
     const InputReader<scalar_t> grad_reader(grad);
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_diagonal_a = d_diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_diagonal_a = d_diagonal.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     OutputWriter<scalar_t> d_input_writer(d_input);
     dim3 block(min(n, MAX_BLOCK_SIZE));
     auto stream = at::cuda::getCurrentCUDAStream();
@@ -1629,14 +1629,14 @@ void butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark(const at
   auto intermediate_storage = at::empty({nblocks, batch_size, nstack, n},
                                         at::dtype(input.dtype()).device(input.device()));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark", [&] {
-    const auto twiddle_cos_a = twiddle_cos.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto twiddle_sin_a = twiddle_sin.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    const auto diagonal_a = diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    const auto twiddle_cos_a = twiddle_cos.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto twiddle_sin_a = twiddle_sin.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    const auto diagonal_a = diagonal.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     const InputReader<scalar_t> input_reader(input);
     const InputReader<scalar_t> grad_reader(grad);
     IntermediateStorage<scalar_t> inter_storage(intermediate_storage);
-    auto d_twiddle_a = d_twiddle.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
-    auto d_diagonal_a = d_diagonal.packed_accessor<scalar_t, 3, at::RestrictPtrTraits, int32_t>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto d_diagonal_a = d_diagonal.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     OutputWriter<scalar_t> d_input_writer(d_input);
     dim3 block(min(n, MAX_BLOCK_SIZE));
     auto stream = at::cuda::getCurrentCUDAStream();
