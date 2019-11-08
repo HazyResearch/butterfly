@@ -175,21 +175,23 @@ def default_config():
 @ex.capture
 def dynamic_conv_experiment(model, model_args, encoder, decoder, structure_lr_multiplier,
                             nmaxupdates, ntrials, result_dir, cuda, smoke_test):
-    name=f"{model}_{model_args}_encoder_[{'-'.join(encoder)}]_decoder_[{'-'.join(decoder)}]_structlr_{structure_lr_multiplier}"
+    # name=f"{model}_{model_args}_encoder_[{'-'.join(encoder)}]_decoder_[{'-'.join(decoder)}]_structlr_{structure_lr_multiplier}"
+    name=f"{model}_{model_args}_encoder_[{'-'.join(encoder)}]_decoder_[{'-'.join(decoder)}]_structlr_grid"
     config={
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-4), math.log(1e-3)))),
         # 'lr': grid_search([5e-4, 7e-4, 9e-4, 11e-4]),
         # 'lr': grid_search([1e-4, 2.5e-4, 5e-4, 7.5e-4]),
         'lr': 5e-4,
-        'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if model == 'DynamicConv' else 1e-4,
+        # 'weight_decay': sample_from(lambda spec: math.exp(random.uniform(math.log(1e-6), math.log(5e-4)))) if model == 'DynamicConv' else 1e-4,
+        'weight_decay': 1e-4,
         # Transformer seems to need dropout 0.3
-        'dropout': sample_from(lambda spec: random.uniform(0.1, 0.3)) if model == 'DynamicConv' else 0.3,
+        # 'dropout': sample_from(lambda spec: random.uniform(0.1, 0.3)) if model == 'DynamicConv' else 0.3,
+        'dropout': 0.3,
         'seed': sample_from(lambda spec: random.randint(0, 1 << 16)),
         'encoder': list(encoder),  # Need to copy @encoder as sacred created a read-only list
         'decoder': list(decoder),
         # 'structure-lr-multiplier': structure_lr_multiplier,
-        # 'structure-lr-multiplier': grid_search([0.25, 0.5, 1.0, 2.0, 4.0]),
-        'structure-lr-multiplier': grid_search([0.25, 0.5, 2.0, 4.0]),
+        'structure-lr-multiplier': grid_search([0.25, 0.5, 1.0, 2.0, 4.0]),
         'device': 'cuda' if cuda else 'cpu',
         'model': {'name': model, 'args': model_args},
         'nmaxupdates': nmaxupdates,
