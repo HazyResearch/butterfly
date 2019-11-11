@@ -67,7 +67,7 @@ class Block(nn.Module):
             self.conv2 = nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0, bias=False)
         elif structure.startswith('LR'):
             odo_nblocks = int(structure.split('_')[1])
-            rank = int(odo_nblocks * math.log2(in_planes) / 2)
+            rank = int(odo_nblocks * math.log2(out_planes) / 2)
             self.conv2 = LowRankConv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0, bias=False, rank=rank)
         else:
             param = structure.split('_')[0]
@@ -99,7 +99,7 @@ class MobileNet(nn.Module):
     # (128,2) means conv planes=128, conv stride=2, by default conv stride=1
     cfg = [64, (128,2), 128, (256,2), 256, (512,2), 512, 512, 512, 512, 512, (1024,2), 1024]
 
-    def __init__(self, num_classes=1000, width_mult=1.0, round_nearest=8, structure=None, softmax_structure='D'):
+    def __init__(self, num_classes=1000, width_mult=1.0, round_nearest=8, structure=None, softmax_structure='D', sm_pooling=1):
         """
         structure: list of string
         """
@@ -109,13 +109,14 @@ class MobileNet(nn.Module):
         self.structure = [] if structure is None else structure
         self.n_structure_layer = len(self.structure)
         self.structure = ['D'] * (len(self.cfg) - self.n_structure_layer) + self.structure
+        self.sm_pooling = sm_pooling
         input_channel = _make_divisible(32 * width_mult, round_nearest)
         self.conv1 = nn.Conv2d(3, input_channel, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(input_channel)
         self.bn1.weight._no_wd = True
         self.bn1.bias._no_wd = True
         self.layers = self._make_layers(in_planes=input_channel)
-        self.last_channel = _make_divisible(1024 * width_mult, round_nearest)
+        self.last_channel = _make_divisible(1024 * width_mult // sm_pooling, round_nearest)
         if softmax_structure == 'D':
             self.linear = nn.Linear(self.last_channel, num_classes)
         else:
@@ -136,6 +137,9 @@ class MobileNet(nn.Module):
         out = F.relu(self.bn1(self.conv1(x)), inplace=True)
         out = self.layers(out)
         out = out.mean([2, 3])
+        if self.sm_pooling != 1:
+            b, n = out.shape
+            out = out.reshape(b, self.sm_pooling, n // self.sm_pooling).mean(1)
         out = self.linear(out)
         return out
 

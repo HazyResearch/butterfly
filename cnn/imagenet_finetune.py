@@ -60,6 +60,9 @@ def add_parser_arguments(parser):
     parser.add_argument('--softmax-struct', metavar='SMSTRUCT', default='D',
                         type=str,
                         help='structure for softmax layer: ' + ' (default: D)')
+    parser.add_argument('--sm-pooling', metavar='SMPOOL', default=1,
+                        type=int,
+                        help='pooling before the softmax layer: ' + ' (default: 1)')
     parser.add_argument('--n-struct-layers', default=0, type=int,
                         metavar='NSL', help='Number of structured layer (default 7)')
     parser.add_argument('--width', default=1.0, type=float,
@@ -287,7 +290,7 @@ def main(args):
             pretrained_weights=pretrained_weights,
             cuda = True, fp16 = args.fp16,
             width=args.width, n_struct_layers=0,
-            struct=args.struct, softmax_struct=args.softmax_struct)
+            struct=args.struct, softmax_struct=args.softmax_struct, sm_pooling=args.sm_pooling)
     checkpoint = torch.load(args.full_model_path, map_location = lambda storage, loc: storage.cuda(args.gpu))
     model_state = checkpoint['state_dict']
     # Strip names to be compatible with Pytorch 1.2, i.e. 'module.conv1.weight' -> 'conv1.weight'
@@ -324,7 +327,7 @@ def main(args):
                 pretrained_weights=pretrained_weights,
                 cuda = True, fp16 = args.fp16,
                 width=args.width, n_struct_layers=n_struct_layers,
-                struct=args.struct, softmax_struct=args.softmax_struct)
+                struct=args.struct, softmax_struct=args.softmax_struct, sm_pooling=args.sm_pooling)
         current_state_dict_keys = model_and_loss.model.state_dict().keys()
         state_dict = {name: param for name, param in prev_state_dict.items() if name in current_state_dict_keys}
         state_dict.update({layer_name + '.' + name: param for name, param in structured_params.items()})
@@ -334,7 +337,7 @@ def main(args):
 
         optimizer = get_optimizer(list(model_and_loss.model.named_parameters()),
                 args.fp16,
-                args.lr, args.momentum, args.weight_decay,
+                args.lr, args.momentum, args.momentum, args.weight_decay,
                 nesterov = args.nesterov,
                 bn_weight_decay = args.bn_weight_decay,
                 state=optimizer_state,
@@ -344,7 +347,7 @@ def main(args):
         if args.amp:
             model_and_loss, optimizer = amp.initialize(
                     model_and_loss, optimizer,
-                    opt_level="O2",
+                    opt_level="O1",
                     loss_scale="dynamic" if args.dynamic_loss_scale else args.static_loss_scale)
 
         if args.distributed:

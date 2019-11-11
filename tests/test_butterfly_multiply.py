@@ -8,7 +8,6 @@ import torch
 
 from butterfly import Butterfly
 from butterfly.utils import twiddle_normal_to_fast_format
-from cnn.models.butterfly_conv import ButterflyConv2d
 
 from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
@@ -20,7 +19,7 @@ from butterfly.butterfly_multiply import butterfly_mult_conv2d_torch, butterfly_
 from butterfly.butterfly_multiply import bbt_mult_conv2d_torch, bbt_mult_conv2d
 from butterfly.butterfly_multiply import butterfly_mult_untied_svd_torch, butterfly_mult_untied_svd
 from butterfly.butterfly_multiply import butterfly_mult_conv2d_svd_torch, butterfly_mult_conv2d_svd
-# from factor_multiply import butterfly_multiply_untied_eval
+from factor_multiply import butterfly_multiply_untied_eval
 
 from factor_multiply_fast import butterfly_multiply_untied_forward_fast
 from factor_multiply_fast import butterfly_multiply_untied_forward_backward_fast

@@ -3,6 +3,11 @@
 #include <utility>
 #include <vector>
 
+// For compatibility with Pytorch 1.1
+#ifndef TORCH_CHECK
+#define TORCH_CHECK AT_CHECK
+#endif
+
 #define BFLY_BENCHMARK false
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.type().device_type() == at::kCPU || x.type().device_type() == at::kCUDA, #x " must be on CPU or CUDA")

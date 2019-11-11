@@ -17,6 +17,7 @@ from . import utils
 
 from cnn.mobilenet_imagenet import MobileNet
 from cnn.mobilenet_imagenet import Butterfly1x1Conv
+from cnn.shufflenet_imagenet import ShuffleNet
 
 try:
     from apex.parallel import DistributedDataParallel as DDP
@@ -28,7 +29,8 @@ except ImportError:
 
 class ModelAndLoss(nn.Module):
     def __init__(self, arch, loss, pretrained_weights=None, cuda=True, fp16=False,
-                 width=1.0, n_struct_layers=0, struct='D', softmax_struct='D'):
+                 width=1.0, n_struct_layers=0, struct='D', softmax_struct='D', sm_pooling=1,
+                 groups=8, shuffle='P'):
         super(ModelAndLoss, self).__init__()
         self.arch = arch
 
@@ -36,9 +38,11 @@ class ModelAndLoss(nn.Module):
         # model = models.build_resnet(arch[0], arch[1])
         if arch == 'mobilenetv1':
             model = MobileNet(width_mult=width, structure=[struct] * n_struct_layers,
-                              softmax_structure=softmax_struct)
+                              softmax_structure=softmax_struct, sm_pooling=sm_pooling)
             # if args.distilled_param_path:
             #     model.load_state_dict(model.mixed_model_state_dict(args.full_model_path, args.distilled_param_path))
+        elif arch == 'shufflenetv1':
+            model = ShuffleNet(width_mult=width, groups=groups, shuffle=shuffle)
         else:
             model = models.__dict__[arch]()
         if pretrained_weights is not None:
@@ -78,7 +82,7 @@ class ModelAndLoss(nn.Module):
             self.model.load_state_dict(state)
 
 
-def get_optimizer(parameters, fp16, lr, momentum, weight_decay,
+def get_optimizer(parameters, fp16, lr, momentum, structured_momentum, weight_decay,
                   nesterov=False,
                   state=None,
                   static_loss_scale=1., dynamic_loss_scale=False,
@@ -90,7 +94,7 @@ def get_optimizer(parameters, fp16, lr, momentum, weight_decay,
         no_wd_params = [v for n, v in parameters if getattr(v, '_no_wd', False)]
         unstructured_params = [v for n, v in parameters
                                if not getattr(v, '_is_structured', False) and not getattr(v, '_no_wd', False)]
-        params_dict = [{'params': structured_params, 'weight_decay': 0.0},
+        params_dict = [{'params': structured_params, 'weight_decay': 0.0, 'momentum': structured_momentum},
                        {'params': no_wd_params, 'weight_decay': 0.0},
                        {'params': unstructured_params}]
     else:
@@ -99,7 +103,7 @@ def get_optimizer(parameters, fp16, lr, momentum, weight_decay,
         no_wd_params = [v for n, v in parameters if getattr(v, '_no_wd', False) or 'bn' in n]
         unstructured_params = [v for n, v in parameters
                                if not getattr(v, '_is_structured', False) and not getattr(v, '_no_wd', False) and 'bn' not in n]
-        params_dict = [{'params': structured_params, 'weight_decay': 0.0},
+        params_dict = [{'params': structured_params, 'weight_decay': 0.0, 'momentum': structured_momentum},
                        {'params': no_wd_params, 'weight_decay': 0.0},
                        {'params': unstructured_params}]
     optimizer = torch.optim.SGD(params_dict, lr,
@@ -413,6 +417,7 @@ def train_loop(model_and_loss, optimizer, lr_scheduler, train_loader, val_loader
 # }}}
 
 def get_input_cov(model, train_loader, layer_names, max_batches=None):
+    model = model.float()
     # hook to capture intermediate inputs
     def hook(module, input):
         x, = input
@@ -461,6 +466,8 @@ def get_input_cov(model, train_loader, layer_names, max_batches=None):
 
 def butterfly_projection_cov(teacher_module, input_cov, butterfly_structure='odo_1',
                              n_Adam_steps=20000, n_LBFGS_steps=50):
+    teacher_module = teacher_module.float()
+    input_cov = input_cov.float()
     try:
         in_channels = teacher_module.in_channels
         out_channels = teacher_module.out_channels
@@ -475,7 +482,12 @@ def butterfly_projection_cov(teacher_module, input_cov, butterfly_structure='odo
     student_module = student_module.to(input_cov.device)
 
     with torch.no_grad():
-        Sigma, U = torch.symeig(input_cov, eigenvectors=True)
+        try:  # torch.symeig sometimes fail to converge on CUDA
+            Sigma, U = torch.symeig(input_cov, eigenvectors=True)
+        except:  # Move to CPU and use numpy's function
+            Sigma, U = np.linalg.eigh(input_cov.cpu().numpy())
+            Sigma = torch.tensor(Sigma, dtype=input_cov.dtype, device=input_cov.device)
+            U = torch.tensor(U, dtype=input_cov.dtype, device=input_cov.device)
         Sigma = Sigma.clamp(0)  # avoid small negative eigenvalues
         input = torch.diag(Sigma.sqrt()) @ U.t()
         input = input.reshape(in_channels, in_channels, 1, 1)  # To be compatible with conv2d
