@@ -92,7 +92,10 @@ class TrainableModel(Trainable):
         train_args += ['--structure-lr-multiplier', str(config['structure-lr-multiplier'])]
         if config['density'] < 1.0:
             train_args += ['--sparse', '--density', str(config['density']), '--redistribution', 'none', '--verbose']
-            if 'DynamicConv' not in model['name']: train_args += ['--force-qkv-separate']
+            if 'DynamicConv' in model['name']:
+                train_args += ['--butterfly-density']
+            else:
+                train_args += ['--force-qkv-separate']
         print(f'save_dir: {self._save_dir}')
 
         avg_args = [
