@@ -50,7 +50,7 @@ class TrainableModel(Trainable):
             torch.cuda.manual_seed(config['seed'])
         model = config['model']
         train_args = [str(Path(project_root) / 'fairseq/data-bin/iwslt14.tokenized.de-en')]
-        train_args += ['--clip-norm', '0'] if model['name'] == 'DynamicConv' else []
+        train_args += ['--clip-norm', '0'] if 'DynamicConv' in model['name'] else []
         train_args += ['--optimizer', 'adam']
         train_args += ['--lr', str(config['lr'])]
         train_args += ['--source-lang', 'de']
@@ -71,15 +71,17 @@ class TrainableModel(Trainable):
         train_args += ['--keep-last-epochs', '10']
         if model['name'] == 'DynamicConv':
             train_args += ['-a', 'lightconv_butterfly_iwslt_de_en']
+        elif model['name'] == 'DynamicConvBasic':
+            train_args += ['-a', 'lightconv_iwslt_de_en']
         elif model['name'] == 'TransformerBasic':
             train_args += ['-a', 'transformer_iwslt_de_en']
         elif model['name'] == 'Transformer':
             train_args += ['-a', 'transformer_butterfly_iwslt_de_en']
         train_args += ['--dropout', str(config['dropout'])]
-        train_args += ['--attention-dropout', '0.1'] if model['name'] == 'DynamicConv' else []
-        train_args += ['--weight-dropout', '0.1'] if model['name'] == 'DynamicConv' else []
-        train_args += ['--encoder-glu', '0'] if model['name'] == 'DynamicConv' else []
-        train_args += ['--decoder-glu', '0 '] if model['name'] == 'DynamicConv' else []
+        train_args += ['--attention-dropout', '0.1'] if 'DynamicConv' in model['name'] else []
+        train_args += ['--weight-dropout', '0.1'] if 'DynamicConv' in model['name'] else []
+        train_args += ['--encoder-glu', '0'] if 'DynamicConv' in model['name'] else []
+        train_args += ['--decoder-glu', '0 '] if 'DynamicConv' in model['name'] else []
         train_args += ['--seed', str(config['seed'])]
         self._save_dir = Path(config['result_dir']) / f"structlr={config['structure-lr-multiplier']}_seed={config['seed']}"
         train_args += ['--save-dir', str(self._save_dir)]
@@ -89,7 +91,8 @@ class TrainableModel(Trainable):
         train_args += ['--decoder-structure-type-list', str(config['decoder'])] if model['name'] == 'Transformer' else []
         train_args += ['--structure-lr-multiplier', str(config['structure-lr-multiplier'])]
         if config['density'] < 1.0:
-            train_args += ['--sparse', '--density', str(config['density']), '--redistribution', 'none', '--force-qkv-separate', '--verbose']
+            train_args += ['--sparse', '--density', str(config['density']), '--redistribution', 'none', '--verbose']
+            if 'DynamicConv' not in model['name']: train_args += ['--force-qkv-separate']
         print(f'save_dir: {self._save_dir}')
 
         avg_args = [
@@ -152,10 +155,10 @@ if slack_config_path.exists():
 
 
 class default_config:
-  def __init__(self):
-    self.model = 'TransformerBasic'
+  def __init__(self, model_name='TransformerBasic'):
+    self.model = model_name
     self.model_args = {}  # Arguments to be passed to the model, as a dictionary
-    self.encoder = ['D'] * 6
+    self.encoder = ['D'] * (7 if 'DynamicConv' in model_name else 6)
     self.decoder = ['D'] * 6  # Layers in the decoder
     self.density = 1.0  # if less than 1.0, use sparse
     self.structure_lr_multiplier = 1.0  # Learning rate multiplier for structured parameters
@@ -165,9 +168,9 @@ class default_config:
     self.smoke_test = False  # Finish quickly for testing
 
 def main():
-    config = default_config().__dict__
-    config['density'] = float(sys.argv[1].split('=')[1])
-    config['structure-lr-multiplier'] = float(sys.argv[2].split('=')[1])
+    config = default_config(model_name=sys.argv[1].split('=')[1]).__dict__
+    config['density'] = float(sys.argv[2].split('=')[1])
+    config['structure-lr-multiplier'] = float(sys.argv[3].split('=')[1])
     c2 = {
         'lr': 5e-4,
         'weight_decay': 1e-4,
@@ -190,4 +193,4 @@ def main():
         json.dump(result, f, ensure_ascii=False, indent=4)
 
 if __name__ == '__main__':
-  main()
+    main()
