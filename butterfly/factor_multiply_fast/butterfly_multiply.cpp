@@ -9,6 +9,7 @@
 #endif
 
 #define BFLY_BENCHMARK false
+#define BFLY_MAX5_BENCHMARK false
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.type().device_type() == at::kCPU || x.type().device_type() == at::kCUDA, #x " must be on CPU or CUDA")
 
@@ -26,6 +27,12 @@ void butterfly_multiply_untied_forward_max5_fast_cuda(const at::Tensor &twiddle,
                                                       const at::Tensor &input,
                                                       at::Tensor &output,
                                                       bool increasing_stride);
+#if BFLY_MAX5_BENCHMARK
+void butterfly_multiply_untied_forward_max5_fast_cuda_benchmark(const at::Tensor &twiddle,
+                                                                const at::Tensor &input,
+                                                                at::Tensor &output,
+                                                                bool increasing_stride);
+#endif
 void butterfly_multiply_untied_forward_backward_fast_cuda(const at::Tensor &twiddle,
                                                           const at::Tensor &input,
                                                           const at::Tensor &grad,
@@ -38,6 +45,14 @@ void butterfly_multiply_untied_forward_backward_max5_fast_cuda(const at::Tensor 
                                                                at::Tensor &d_twiddle,
                                                                at::Tensor &d_input,
                                                                bool increasing_stride);
+#if BFLY_MAX5_BENCHMARK
+void butterfly_multiply_untied_forward_backward_max5_fast_cuda_benchmark(const at::Tensor &twiddle,
+                                                                         const at::Tensor &input,
+                                                                         const at::Tensor &grad,
+                                                                         at::Tensor &d_twiddle,
+                                                                         at::Tensor &d_input,
+                                                                         bool increasing_stride);
+#endif
 void butterfly_bbs_multiply_untied_forward_fast_cuda(const at::Tensor &twiddle,
                                                      const at::Tensor &input,
                                                      at::Tensor &output);
@@ -161,6 +176,7 @@ at::Tensor butterfly_multiply_untied_forward_max5_fast(const at::Tensor &twiddle
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double)n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
   TORCH_CHECK(1 << log_n == n, "butterfly_multiply_untied_forward_max5_fast: n must be a power of 2");
   TORCH_CHECK((twiddle.dim() == 4 && input.dim() == 3),
            "butterfly_multiply_untied_forward_max5_fast: twiddle and input must have "
@@ -170,12 +186,16 @@ at::Tensor butterfly_multiply_untied_forward_max5_fast(const at::Tensor &twiddle
   TORCH_CHECK(twiddle.device() == input.device(), "device of twiddle (",
            twiddle.device(), ") must match device of input (", input.device(),
            ")");
-  TORCH_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, log_n, 2, n}),
+  TORCH_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, log_n * (nblocks == 0 ? 1 : 2 * nblocks), 2, n}),
            "butterfly_multiply_untied_forward_max5_fast: twiddle must have shape (nstack, "
            "log n, 2, n) (nstack, log n, 2, n, 2)");
   auto output = torch::empty_like(input);
   TORCH_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_max5_fast: only supports CUDA");
+  #if !BFLY_MAX5_BENCHMARK
   butterfly_multiply_untied_forward_max5_fast_cuda(twiddle, input, output, increasing_stride);
+  #else
+  butterfly_multiply_untied_forward_max5_fast_cuda_benchmark(twiddle, input, output, increasing_stride);
+  #endif
   return output;
 }
 
@@ -239,6 +259,7 @@ std::vector<at::Tensor> butterfly_multiply_untied_forward_backward_max5_fast(con
   const auto nstack = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double)n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
   TORCH_CHECK(1 << log_n == n, "butterfly_multiply_untied_forward_backward_max5_fast: n must be a power of 2");
   TORCH_CHECK((twiddle.dim() == 4 && input.dim() == 3 && grad.dim() == 3),
            "butterfly_multiply_untied_forward_backward_max5_fast: twiddle, input, "
@@ -250,7 +271,7 @@ std::vector<at::Tensor> butterfly_multiply_untied_forward_backward_max5_fast(con
       twiddle.device() == input.device() && twiddle.device() == grad.device(),
       "device of twiddle (", twiddle.device(), ") must match device of input (",
       input.device(), ") and grad (", grad.device(), ")");
-  TORCH_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, log_n, 2, n}),
+  TORCH_CHECK(twiddle.sizes() == torch::IntArrayRef({nstack, log_n * (nblocks == 0 ? 1 : 2 * nblocks), 2, n}),
            "butterfly_multiply_untied_forward_backward_max5_fast: twiddle must have shape (nstack, "
            "log n, 2, n) (nstack, log n, 2, n, 2)");
   TORCH_CHECK(grad.sizes() == torch::IntArrayRef({batch_size, nstack, n}),
@@ -259,9 +280,15 @@ std::vector<at::Tensor> butterfly_multiply_untied_forward_backward_max5_fast(con
   auto d_input = torch::empty_like(input);
   auto d_twiddle = torch::zeros_like(twiddle);
   TORCH_CHECK(input.is_cuda(), "butterfly_multiply_untied_forward_backward_max5_fast: only supports CUDA");
+  #if !BFLY_MAX5_BENCHMARK
   butterfly_multiply_untied_forward_backward_max5_fast_cuda(twiddle, input, grad,
                                                             d_twiddle, d_input,
                                                             increasing_stride);
+  #else
+  butterfly_multiply_untied_forward_backward_max5_fast_cuda_benchmark(twiddle, input, grad,
+                                                                      d_twiddle, d_input,
+                                                                      increasing_stride);
+  #endif
   return {d_twiddle, d_input} ;
 }
 

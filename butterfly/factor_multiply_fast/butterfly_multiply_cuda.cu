@@ -15,6 +15,7 @@
 #endif
 
 #define BFLY_BENCHMARK false
+#define BFLY_MAX5_BENCHMARK false
 
 // Only support float (not double) for now to speed up compilation time
 #undef AT_DISPATCH_FLOATING_TYPES
@@ -49,10 +50,12 @@ static constexpr int MAX_BLOCK_SIZE = 1024;
 // static constexpr int WORK_PER_THREAD = 16;
 // static constexpr int ELEMENTARY_SIZE = MAX_BLOCK_SIZE / 2;
 // static constexpr int MAX_N_FACTORS = 10;
+static constexpr int MAX5_FORWARD_BLOCK_SIZE = 512;
+static constexpr int MAX5_BACKWARD_BLOCK_SIZE = 256;
 static constexpr int ITEMS_PER_THREAD_FORWARD[14] = {4, 4, 4, 4, 4, 4, 4, 8, 8, 8, 13, 10, 4, 4};
 static constexpr int ITEMS_PER_THREAD_BACKWARD[14] = {16, 16, 16, 16, 16, 16, 16, 16, 16, 8, 8, 8, 8, 8};
-static constexpr int ITEMS_PER_THREAD_FORWARD_MAX5[8] = {4, 4, 4, 4, 4, 4, 4, 4};
-static constexpr int ITEMS_PER_THREAD_BACKWARD_MAX5[7] = {16, 16, 16, 16, 16, 16, 8};
+static constexpr int ITEMS_PER_THREAD_FORWARD_MAX5[9] = {1, 2, 2, 4, 4, 4, 2, 1, 1};
+static constexpr int ITEMS_PER_THREAD_BACKWARD_MAX5[8] = {8, 8, 8, 8, 8, 6, 8, 3};
 static constexpr int MIN_BLOCKS_PER_MP_FORWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1};
 static constexpr int MIN_BLOCKS_PER_MP_BACKWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 700)
@@ -425,7 +428,7 @@ template <int nsteps, bool increasing_stride,
             int items_per_thread=ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1],
             int min_blocks_per_mp=MIN_BLOCKS_PER_MP_FORWARD[nsteps - 1],
             typename scalar_t>
-C10_LAUNCH_BOUNDS_2(MAX_BLOCK_SIZE / 2, min_blocks_per_mp)
+C10_LAUNCH_BOUNDS_2(MAX5_FORWARD_BLOCK_SIZE, min_blocks_per_mp)
 __global__ void butterfly_multiply_untied_forward_max5_fast_cuda_kernel(const CudaAcsr<scalar_t, 4> twiddle_a,
                                                                         InputReader<scalar_t> input_reader,
                                                                         OutputWriter<scalar_t> output_writer,
@@ -462,23 +465,42 @@ __global__ void butterfly_multiply_untied_forward_max5_fast_cuda_kernel(const Cu
   output_writer.save_max5<items_per_thread, mult_per_warp>(input_val, batch_idx, input_idx, input_idx_stride);
 }
 
-std::vector<int> butterfly_max5_plan(const int log_n, const int max_nsteps, const bool increasing_stride) {
+std::vector<int> butterfly_max5_plan(const int log_n, const int nblocks, const int max_nsteps, const bool increasing_stride) {
   const int niters = div_up(log_n, max_nsteps);
-  const int nsteps_remainder = log_n - (niters - 1) * max_nsteps;
+  const int niters_total = niters * (nblocks == 0 ? 1 : 2 * nblocks);
+  const int nsteps = div_up(log_n, niters);
+  const int nsteps_remainder = log_n - (niters - 1) * nsteps;
   std::vector<int> bit_milestones;
-  bit_milestones.reserve(niters + 1);
-  if (increasing_stride) {
-    // bit_milestones has niters + 1 elements the form [0, nsteps_remainder, nsteps_remainder + max_nsteps, ..., log_n]
-    bit_milestones.push_back(0);
-    for (int i = nsteps_remainder; i <= log_n; i += max_nsteps) {
-      bit_milestones.push_back(i);
+  bit_milestones.reserve(niters_total + 1);
+  auto push_strides = [log_n, nsteps, nsteps_remainder](std::vector<int>& milestones, bool increasing) {
+    if (increasing) {
+      for (int i = nsteps_remainder; i <= log_n; i += nsteps) {
+        milestones.push_back(i);
+      }
+    } else {
+      for (int i = log_n - nsteps; i > 0; i -= nsteps) {
+        milestones.push_back(i);
+      }
+      milestones.push_back(0);
     }
+  };
+  bit_milestones.push_back(increasing_stride ? 0 : log_n);
+  if (nblocks == 0) {
+    // bit_milestones has niters + 1 elements the form [0, nsteps_remainder, nsteps_remainder + nsteps, ..., log_n]
+    // if increasing stride. Otherwise it's the reverse.
+    push_strides(bit_milestones, increasing_stride);
   } else {
-    // bit_milestones has niters + 1 elements the form [log_n, ..., nsteps_remainder + max_nsteps, nsteps_remainder, 0]
-    for (int i = log_n; i >= nsteps_remainder; i -= max_nsteps) {
-      bit_milestones.push_back(i);
+    if (increasing_stride) {
+      for (int block = 0; block < nblocks; block++) {
+        push_strides(bit_milestones, true);
+        push_strides(bit_milestones, false);
+      }
+    } else {
+      for (int block = 0; block < nblocks; block++) {
+        push_strides(bit_milestones, false);
+        push_strides(bit_milestones, true);
+      }
     }
-    bit_milestones.push_back(0);
   }
   return bit_milestones;
 }
@@ -491,8 +513,9 @@ void butterfly_multiply_untied_forward_max5_fast_cuda(const at::Tensor &twiddle,
   const int nstack = input.size(1);
   const int n = input.size(2);
   const int log_n = int(log2((double) n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
   auto stream = at::cuda::getCurrentCUDAStream();
-  const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, 8, increasing_stride);
+  const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, 9, increasing_stride);
   const int niters = bit_milestones.size() - 1;
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_max5_fast_cuda", [&] {
     const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
@@ -506,7 +529,7 @@ void butterfly_multiply_untied_forward_max5_fast_cuda(const at::Tensor &twiddle,
       const int span = 1 << nsteps;
       const int n_div_span = 1 << (log_n - nsteps);  // = n / span
       const int block_x = min(span, WARP_SIZE);
-      const int max_block_y = (MAX_BLOCK_SIZE / 2) / block_x;  // = 512 / block_x
+      const int max_block_y = MAX5_FORWARD_BLOCK_SIZE / block_x;
       dim3 block(block_x, min(max_block_y, div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1])));
       // grid.x must be at least n / span
       dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1] * block.y) * n_div_span, 1, nstack);
@@ -517,7 +540,7 @@ void butterfly_multiply_untied_forward_max5_fast_cuda(const at::Tensor &twiddle,
           : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, false>                              \
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit); break;
 
-        MAP(CASE_NSTEPS, 1, 2, 3, 4, 5, 6, 7, 8)
+        MAP(CASE_NSTEPS, 1, 2, 3, 4, 5, 6, 7, 8, 9)
       }
       twiddle_idx_start += nsteps;
     }
@@ -808,9 +831,9 @@ __device__ __forceinline__ void b_untied_forward_backward_shared_twiddle(const s
 
 template <int nsteps, bool increasing_stride,
             int items_per_thread=ITEMS_PER_THREAD_BACKWARD_MAX5[nsteps - 1],
-            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_FORWARD[nsteps - 1],
+            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_BACKWARD[nsteps - 1],
             typename scalar_t, typename accscalar_t=at::acc_type<scalar_t, true>>
-C10_LAUNCH_BOUNDS_2(MAX_BLOCK_SIZE / 2, min_blocks_per_mp)
+C10_LAUNCH_BOUNDS_2(MAX5_BACKWARD_BLOCK_SIZE, min_blocks_per_mp)
 __global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel(const CudaAcsr<scalar_t, 4> twiddle_a,
                                                                                  InputReader<scalar_t> input_reader,
                                                                                  InputReader<scalar_t> grad_reader,
@@ -877,8 +900,9 @@ void butterfly_multiply_untied_forward_backward_max5_fast_cuda(const at::Tensor 
   const int nstack = input.size(1);
   const int n = input.size(2);
   const int log_n = int(log2((double) n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
   auto stream = at::cuda::getCurrentCUDAStream();
-  const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, 7, increasing_stride);
+  const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, 8, increasing_stride);
   const int niters = bit_milestones.size() - 1;
   auto intermediate_storage = at::empty({niters - 1, batch_size, nstack, n},
                                         at::dtype(input.dtype()).device(input.device()));
@@ -896,7 +920,7 @@ void butterfly_multiply_untied_forward_backward_max5_fast_cuda(const at::Tensor 
       const int span = 1 << nsteps;
       const int n_div_span = 1 << (log_n - nsteps);  // = n / span
       const int block_x = min(span, WARP_SIZE);
-      const int max_block_y = (MAX_BLOCK_SIZE / 2) / block_x;  // = 512 / block_x
+      const int max_block_y = MAX5_FORWARD_BLOCK_SIZE / block_x;
       dim3 block(block_x, min(max_block_y, div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1])));
       // grid.x must be at least n / span
       dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1] * block.y) * n_div_span, 1, nstack);
@@ -907,12 +931,12 @@ void butterfly_multiply_untied_forward_backward_max5_fast_cuda(const at::Tensor 
           : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, false>                              \
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit); break;
 
-        MAP(CASE_NSTEPS_FORWARD, 1, 2, 3, 4, 5, 6, 7)
+        MAP(CASE_NSTEPS_FORWARD, 1, 2, 3, 4, 5, 6, 7, 8)
       }
       twiddle_idx_start += nsteps;
     }
     // Backward pass
-    twiddle_idx_start = log_n;
+    twiddle_idx_start = log_n * (nblocks == 0 ? 1 : 2 * nblocks);
     for (int iter = niters - 1; iter >= 0; iter--) {
       const InputReader<scalar_t> input_reader(iter == 0 ? input : intermediate_storage[iter - 1]);
       const InputReader<scalar_t> grad_reader(iter == niters - 1 ? grad : d_input);
@@ -924,7 +948,7 @@ void butterfly_multiply_untied_forward_backward_max5_fast_cuda(const at::Tensor 
       const int span = 1 << nsteps;
       const int n_div_span = 1 << (log_n - nsteps);  // = n / span
       const int block_x = min(span, WARP_SIZE);
-      const int max_block_y = (MAX_BLOCK_SIZE / 2) / block_x;  // = 512 / block_x
+      const int max_block_y = MAX5_BACKWARD_BLOCK_SIZE / block_x;
       dim3 block(block_x, min(max_block_y, div_up(batch_size, ITEMS_PER_THREAD_BACKWARD_MAX5[nsteps - 1])));
       // grid.x must be at least n / span
       dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD_MAX5[nsteps - 1] * block.y) * n_div_span, 1, nstack);
@@ -937,7 +961,7 @@ void butterfly_multiply_untied_forward_backward_max5_fast_cuda(const at::Tensor 
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,                \
                                        log_n, twiddle_idx_start, start_bit); break;
 
-        MAP(CASE_NSTEPS_BACKWARD, 1, 2, 3, 4, 5, 6, 7)
+        MAP(CASE_NSTEPS_BACKWARD, 1, 2, 3, 4, 5, 6, 7, 8)
       }
     }
   });
@@ -2098,3 +2122,320 @@ void butterfly_odo_multiply_untied_forward_backward_fast_cuda_benchmark(const at
 }
 
 #endif // BFLY_BENCHMARK
+
+#if BFLY_MAX5_BENCHMARK
+void butterfly_multiply_untied_forward_max5_fast_cuda_benchmark(const at::Tensor &twiddle,
+                                                                const at::Tensor &input,
+                                                                at::Tensor &output,
+                                                                bool increasing_stride) {
+  int batch_size = input.size(0);
+  const int nstack = input.size(1);
+  const int n = input.size(2);
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, 8, increasing_stride);
+  const int niters = bit_milestones.size() - 1;
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_max5_fast_cuda_benchmark", [&] {
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
+    int twiddle_idx_start = 0;
+    for (int iter = 0; iter < niters; iter++) {
+      const InputReader<scalar_t> input_reader(iter == 0 ? input : output);
+      OutputWriter<scalar_t> output_writer(output);
+      const bool increasing_stride_this_iter = bit_milestones[iter] <= bit_milestones[iter + 1];
+      const int start_bit = increasing_stride_this_iter ? bit_milestones[iter] : bit_milestones[iter + 1];
+      const int nsteps = abs(bit_milestones[iter + 1] - bit_milestones[iter]);
+      const int span = 1 << nsteps;
+      const int n_div_span = 1 << (log_n - nsteps);  // = n / span
+      const int block_x = min(span, WARP_SIZE);
+      const int max_block_y = MAX5_FORWARD_BLOCK_SIZE / block_x;
+      switch (nsteps) {
+      case 1:
+        #define CASE_IPT_1(items_per_thread_val) do {                                                                          \
+          dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));                                     \
+          dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack);                               \
+          increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<1, true, items_per_thread_val> \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit)          \
+            : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<1, false, items_per_thread_val>                          \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit);         \
+        } while(0);
+        MAP(CASE_IPT_1, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 2:
+        #define CASE_IPT_2(items_per_thread_val) do {                                                                          \
+          dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));                                     \
+          dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack);                               \
+          increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<2, true, items_per_thread_val> \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit)          \
+            : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<2, false, items_per_thread_val>                          \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit);         \
+        } while(0);
+        MAP(CASE_IPT_2, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 3:
+        #define CASE_IPT_3(items_per_thread_val) do {                                                                          \
+          dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));                                     \
+          dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack);                               \
+          increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<3, true, items_per_thread_val> \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit)          \
+            : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<3, false, items_per_thread_val>                          \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit);         \
+        } while(0);
+        MAP(CASE_IPT_3, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 4:
+        #define CASE_IPT_4(items_per_thread_val) do {                                                                          \
+          dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));                                     \
+          dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack);                               \
+          increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<4, true, items_per_thread_val> \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit)          \
+            : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<4, false, items_per_thread_val>                          \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit);         \
+        } while(0);
+        MAP(CASE_IPT_4, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 5:
+        #define CASE_IPT_5(items_per_thread_val) do {                                                                          \
+          dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));                                     \
+          dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack);                               \
+          increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<5, true, items_per_thread_val> \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit)          \
+            : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<5, false, items_per_thread_val>                          \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit);         \
+        } while(0);
+        MAP(CASE_IPT_5, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 6:
+        #define CASE_IPT_6(items_per_thread_val) do {                                                                          \
+          dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));                                     \
+          dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack);                               \
+          increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<6, true, items_per_thread_val> \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit)          \
+            : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<6, false, items_per_thread_val>                          \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit);         \
+        } while(0);
+        MAP(CASE_IPT_6, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 7:
+        #define CASE_IPT_7(items_per_thread_val) do {                                                                          \
+          dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));                                     \
+          dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack);                               \
+          increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<7, true, items_per_thread_val> \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit)          \
+            : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<7, false, items_per_thread_val>                          \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit);         \
+        } while(0);
+        MAP(CASE_IPT_7, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 8:
+        #define CASE_IPT_8(items_per_thread_val) do {                                                                          \
+          dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));                                     \
+          dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack);                               \
+          increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<8, true, items_per_thread_val> \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit)          \
+            : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<8, false, items_per_thread_val>                          \
+            <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit);         \
+        } while(0);
+        MAP(CASE_IPT_8, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      }
+      twiddle_idx_start += nsteps;
+    }
+  });
+  // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
+  #undef CASE_IPT_1
+  #undef CASE_IPT_2
+  #undef CASE_IPT_3
+  #undef CASE_IPT_4
+  #undef CASE_IPT_5
+  #undef CASE_IPT_6
+  #undef CASE_IPT_7
+  #undef CASE_IPT_8
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_multiply_untied_forward_max5_fast_cuda_benchmark failed with error code ",
+     cudaGetLastError());
+}
+
+void butterfly_multiply_untied_forward_backward_max5_fast_cuda_benchmark(const at::Tensor &twiddle,
+                                                                         const at::Tensor &input,
+                                                                         const at::Tensor &grad,
+                                                                         at::Tensor& d_twiddle,
+                                                                         at::Tensor& d_input,
+                                                                         bool increasing_stride) {
+  int batch_size = input.size(0);
+  const int nstack = input.size(1);
+  const int n = input.size(2);
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle.size(1) / (2 * log_n);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, 8, increasing_stride);
+  const int niters = bit_milestones.size() - 1;
+  auto intermediate_storage = at::empty({niters - 1, batch_size, nstack, n},
+                                        at::dtype(input.dtype()).device(input.device()));
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_max5_fast_cuda", [&] {
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
+    // Forward pass
+    int twiddle_idx_start = 0;
+    for (int iter = 0; iter < niters - 1; iter++) {
+      const InputReader<scalar_t> input_reader(iter == 0 ? input : intermediate_storage[iter - 1]);
+      OutputWriter<scalar_t> output_writer(intermediate_storage[iter]);
+      const bool increasing_stride_this_iter = bit_milestones[iter] <= bit_milestones[iter + 1];
+      const int start_bit = increasing_stride_this_iter ? bit_milestones[iter] : bit_milestones[iter + 1];
+      const int nsteps = abs(bit_milestones[iter + 1] - bit_milestones[iter]);
+      const int span = 1 << nsteps;
+      const int n_div_span = 1 << (log_n - nsteps);  // = n / span
+      const int block_x = min(span, WARP_SIZE);
+      const int max_block_y = MAX5_FORWARD_BLOCK_SIZE / block_x;
+      dim3 block(block_x, min(max_block_y, div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1])));
+      // grid.x must be at least n / span
+      dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1] * block.y) * n_div_span, 1, nstack);
+      switch (nsteps) {
+        #define CASE_NSTEPS_FORWARD(nsteps_val) case nsteps_val:                                                    \
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, true>     \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit) \
+          : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, false>                              \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, start_bit); break;
+
+        MAP(CASE_NSTEPS_FORWARD, 1, 2, 3, 4, 5, 6, 7)
+      }
+      twiddle_idx_start += nsteps;
+    }
+    // Backward pass
+    twiddle_idx_start = log_n * (nblocks == 0 ? 1 : 2 * nblocks);
+    for (int iter = niters - 1; iter >= 0; iter--) {
+      const InputReader<scalar_t> input_reader(iter == 0 ? input : intermediate_storage[iter - 1]);
+      const InputReader<scalar_t> grad_reader(iter == niters - 1 ? grad : d_input);
+      OutputWriter<scalar_t> d_input_writer(d_input);
+      const bool increasing_stride_this_iter = bit_milestones[iter] <= bit_milestones[iter + 1];
+      const int start_bit = increasing_stride_this_iter ? bit_milestones[iter] : bit_milestones[iter + 1];
+      const int nsteps = abs(bit_milestones[iter + 1] - bit_milestones[iter]);
+      twiddle_idx_start -= nsteps;
+      const int span = 1 << nsteps;
+      const int n_div_span = 1 << (log_n - nsteps);  // = n / span
+      const int block_x = min(span, WARP_SIZE);
+      const int max_block_y = MAX5_BACKWARD_BLOCK_SIZE / block_x;
+      switch (nsteps) {
+      case 1:
+        #define CASE_IPT_1(items_per_thread_val) do {                                          \
+        dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));       \
+        dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack); \
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<1, true, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit)                                  \
+          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<1, false, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit);                                 \
+        } while(0);
+        MAP(CASE_IPT_1, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 2:
+        #define CASE_IPT_2(items_per_thread_val) do {                                          \
+        dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));       \
+        dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack); \
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<2, true, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit)                                  \
+          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<2, false, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit);                                 \
+        } while(0);
+        MAP(CASE_IPT_2, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 3:
+        #define CASE_IPT_3(items_per_thread_val) do {                                          \
+        dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));       \
+        dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack); \
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<3, true, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit)                                  \
+          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<3, false, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit);                                 \
+        } while(0);
+        MAP(CASE_IPT_3, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 4:
+        #define CASE_IPT_4(items_per_thread_val) do {                                          \
+        dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));       \
+        dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack); \
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<4, true, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit)                                  \
+          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<4, false, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit);                                 \
+        } while(0);
+        MAP(CASE_IPT_4, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 5:
+        #define CASE_IPT_5(items_per_thread_val) do {                                          \
+        dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));       \
+        dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack); \
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<5, true, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit)                                  \
+          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<5, false, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit);                                 \
+        } while(0);
+        MAP(CASE_IPT_5, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 6:
+        #define CASE_IPT_6(items_per_thread_val) do {                                          \
+        dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));       \
+        dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack); \
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<6, true, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit)                                  \
+          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<6, false, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit);                                 \
+        } while(0);
+        MAP(CASE_IPT_6, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 7:
+        #define CASE_IPT_7(items_per_thread_val) do {                                          \
+        dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));       \
+        dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack); \
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<7, true, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit)                                  \
+          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<7, false, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit);                                 \
+        } while(0);
+        MAP(CASE_IPT_7, 1, 2, 4, 6, 8, 12, 16)
+        break;
+      case 8:
+        #define CASE_IPT_8(items_per_thread_val) do {                                          \
+        dim3 block(block_x, min(max_block_y, div_up(batch_size, items_per_thread_val)));       \
+        dim3 grid(div_up(batch_size, items_per_thread_val * block.y) * n_div_span, 1, nstack); \
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<8, true, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit)                                  \
+          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<8, false, items_per_thread_val> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,    \
+                                       log_n, twiddle_idx_start, start_bit);                                 \
+        } while(0);
+        MAP(CASE_IPT_8, 1, 2, 3, 4, 6, 8)
+        break;
+      }
+    }
+  });
+  // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
+  #undef CASE_NSTEPS_FORWARD
+  #undef CASE_IPT_1
+  #undef CASE_IPT_2
+  #undef CASE_IPT_3
+  #undef CASE_IPT_4
+  #undef CASE_IPT_5
+  #undef CASE_IPT_6
+  #undef CASE_IPT_7
+  #undef CASE_IPT_8
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_multiply_untied_forward_backward_max5_fast_cuda_benchmark failed with error code ",
+     cudaGetLastError());
+}
+
+#endif // BFLY_MAX5_BENCHMARK

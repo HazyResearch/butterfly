@@ -486,8 +486,9 @@ class ButterflyMultTest(unittest.TestCase):
                                          (batch_size, n), device, complex, increasing_stride))
 
     def test_butterfly_untied_max5_fast(self):
-        # for batch_size, n in [(32768, 32)]:
+        # for batch_size, n in [(2048, 256), (32768, 256)]:
         for batch_size, n in [(2048, 512)]:
+        # for batch_size, n in [(32768, 2), (32768, 4), (32768, 8), (32768, 16), (32668, 32), (2048, 64), (2048, 128), (2048, 256), (2048, 512), (2048, 1024)]:
         # for batch_size, n in [(1, 512)]:
             m = int(math.log2(n))
             nstack = 1
@@ -517,8 +518,6 @@ class ButterflyMultTest(unittest.TestCase):
                         # output_old = butterfly_mult_untied_torch(twiddle, input, increasing_stride, True)[1]
                         self.assertTrue(torch.allclose(output, output_old, rtol=self.rtol, atol=self.atol),
                                         ((output - output_old).abs().max().item(), device, complex, increasing_stride))
-                        if n > 4096:
-                            continue
                         grad = torch.randn_like(output)
                         d_twiddle, d_input = butterfly_multiply_untied_forward_backward_max5_fast(twiddle_fast, input,
                                                                                                   grad, increasing_stride)
@@ -573,6 +572,54 @@ class ButterflyMultTest(unittest.TestCase):
                 grad = torch.randn_like(output)
                 # grad = input.clone()
                 d_twiddle, d_input = butterfly_bbs_multiply_untied_forward_backward_fast(twiddle_fast, input, grad)
+                # d_twiddle, d_input = torch.autograd.grad(output, (twiddle_fast, input), grad, retain_graph=True)
+                d_twiddle_old, d_input_old = torch.autograd.grad(output_old, (twiddle, input), grad, retain_graph=True)
+                self.assertTrue(torch.allclose(d_input, d_input_old, rtol=self.rtol, atol=self.atol),
+                                ((d_input - d_input_old).abs().max().item(), device))
+                d_twiddle_temp = []
+                for i, chunk in enumerate(d_twiddle_old.chunk(nblocks * 2, dim=1)):
+                    chunk_fast = twiddle_normal_to_fast_format(chunk)
+                    if i % 2 == 0:
+                        chunk_fast = chunk_fast.flip(1)
+                    d_twiddle_temp.append(chunk_fast)
+                d_twiddle_old = torch.cat(d_twiddle_temp, dim=1)
+                self.assertTrue(torch.allclose(d_twiddle, d_twiddle_old, rtol=self.rtol * (10 if batch_size > 1024 else 1),
+                                                atol=self.atol * (10 if batch_size > 1024 else 1)),
+                                (((d_twiddle - d_twiddle_old) / d_twiddle_old).abs().max().item(),
+                                    (batch_size, n), device))
+
+
+    def test_butterfly_bbs_untied_max5_fast(self):
+        for batch_size, n in [(2048, 512)]:
+            m = int(math.log2(n))
+            nstack = 1
+            nblocks = 3
+            # for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+            for device in ['cuda']:
+                if batch_size > 1024 and (device == 'cpu'):
+                    continue
+                scaling = 1 / math.sqrt(2)
+                twiddle = torch.randn((nstack, nblocks * 2 * m, n // 2, 2, 2), requires_grad=True, device=device) * scaling
+                # twiddle = torch.arange(16.0, requires_grad=True, device=device).view(nstack, nblocks * 2 * m, n // 2, 2, 2)
+                input = torch.randn((batch_size, nstack, n), requires_grad=True, device=twiddle.device)
+                # input = torch.arange(2.0, requires_grad=True, device=twiddle.device).view(batch_size, nstack, n)
+                twiddle_fast = []
+                for i, chunk in enumerate(twiddle.chunk(nblocks * 2, dim=1)):
+                    chunk_fast = twiddle_normal_to_fast_format(chunk)
+                    if i % 2 == 0:
+                        chunk_fast = chunk_fast.flip(1)
+                    twiddle_fast.append(chunk_fast)
+                twiddle_fast = torch.cat(twiddle_fast, dim=1)
+                output = butterfly_multiply_untied_forward_max5_fast(twiddle_fast, input, False)
+                output_old = input
+                for block in range(nblocks):
+                    output_old = butterfly_mult_untied(twiddle[:, block * 2 * m:(block * 2 + 1) * m], output_old, False)
+                    output_old = butterfly_mult_untied(twiddle[:, (block * 2 + 1) * m:(block + 1) * 2 * m], output_old, True)
+                self.assertTrue(torch.allclose(output, output_old, rtol=self.rtol, atol=self.atol),
+                                ((output - output_old).abs().max().item(), device))
+                grad = torch.randn_like(output)
+                # grad = input.clone()
+                d_twiddle, d_input = butterfly_multiply_untied_forward_backward_max5_fast(twiddle_fast, input, grad, False)
                 # d_twiddle, d_input = torch.autograd.grad(output, (twiddle_fast, input), grad, retain_graph=True)
                 d_twiddle_old, d_input_old = torch.autograd.grad(output_old, (twiddle, input), grad, retain_graph=True)
                 self.assertTrue(torch.allclose(d_input, d_input_old, rtol=self.rtol, atol=self.atol),
