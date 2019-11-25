@@ -22,7 +22,9 @@ from butterfly.butterfly_multiply import butterfly_mult_conv2d_svd_torch, butter
 from factor_multiply import butterfly_multiply_untied_eval
 
 from factor_multiply_fast import butterfly_multiply_untied_forward_fast
+from factor_multiply_fast import butterfly_multiply_untied_forward_max5_fast
 from factor_multiply_fast import butterfly_multiply_untied_forward_backward_fast
+from factor_multiply_fast import butterfly_multiply_untied_forward_backward_max5_fast
 from factor_multiply_fast import butterfly_bbs_multiply_untied_forward_fast
 from factor_multiply_fast import butterfly_bbs_multiply_untied_forward_backward_fast
 from factor_multiply_fast import butterfly_ortho_multiply_untied_forward_fast
@@ -463,6 +465,63 @@ class ButterflyMultTest(unittest.TestCase):
                         grad = torch.randn_like(output)
                         d_twiddle, d_input = butterfly_multiply_untied_forward_backward_fast(twiddle_fast, input,
                                                                                              grad, increasing_stride)
+                        # d_twiddle, d_input = torch.autograd.grad(output, (twiddle_fast, input), grad, retain_graph=True)
+                        d_twiddle_old, d_input_old = torch.autograd.grad(output_old, (twiddle, input), grad, retain_graph=True)
+                        self.assertTrue(torch.allclose(d_input, d_input_old, rtol=self.rtol, atol=self.atol),
+                                        ((d_input - d_input_old).abs().max().item(), device, complex, increasing_stride))
+                        # # if device == 'cuda' and batch_size > 1024 and not complex and increasing_stride:
+                        # #     print((d_twiddle - d_twiddle_torch).abs().mean(dim=(0, 2, 3, 4)))
+                        # #     print(((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().mean(dim=(0, 2, 3, 4)))
+                        # #     i = ((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().argmax()
+                        # #     print(d_twiddle.flatten()[i])
+                        # #     print(d_twiddle_torch.flatten()[i])
+                        # #     print(d_twiddle.flatten()[i-5:i+5])
+                        # #     print(d_twiddle_torch.flatten()[i-5:i+5])
+                        d_twiddle_old = twiddle_normal_to_fast_format(d_twiddle_old)
+                        if not increasing_stride:
+                            d_twiddle_old = d_twiddle_old.flip(1)
+                        self.assertTrue(torch.allclose(d_twiddle, d_twiddle_old, rtol=self.rtol * (10 if batch_size > 1024 else 1),
+                                                       atol=self.atol * (10 if batch_size > 1024 else 1)),
+                                        (((d_twiddle - d_twiddle_old) / d_twiddle_old).abs().max().item(),
+                                         (batch_size, n), device, complex, increasing_stride))
+
+    def test_butterfly_untied_max5_fast(self):
+        # for batch_size, n in [(32768, 32)]:
+        for batch_size, n in [(2048, 512)]:
+        # for batch_size, n in [(1, 512)]:
+            m = int(math.log2(n))
+            nstack = 1
+            # for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+            for device in ['cuda']:
+                # for complex in [False, True]:
+                for complex in [False]:
+                    for increasing_stride in [True, False]:
+                    # for increasing_stride in [True]:
+                        if batch_size > 1024 and (device == 'cpu' or complex):
+                            continue
+                        scaling = 1 / math.sqrt(2) if not complex else 1 / 2
+                        twiddle = torch.randn((nstack, m, n // 2, 2, 2) + (() if not complex else (2, )), requires_grad=True, device=device) * scaling
+                        # twiddle = torch.arange(2 * n, dtype=torch.float, device=device, requires_grad=True).reshape(n // 2, 2, 2).unsqueeze(0).repeat(m, 1, 1, 1).unsqueeze(0)
+                        # twiddle = torch.arange(m * n * 2, dtype=torch.float, device=device, requires_grad=True).reshape(m, n // 2, 2, 2).unsqueeze(0)
+                        twiddle_fast = twiddle_normal_to_fast_format(twiddle)
+                        # twiddle_fast = torch.randn((nstack, m, 2, n), requires_grad=True, device=device) * scaling
+                        if not increasing_stride:
+                            twiddle_fast = twiddle_fast.flip(1)
+                        input = torch.randn((batch_size, nstack, n) + (() if not complex else (2, )), requires_grad=True, device=twiddle.device)
+                        # input = torch.randn((n, batch_size) + (() if not complex else (2, )), requires_grad=True, device=twiddle.device).t().unsqueeze(1)
+                        # input = torch.arange(n, dtype=torch.float, device=device, requires_grad=True).unsqueeze(0).unsqueeze(1).expand(batch_size, -1, -1)
+                        output = butterfly_multiply_untied_forward_max5_fast(twiddle_fast, input, increasing_stride)
+                        # output_reshape = output.reshape(batch_size * 16, 1, 32)
+                        # output_old = butterfly_mult_untied_torch(twiddle, input, increasing_stride)
+                        output_old = butterfly_mult_untied(twiddle, input, increasing_stride)
+                        # output_old = butterfly_mult_untied_torch(twiddle, input, increasing_stride, True)[1]
+                        self.assertTrue(torch.allclose(output, output_old, rtol=self.rtol, atol=self.atol),
+                                        ((output - output_old).abs().max().item(), device, complex, increasing_stride))
+                        if n > 4096:
+                            continue
+                        grad = torch.randn_like(output)
+                        d_twiddle, d_input = butterfly_multiply_untied_forward_backward_max5_fast(twiddle_fast, input,
+                                                                                                  grad, increasing_stride)
                         # d_twiddle, d_input = torch.autograd.grad(output, (twiddle_fast, input), grad, retain_graph=True)
                         d_twiddle_old, d_input_old = torch.autograd.grad(output_old, (twiddle, input), grad, retain_graph=True)
                         self.assertTrue(torch.allclose(d_input, d_input_old, rtol=self.rtol, atol=self.atol),

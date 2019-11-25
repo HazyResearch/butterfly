@@ -169,7 +169,7 @@ def butterfly_mult_untied_torch(twiddle, input, increasing_stride=True, return_i
 class ButterflyMultUntied(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, twiddle, input, increasing_stride=True, is_training=True, fast=True):
+    def forward(ctx, twiddle, input, increasing_stride=True, is_training=True, fast=False):
         """
         Parameters:
             twiddle: (nstack, log n, n / 2, 2, 2) if real or (nstack, log n, n / 2, 2, 2, 2) if complex
