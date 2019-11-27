@@ -93,11 +93,6 @@ __host__ __device__ static inline int delete_bit(int x, unsigned char position) 
   // return ((x >> (position + 1)) << position) + (x & ((1 << position) - 1));
 }
 
-// Check if the bit at position @position in the binary representation of x is set
-__host__ __device__ static inline bool is_bit_set(int x, unsigned char position) {
-  return ((x >> position) & 1) != 0;
-}
-
 template <typename scalar_t>
 static __device__  __forceinline__
 void atomicAdd(thrust::complex<scalar_t> *address,
@@ -460,16 +455,18 @@ __global__ void butterfly_multiply_untied_forward_max5_fast_cuda_kernel(const Cu
   const int input_idx = high_bits | (t_idx << input_idx_start_bit) | low_bits;
   const int input_idx_stride = (1 << input_idx_start_bit) * warpSize;
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
-  for (int t = threadIdx.y; t < mult_per_warp * nsteps; t += blockDim.y) {
-    const int twiddle_offset = t / mult_per_warp;
-    const int mult = t % mult_per_warp;
-    const int input_idx_bit = input_idx_start_bit + (increasing_stride ? twiddle_offset : nsteps - 1 - twiddle_offset);
-    const int twiddle_idx = twiddle_idx_start + twiddle_offset;
-    int idx = mult * input_idx_stride + input_idx;
-    bool is_idx_bit_set = is_bit_set(idx, input_idx_bit);
-    int idx_access = delete_bit(idx, input_idx_bit);
-    s_twiddle[twiddle_offset][0][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][is_idx_bit_set];
-    s_twiddle[twiddle_offset][1][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][!is_idx_bit_set];
+  for (int t = threadIdx.x + threadIdx.y * blockDim.x; t < nsteps * (span / 2); t += blockDim.x * blockDim.y) {
+    const int step = t / (span / 2);
+    const int twiddle_idx = twiddle_idx_start + step;
+    const int s_twiddle_stride = 1 << (increasing_stride ? step : nsteps - 1 - step);
+    const int remainder = t % (span / 2);
+    const int low_order_bits = remainder & (s_twiddle_stride - 1);
+    const int s_idx = 2 * (remainder - low_order_bits) + low_order_bits;
+    const int idx = (high_bits >> 1) | (remainder << input_idx_start_bit) | low_bits;
+    s_twiddle[step][0][s_idx] = twiddle_a[s][twiddle_idx][idx][0][0];
+    s_twiddle[step][1][s_idx] = twiddle_a[s][twiddle_idx][idx][0][1];
+    s_twiddle[step][1][s_idx + s_twiddle_stride] = twiddle_a[s][twiddle_idx][idx][1][0];
+    s_twiddle[step][0][s_idx + s_twiddle_stride] = twiddle_a[s][twiddle_idx][idx][1][1];
   }
   input_reader.load_max5<items_per_thread, mult_per_warp>(input_val, batch_idx, input_idx, input_idx_stride);
   __syncthreads();
@@ -869,19 +866,22 @@ __global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel
   const int input_idx = high_bits | (t_idx << input_idx_start_bit) | low_bits;
   const int input_idx_stride = (1 << input_idx_start_bit) * warpSize;
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
-  // for (int twiddle_offset = threadIdx.y; twiddle_offset < nsteps; twiddle_offset += blockDim.y) {
-  for (int t = threadIdx.y; t < mult_per_warp * nsteps; t += blockDim.y) {
-    const int twiddle_offset = t / mult_per_warp;
-    const int mult = t % mult_per_warp;
-    const int input_idx_bit = input_idx_start_bit + (increasing_stride ? twiddle_offset : nsteps - 1 - twiddle_offset);
-    const int twiddle_idx = twiddle_idx_start + twiddle_offset;
-    int idx = mult * input_idx_stride + input_idx;
-    bool is_idx_bit_set = is_bit_set(idx, input_idx_bit);
-    int idx_access = delete_bit(idx, input_idx_bit);
-    s_twiddle[twiddle_offset][0][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][is_idx_bit_set];
-    s_twiddle[twiddle_offset][1][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][!is_idx_bit_set];
-    s_d_twiddle[twiddle_offset][0][mult * warpSize + t_idx] = 0;
-    s_d_twiddle[twiddle_offset][1][mult * warpSize + t_idx] = 0;
+  for (int t = threadIdx.x + threadIdx.y * blockDim.x; t < nsteps * (span / 2); t += blockDim.x * blockDim.y) {
+    const int step = t / (span / 2);
+    const int twiddle_idx = twiddle_idx_start + step;
+    const int s_twiddle_stride = 1 << (increasing_stride ? step : nsteps - 1 - step);
+    const int remainder = t % (span / 2);
+    const int low_order_bits = remainder & (s_twiddle_stride - 1);
+    const int s_idx = 2 * (remainder - low_order_bits) + low_order_bits;
+    const int idx = (high_bits >> 1) | (remainder << input_idx_start_bit) | low_bits;
+    s_twiddle[step][0][s_idx] = twiddle_a[s][twiddle_idx][idx][0][0];
+    s_twiddle[step][1][s_idx] = twiddle_a[s][twiddle_idx][idx][0][1];
+    s_twiddle[step][1][s_idx + s_twiddle_stride] = twiddle_a[s][twiddle_idx][idx][1][0];
+    s_twiddle[step][0][s_idx + s_twiddle_stride] = twiddle_a[s][twiddle_idx][idx][1][1];
+    s_d_twiddle[step][0][s_idx] = 0;
+    s_d_twiddle[step][1][s_idx] = 0;
+    s_d_twiddle[step][1][s_idx + s_twiddle_stride] = 0;
+    s_d_twiddle[step][0][s_idx + s_twiddle_stride] = 0;
   }
   input_reader.load_max5<items_per_thread, mult_per_warp>(input_val[0], batch_idx, input_idx, input_idx_stride);
   __syncthreads();
@@ -890,16 +890,18 @@ __global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel
     (s_twiddle, s_d_twiddle, input_val, grad_val, t_idx);
   d_input_writer.save_max5<items_per_thread, mult_per_warp>(grad_val, batch_idx, input_idx, input_idx_stride);
   __syncthreads();
-  for (int t = threadIdx.y; t < mult_per_warp * nsteps; t += blockDim.y) {
-    const int twiddle_offset = t / mult_per_warp;
-    const int mult = t % mult_per_warp;
-    const int input_idx_bit = input_idx_start_bit + (increasing_stride ? twiddle_offset : nsteps - 1 - twiddle_offset);
-    const int twiddle_idx = twiddle_idx_start + twiddle_offset;
-    int idx = mult * input_idx_stride + input_idx;
-    bool is_idx_bit_set = is_bit_set(idx, input_idx_bit);
-    int idx_access = delete_bit(idx, input_idx_bit);
-    atomicAdd(&d_twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][is_idx_bit_set], s_d_twiddle[twiddle_offset][0][mult * warpSize + t_idx]);
-    atomicAdd(&d_twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][!is_idx_bit_set], s_d_twiddle[twiddle_offset][1][mult * warpSize + t_idx]);
+  for (int t = threadIdx.x + threadIdx.y * blockDim.x; t < nsteps * (span / 2); t += blockDim.x * blockDim.y) {
+    const int step = t / (span / 2);
+    const int twiddle_idx = twiddle_idx_start + step;
+    const int s_twiddle_stride = 1 << (increasing_stride ? step : nsteps - 1 - step);
+    const int remainder = t % (span / 2);
+    const int low_order_bits = remainder & (s_twiddle_stride - 1);
+    const int s_idx = 2 * (remainder - low_order_bits) + low_order_bits;
+    const int idx = (high_bits >> 1) | (remainder << input_idx_start_bit) | low_bits;
+    atomicAdd(&d_twiddle_a[s][twiddle_idx][idx][0][0], s_d_twiddle[step][0][s_idx]);
+    atomicAdd(&d_twiddle_a[s][twiddle_idx][idx][0][1], s_d_twiddle[step][1][s_idx]);
+    atomicAdd(&d_twiddle_a[s][twiddle_idx][idx][1][0], s_d_twiddle[step][1][s_idx + s_twiddle_stride]);
+    atomicAdd(&d_twiddle_a[s][twiddle_idx][idx][1][1], s_d_twiddle[step][0][s_idx + s_twiddle_stride]);
   }
 }
 
