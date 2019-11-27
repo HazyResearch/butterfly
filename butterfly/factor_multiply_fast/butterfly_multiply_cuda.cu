@@ -86,6 +86,18 @@ __host__ __device__ static inline int div_up(int a, int b) {
   return (a + b - 1) / b;
 }
 
+// Delete the bit at position @position in the binary representation of x
+__host__ __device__ static inline int delete_bit(int x, unsigned char position) {
+  int mask = (1 << position) - 1;
+  return ((x >> 1) & ~mask) | (x & mask);
+  // return ((x >> (position + 1)) << position) + (x & ((1 << position) - 1));
+}
+
+// Check if the bit at position @position in the binary representation of x is set
+__host__ __device__ static inline bool is_bit_set(int x, unsigned char position) {
+  return ((x >> position) & 1) != 0;
+}
+
 template <typename scalar_t>
 static __device__  __forceinline__
 void atomicAdd(thrust::complex<scalar_t> *address,
@@ -429,7 +441,7 @@ template <int nsteps, bool increasing_stride,
             int min_blocks_per_mp=MIN_BLOCKS_PER_MP_FORWARD[nsteps - 1],
             typename scalar_t>
 C10_LAUNCH_BOUNDS_2(MAX5_FORWARD_BLOCK_SIZE, min_blocks_per_mp)
-__global__ void butterfly_multiply_untied_forward_max5_fast_cuda_kernel(const CudaAcsr<scalar_t, 4> twiddle_a,
+__global__ void butterfly_multiply_untied_forward_max5_fast_cuda_kernel(const CudaAcsr<scalar_t, 5> twiddle_a,
                                                                         InputReader<scalar_t> input_reader,
                                                                         OutputWriter<scalar_t> output_writer,
                                                                         int log_n,
@@ -448,16 +460,16 @@ __global__ void butterfly_multiply_untied_forward_max5_fast_cuda_kernel(const Cu
   const int input_idx = high_bits | (t_idx << input_idx_start_bit) | low_bits;
   const int input_idx_stride = (1 << input_idx_start_bit) * warpSize;
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
-  for (int twiddle_offset = threadIdx.y; twiddle_offset < nsteps; twiddle_offset += blockDim.y) {
-  // for (int t = threadIdx.y; t < mult_per_warp * nsteps; t += blockDim.y) {
-  //   const int twiddle_offset = t / mult_per_warp;
-  //   const int mult = t % mult_per_warp;
+  for (int t = threadIdx.y; t < mult_per_warp * nsteps; t += blockDim.y) {
+    const int twiddle_offset = t / mult_per_warp;
+    const int mult = t % mult_per_warp;
+    const int input_idx_bit = input_idx_start_bit + (increasing_stride ? twiddle_offset : nsteps - 1 - twiddle_offset);
     const int twiddle_idx = twiddle_idx_start + twiddle_offset;
-    #pragma unroll
-    for (int mult = 0; mult < mult_per_warp; mult++) {
-      s_twiddle[twiddle_offset][0][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][0][mult * input_idx_stride + input_idx];
-      s_twiddle[twiddle_offset][1][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][1][mult * input_idx_stride + input_idx];
-    }
+    int idx = mult * input_idx_stride + input_idx;
+    bool is_idx_bit_set = is_bit_set(idx, input_idx_bit);
+    int idx_access = delete_bit(idx, input_idx_bit);
+    s_twiddle[twiddle_offset][0][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][is_idx_bit_set];
+    s_twiddle[twiddle_offset][1][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][!is_idx_bit_set];
   }
   input_reader.load_max5<items_per_thread, mult_per_warp>(input_val, batch_idx, input_idx, input_idx_stride);
   __syncthreads();
@@ -518,7 +530,7 @@ void butterfly_multiply_untied_forward_max5_fast_cuda(const at::Tensor &twiddle,
   const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, 9, increasing_stride);
   const int niters = bit_milestones.size() - 1;
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_max5_fast_cuda", [&] {
-    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
     int twiddle_idx_start = 0;
     for (int iter = 0; iter < niters; iter++) {
       const InputReader<scalar_t> input_reader(iter == 0 ? input : output);
@@ -834,10 +846,10 @@ template <int nsteps, bool increasing_stride,
             int min_blocks_per_mp=MIN_BLOCKS_PER_MP_BACKWARD[nsteps - 1],
             typename scalar_t, typename accscalar_t=at::acc_type<scalar_t, true>>
 C10_LAUNCH_BOUNDS_2(MAX5_BACKWARD_BLOCK_SIZE, min_blocks_per_mp)
-__global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel(const CudaAcsr<scalar_t, 4> twiddle_a,
+__global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel(const CudaAcsr<scalar_t, 5> twiddle_a,
                                                                                  InputReader<scalar_t> input_reader,
                                                                                  InputReader<scalar_t> grad_reader,
-                                                                                 CudaAcsr<scalar_t, 4> d_twiddle_a,
+                                                                                 CudaAcsr<scalar_t, 5> d_twiddle_a,
                                                                                  OutputWriter<scalar_t> d_input_writer,
                                                                                  int log_n,
                                                                                  int twiddle_idx_start,
@@ -857,18 +869,19 @@ __global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel
   const int input_idx = high_bits | (t_idx << input_idx_start_bit) | low_bits;
   const int input_idx_stride = (1 << input_idx_start_bit) * warpSize;
   const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
-  for (int twiddle_offset = threadIdx.y; twiddle_offset < nsteps; twiddle_offset += blockDim.y) {
-  // for (int t = threadIdx.y; t < mult_per_warp * nsteps; t += blockDim.y) {
-    // const int twiddle_offset = t / mult_per_warp;
-    // const int mult = t % mult_per_warp;
+  // for (int twiddle_offset = threadIdx.y; twiddle_offset < nsteps; twiddle_offset += blockDim.y) {
+  for (int t = threadIdx.y; t < mult_per_warp * nsteps; t += blockDim.y) {
+    const int twiddle_offset = t / mult_per_warp;
+    const int mult = t % mult_per_warp;
+    const int input_idx_bit = input_idx_start_bit + (increasing_stride ? twiddle_offset : nsteps - 1 - twiddle_offset);
     const int twiddle_idx = twiddle_idx_start + twiddle_offset;
-    #pragma unroll
-    for (int mult = 0; mult < mult_per_warp; mult++) {
-      s_twiddle[twiddle_offset][0][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][0][mult * input_idx_stride + input_idx];
-      s_twiddle[twiddle_offset][1][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][1][mult * input_idx_stride + input_idx];
-      s_d_twiddle[twiddle_offset][0][mult * warpSize + t_idx] = 0;
-      s_d_twiddle[twiddle_offset][1][mult * warpSize + t_idx] = 0;
-    }
+    int idx = mult * input_idx_stride + input_idx;
+    bool is_idx_bit_set = is_bit_set(idx, input_idx_bit);
+    int idx_access = delete_bit(idx, input_idx_bit);
+    s_twiddle[twiddle_offset][0][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][is_idx_bit_set];
+    s_twiddle[twiddle_offset][1][mult * warpSize + t_idx] = twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][!is_idx_bit_set];
+    s_d_twiddle[twiddle_offset][0][mult * warpSize + t_idx] = 0;
+    s_d_twiddle[twiddle_offset][1][mult * warpSize + t_idx] = 0;
   }
   input_reader.load_max5<items_per_thread, mult_per_warp>(input_val[0], batch_idx, input_idx, input_idx_stride);
   __syncthreads();
@@ -877,16 +890,16 @@ __global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel
     (s_twiddle, s_d_twiddle, input_val, grad_val, t_idx);
   d_input_writer.save_max5<items_per_thread, mult_per_warp>(grad_val, batch_idx, input_idx, input_idx_stride);
   __syncthreads();
-  for (int twiddle_offset = threadIdx.y; twiddle_offset < nsteps; twiddle_offset += blockDim.y) {
-  // for (int t = threadIdx.y; t < mult_per_warp * nsteps; t += blockDim.y) {
-  //   const int twiddle_offset = t / mult_per_warp;
-  //   const int mult = t % mult_per_warp;
+  for (int t = threadIdx.y; t < mult_per_warp * nsteps; t += blockDim.y) {
+    const int twiddle_offset = t / mult_per_warp;
+    const int mult = t % mult_per_warp;
+    const int input_idx_bit = input_idx_start_bit + (increasing_stride ? twiddle_offset : nsteps - 1 - twiddle_offset);
     const int twiddle_idx = twiddle_idx_start + twiddle_offset;
-    #pragma unroll
-    for (int mult = 0; mult < mult_per_warp; mult++) {
-      atomicAdd(&d_twiddle_a[s][twiddle_idx][0][mult * input_idx_stride + input_idx], s_d_twiddle[twiddle_offset][0][mult * warpSize + t_idx]);
-      atomicAdd(&d_twiddle_a[s][twiddle_idx][1][mult * input_idx_stride + input_idx], s_d_twiddle[twiddle_offset][1][mult * warpSize + t_idx]);
-    }
+    int idx = mult * input_idx_stride + input_idx;
+    bool is_idx_bit_set = is_bit_set(idx, input_idx_bit);
+    int idx_access = delete_bit(idx, input_idx_bit);
+    atomicAdd(&d_twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][is_idx_bit_set], s_d_twiddle[twiddle_offset][0][mult * warpSize + t_idx]);
+    atomicAdd(&d_twiddle_a[s][twiddle_idx][idx_access][is_idx_bit_set][!is_idx_bit_set], s_d_twiddle[twiddle_offset][1][mult * warpSize + t_idx]);
   }
 }
 
@@ -907,8 +920,8 @@ void butterfly_multiply_untied_forward_backward_max5_fast_cuda(const at::Tensor 
   auto intermediate_storage = at::empty({niters - 1, batch_size, nstack, n},
                                         at::dtype(input.dtype()).device(input.device()));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_max5_fast_cuda", [&] {
-    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
-    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
     // Forward pass
     int twiddle_idx_start = 0;
     for (int iter = 0; iter < niters - 1; iter++) {
@@ -2137,7 +2150,7 @@ void butterfly_multiply_untied_forward_max5_fast_cuda_benchmark(const at::Tensor
   const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, 8, increasing_stride);
   const int niters = bit_milestones.size() - 1;
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_max5_fast_cuda_benchmark", [&] {
-    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
     int twiddle_idx_start = 0;
     for (int iter = 0; iter < niters; iter++) {
       const InputReader<scalar_t> input_reader(iter == 0 ? input : output);
@@ -2273,8 +2286,8 @@ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_benchmark(const a
   auto intermediate_storage = at::empty({niters - 1, batch_size, nstack, n},
                                         at::dtype(input.dtype()).device(input.device()));
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_max5_fast_cuda", [&] {
-    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
-    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>();
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 5, at::RestrictPtrTraits>();
     // Forward pass
     int twiddle_idx_start = 0;
     for (int iter = 0; iter < niters - 1; iter++) {
