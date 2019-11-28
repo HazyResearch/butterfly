@@ -5,7 +5,7 @@ sys.path.insert(0, project_root)
 import torch
 
 from butterfly import Butterfly
-from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_factors, butterfly_mult_inplace
+from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_factors
 from factor_multiply import butterfly_multiply_untied, butterfly_multiply_untied_eval
 
 # single threaded inference

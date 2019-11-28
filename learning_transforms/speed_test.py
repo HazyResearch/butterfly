@@ -13,7 +13,6 @@ from butterfly import Block2x2DiagProduct, BlockPermProduct
 from inference import Block2x2DiagProduct_to_ABCDs, BP_mul_cy_inplace
 
 from test_factor_multiply import twiddle_list_concat
-from factor_multiply import butterfly_multiply_inplace
 
 # We limit to 1 thread for reliable speed test
 os.environ['MKL_NUM_THREADS'] = '1'
@@ -30,7 +29,6 @@ scipyfft_times = np.zeros(exps.size)
 dct_times = np.zeros(exps.size)
 dst_times = np.zeros(exps.size)
 bp_times = np.zeros(exps.size)
-bp_all_times = np.zeros(exps.size)
 for idx_n, (n, ntrial) in enumerate(zip(sizes, ntrials)):
     print(n)
     x = np.random.random(n).astype(np.float32)
@@ -78,33 +76,16 @@ for idx_n, (n, ntrial) in enumerate(zip(sizes, ntrials)):
     end = timer()
     bp_times[idx_n] = (end-start) / ntrial
 
-    # BP_inplace_all
-    twiddles = twiddle_list_concat(B)
-    x_torch = torch.tensor(x).unsqueeze(0)
-    # perm_torch = torch.tensor(perm)
-    start = timer()
-    [butterfly_multiply_inplace(twiddles, x_torch) for _ in range(ntrial)]
-    end = timer()
-    bp_all_times[idx_n] = (end-start) / ntrial
-
 print(dense_times)
 print(fft_times)
 print(scipyfft_times)
 print(dct_times)
 print(dst_times)
 print(bp_times)
-print(bp_all_times)
 
 # print(bp_times / fft_times)
 # print(bp_times / dct_times)
 # print(bp_times / dst_times)
-# print(bp_times / bp_all_times)
-
-print(bp_all_times / fft_times)
-print(bp_all_times / dct_times)
-print(bp_all_times / dst_times)
-print(bp_all_times / bp_times)
-
 
 # plt.figure()
 # plt.semilogy(sizes, dense_times / fft_times, label='FFT')

@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from butterfly_factor import butterfly_factor_mult, butterfly_factor_mult_inplace, butterfly_factor_mult_intermediate
+from butterfly_factor import butterfly_factor_mult, butterfly_factor_mult_intermediate
 from butterfly import Block2x2DiagProduct
 from complex_utils import complex_mul
 
@@ -76,63 +76,6 @@ class ButterflyFactorTest(unittest.TestCase):
             d_twiddle_slow, d_input_slow = torch.autograd.grad(output_slow, (factor.ABCD, prev), grad, retain_graph=True)
             self.assertTrue(torch.allclose(d_twiddle, d_twiddle_slow, rtol=self.rtol, atol=self.atol), (factor.size, (d_twiddle - d_twiddle_slow).abs().max().item()))
             self.assertTrue(torch.allclose(d_input, d_input_slow, rtol=self.rtol, atol=self.atol), (d_input - d_input_slow).abs().max().item())
-
-    # @unittest.skip('Not numerically stable if twiddle factors aren't orthogonal')
-    def test_butterfly_factor_inplace_cpu(self):
-        batch_size = 10
-        n = 4096
-        B = Block2x2DiagProduct(n, ortho_init=True)
-        input_ = torch.randn(batch_size, n, requires_grad=True)
-        twiddle = twiddle_list_concat(B)
-        output_inplace = butterfly_factor_mult_inplace(twiddle, input_)
-        output = B(input_)
-        self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
-        grad = torch.randn_like(output)
-        d_twiddle_inplace, d_input_inplace = torch.autograd.grad(output_inplace, (twiddle, input_), grad, retain_graph=True)
-        output.backward(grad, retain_graph=True)
-        d_input = input_.grad
-        d_twiddle = torch.cat([factor.ABCD.grad.permute(2, 0, 1) for factor in B.factors[::-1]])
-        self.assertTrue(torch.allclose(d_input_inplace, d_input, rtol=self.rtol, atol=self.atol), (d_input_inplace - d_input).abs().max().item())
-        self.assertTrue(torch.allclose(d_twiddle_inplace, d_twiddle, rtol=self.rtol, atol=self.atol), (d_twiddle_inplace - d_twiddle).abs().max().item())
-        # print((d_twiddle_inplace - d_twiddle) / d_twiddle)
-        # output = input_
-        # for factor in B.factors[::-1]:
-        #     prev = output
-        #     output = butterfly_factor_mult(factor.ABCD, output.view(-1, 2, factor.size // 2)).view(prev.shape)
-        #     d_twiddle, d_input = torch.autograd.grad(output, (factor.ABCD, prev), grad, retain_graph=True)
-        # self.assertTrue(torch.allclose(d_twiddle_inplace, d_twiddle, rtol=self.rtol, atol=self.atol), (factor.size, (d_twiddle - d_twiddle_slow).abs().max().item()))
-
-    def test_butterfly_factor_complex_inplace_cpu(self):
-        batch_size = 10
-        n = 4096
-        B = Block2x2DiagProduct(n, complex=True)
-        input_ = torch.randn(batch_size, n, 2, requires_grad=True)
-        twiddle = twiddle_list_concat(B)
-        output_inplace = butterfly_factor_mult_inplace(twiddle, input_)
-        output = B(input_)
-        self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
-
-    # @unittest.skip('Not numerically stable if twiddle factors aren't orthogonal')
-    @unittest.skipIf(not torch.cuda.is_available(), "need CUDA")
-    def test_butterfly_factor_inplace_cuda(self):
-        batch_size = 10
-        n = 4096
-        B = Block2x2DiagProduct(n, ortho_init=True).to('cuda')
-        input_ = torch.randn(batch_size, n, device='cuda', requires_grad=True)
-        twiddle = twiddle_list_concat(B)
-        output_inplace = butterfly_factor_mult_inplace(twiddle, input_)
-        output = B(input_)
-        self.assertTrue(torch.allclose(output_inplace, output, rtol=self.rtol, atol=self.atol), (output_inplace - output).abs().max().item())
-        grad = torch.randn_like(output)
-        d_twiddle_inplace, d_input_inplace = torch.autograd.grad(output_inplace, (twiddle, input_), grad, retain_graph=True)
-        output.backward(grad, retain_graph=True)
-        d_input = input_.grad
-        d_twiddle = torch.cat([factor.ABCD.grad.permute(2, 0, 1) for factor in B.factors[::-1]])
-        self.assertTrue(torch.allclose(d_input_inplace, d_input, rtol=self.rtol, atol=self.atol), (d_input_inplace - d_input).abs().max().item())
-        self.assertTrue(torch.allclose(d_twiddle_inplace, d_twiddle, rtol=self.rtol, atol=self.atol), (d_twiddle_inplace - d_twiddle).abs().max().item())
-        # print((d_twiddle_inplace - d_twiddle) / d_twiddle)
-        # print(d_twiddle)
-        # print(d_twiddle_inplace)
 
     def test_butterfly_factor_intermediate_cpu(self):
         batch_size = 10

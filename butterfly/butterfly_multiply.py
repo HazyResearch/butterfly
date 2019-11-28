@@ -15,7 +15,6 @@ try:
     from factor_multiply import butterfly_ortho_multiply_untied, butterfly_ortho_multiply_untied_backward
     from factor_multiply import bbt_multiply_untied, bbt_multiply_untied_forward_backward
     from factor_multiply import bbt_ortho_multiply_untied, bbt_ortho_multiply_untied_backward
-    from factor_multiply import butterfly_multiply_inplace, butterfly_multiply_inplace_backward
     from factor_multiply import butterfly_factor_multiply, butterfly_factor_multiply_backward
     from factor_multiply import butterfly_conv2d, butterfly_conv2d_backward, butterfly_conv2d_forward_backward
     from factor_multiply import bbt_conv2d, bbt_conv2d_forward_backward
@@ -487,36 +486,6 @@ class ODOMultUntied(torch.autograd.Function):
         return d_coefficients, d_diag, d_input
 
 odo_mult_untied = ODOMultUntied.apply
-
-
-class ButterflyMultInplace(torch.autograd.Function):
-
-    @staticmethod
-    def forward(ctx, twiddle, input, increasing_stride=True):
-        """Experimental in-place implementation that does not store intermediate results.
-        Instead, the intermediate results are computed from the output during the backward pass.
-        Parameters:
-            twiddle: (n - 1, 2, 2) if real or (n - 1, 2, 2, 2) if complex
-            input: (batch_size, n) if real or (batch_size, n, 2) if complex
-            increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
-                decreasing stride (e.g., n/2, n/4, ..., 1).
-                Note that this only changes the order of multiplication, not how twiddle is stored.
-                In other words, twiddle[@log_stride] always stores the twiddle for @stride.
-        Returns:
-            output: (batch_size, n) if real or (batch_size, n, 2) if complex
-        """
-        assert increasing_stride, 'Decreasing stride not implemented'
-        output = butterfly_multiply_inplace(twiddle, input)
-        ctx.save_for_backward(twiddle, output)
-        return output
-
-    @staticmethod
-    def backward(ctx, grad):
-        twiddle, output = ctx.saved_tensors
-        d_coefficients, d_input = butterfly_multiply_inplace_backward(grad, twiddle, output)
-        return d_coefficients, d_input
-
-butterfly_mult_inplace = ButterflyMultInplace.apply
 
 
 def butterfly_mult_conv2d_torch(twiddle, input, kernel_size, padding, increasing_stride=True, return_intermediates=False):

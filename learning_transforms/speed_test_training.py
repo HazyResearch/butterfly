@@ -5,10 +5,10 @@ import numpy as np
 import torch
 from torch import nn
 
-from butterfly_factor import butterfly_factor_mult_inplace, butterfly_factor_mult_intermediate
-from butterfly import Block2x2DiagProduct
+from butterfly_factor import butterfly_factor_mult_intermediate
+# from butterfly import Block2x2DiagProduct
 
-from test_factor_multiply import twiddle_list_concat
+# from test_factor_multiply import twiddle_list_concat
 
 exps = np.arange(6, 14)
 sizes = 1 << exps
@@ -22,11 +22,11 @@ fft_times = np.zeros(exps.size)
 butterfly_times = np.zeros(exps.size)
 for idx_n, (n, ntrial) in enumerate(zip(sizes, ntrials)):
     print(n)
-    B = Block2x2DiagProduct(n).to('cuda')
+    # B = Block2x2DiagProduct(n).to('cuda')
     L = torch.nn.Linear(n, n, bias=False).to('cuda')
     x = torch.randn(batch_size, n, requires_grad=True).to('cuda')
     grad = torch.randn_like(x)
-    twiddle = twiddle_list_concat(B)
+    # twiddle = twiddle_list_concat(B)
 
     # Dense multiply
     output = L(x)  # Do it once to initialize cuBlas handle and such

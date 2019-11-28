@@ -5,7 +5,7 @@ sys.path.insert(0, project_root)
 import torch
 
 from butterfly import Butterfly
-from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_factors, butterfly_mult_inplace, bbt_mult_untied, bbt_ortho_mult_untied
+from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_factors, bbt_mult_untied, bbt_ortho_mult_untied
 
 batch_size = 2048
 n = 512
@@ -48,28 +48,6 @@ torch.cuda.synchronize()
 end = time.perf_counter()
 print(f'Butterfly mult factors together: {end - start}s')
 
-torch.cuda.synchronize()
-start = time.perf_counter()
-for _ in range(nsteps):
-    output = butterfly_mult_inplace(twiddle.squeeze(0), x)
-torch.cuda.synchronize()
-end = time.perf_counter()
-print(f'Butterfly mult in-place forward: {end - start}s')
-torch.cuda.synchronize()
-start = time.perf_counter()
-for _ in range(nsteps):
-    torch.autograd.grad(output, (twiddle, x), grad, retain_graph=True)
-torch.cuda.synchronize()
-end = time.perf_counter()
-print(f'Butterfly mult in-place backward: {end - start}s')
-torch.cuda.synchronize()
-start = time.perf_counter()
-for _ in range(nsteps):
-    output = butterfly_mult_inplace(twiddle.squeeze(0), x)
-    torch.autograd.grad(output, (twiddle, x), grad)
-torch.cuda.synchronize()
-end = time.perf_counter()
-print(f'Butterfly mult in-place together: {end - start}s')
 
 torch.cuda.synchronize()
 start = time.perf_counter()
@@ -202,9 +180,8 @@ print(f'CuFFT together: {end - start}s')
 # # output.backward(gradient=grad)
 # output = L(x)
 # output.backward(gradient=grad)
-# # output = torch.rfft(x, 1)
-# # output = butterfly_mult_inplace(twiddle.squeeze(0), x)
-# # output.backward(gradient=grad)
+# output = torch.rfft(x, 1)
+# torch.autograd.grad(output, (x,), torch.rand_like(output), retain_graph=True)
 # output = butterfly_mult(twiddle, x.unsqueeze(1))
 # torch.autograd.grad(output, (twiddle, x), grad.unsqueeze(1), retain_graph=True)
 # output = butterfly_mult_untied(twiddle_untied, x.unsqueeze(1))

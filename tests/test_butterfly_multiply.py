@@ -9,7 +9,7 @@ import torch
 from butterfly import Butterfly
 from butterfly.utils import twiddle_normal_to_fast_format
 
-from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_inplace, butterfly_mult_factors
+from butterfly.butterfly_multiply import butterfly_mult_torch, butterfly_mult, butterfly_mult_factors
 from butterfly.butterfly_multiply import butterfly_mult_untied_torch, butterfly_mult_untied
 from butterfly.butterfly_multiply import butterfly_ortho_mult_tied_torch, butterfly_ortho_mult_tied
 from butterfly.butterfly_multiply import butterfly_ortho_mult_untied_torch, butterfly_ortho_mult_untied
@@ -224,65 +224,6 @@ class ButterflyMultTest(unittest.TestCase):
                                                 atol=self.atol * (10 if batch_size > 1024 else 1)),
                                     (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(),
                                      (batch_size, n), nblocks, device))
-
-    # @unittest.skip("Not numerically stable if twiddle factors aren't orthogonal")
-    def test_butterfly_inplace_cpu(self):
-        batch_size = 10
-        n = 4096
-        # TODO: in-place implementation doesn't support nstack for now
-        nstack = 1
-        b = Butterfly(n, n, bias=False, ortho_init=True)
-        twiddle = b.twiddle
-        input = torch.randn(batch_size, nstack, n, requires_grad=True)
-        output_inplace = butterfly_mult_inplace(twiddle.squeeze(0), input.squeeze(1))
-        output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
-        self.assertTrue(torch.allclose(output_inplace, output_torch, rtol=self.rtol, atol=self.atol),
-                        (output_inplace - output_torch).abs().max().item())
-        grad = torch.randn_like(output_torch)
-        d_twiddle_inplace, d_input_inplace = torch.autograd.grad(output_inplace, (twiddle, input), grad, retain_graph=True)
-        d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
-        self.assertTrue(torch.allclose(d_input_inplace, d_input_torch, rtol=self.rtol, atol=self.atol),
-                        (d_input_inplace - d_input_torch).abs().max().item())
-        # print((d_twiddle_inplace - d_twiddle_torch) / d_twiddle_torch)
-        self.assertTrue(torch.allclose(d_twiddle_inplace, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
-                        ((d_twiddle_inplace - d_twiddle_torch) / d_twiddle_torch).abs().max().item())
-
-    # @unittest.skip("Not numerically stable if twiddle factors aren't orthogonal")
-    def test_butterfly_complex_inplace_cpu(self):
-        batch_size = 10
-        n = 4096
-        # TODO: in-place implementation doesn't support nstack for now
-        nstack = 1
-        b = Butterfly(n, n, bias=False, complex=True, ortho_init=True)
-        twiddle = b.twiddle
-        input = torch.randn(batch_size, nstack, n, 2, requires_grad=True)
-        output_inplace = butterfly_mult_inplace(twiddle.squeeze(0), input.squeeze(1))
-        output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
-        self.assertTrue(torch.allclose(output_inplace, output_torch, rtol=self.rtol, atol=self.atol),
-                        (output_inplace - output_torch).abs().max().item())
-
-    # @unittest.skip("Not numerically stable if twiddle factors aren't orthogonal")
-    @unittest.skipIf(not torch.cuda.is_available(), "need CUDA")
-    def test_butterfly_inplace_cuda(self):
-        batch_size = 10
-        n = 4096
-        # TODO: in-place implementation doesn't support nstack for now
-        nstack = 1
-        b = Butterfly(n, n, bias=False, ortho_init=True).to('cuda')
-        twiddle = b.twiddle
-        input = torch.randn(batch_size, nstack, n, requires_grad=True, device=twiddle.device)
-        output_inplace = butterfly_mult_inplace(twiddle.squeeze(0), input.squeeze(1))
-        output_torch = butterfly_mult_torch(twiddle, input).squeeze(1)
-        self.assertTrue(torch.allclose(output_inplace, output_torch, rtol=self.rtol, atol=self.atol),
-                        (output_inplace - output_torch).abs().max().item())
-        grad = torch.randn_like(output_torch)
-        d_twiddle_inplace, d_input_inplace = torch.autograd.grad(output_inplace, (twiddle, input), grad, retain_graph=True)
-        d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
-        self.assertTrue(torch.allclose(d_input_inplace, d_input_torch, rtol=self.rtol, atol=self.atol),
-                        (d_input_inplace - d_input_torch).abs().max().item())
-        # print((d_twiddle_inplace - d_twiddle_torch) / d_twiddle_torch)
-        self.assertTrue(torch.allclose(d_twiddle_inplace, d_twiddle_torch, rtol=self.rtol, atol=self.atol),
-                        ((d_twiddle_inplace - d_twiddle_torch) / d_twiddle_torch).abs().max().item())
 
     def test_butterfly_factors(self):
         batch_size = 10
