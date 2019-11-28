@@ -24,11 +24,11 @@ class ButterflyTest(unittest.TestCase):
                     for tied_weight in [True, False]:
                         for increasing_stride in [True, False]:
                             for ortho_init in [False, True]:
-                                for param in ['regular'] if complex else ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt', 'svd']:
+                                for param in ['regular'] if complex else ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt']:
                                     for nblocks in [0, 1, 2, 3] if param in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt'] else [0]:
                                         for expansion in [1, 2]:
                                             for double in [False, True]:
-                                                if param in ['obdobt', 'svd'] and tied_weight:
+                                                if param in ['obdobt'] and tied_weight:
                                                     continue
                                                 if nblocks > 0 and complex:
                                                     continue
@@ -76,11 +76,11 @@ class ButterflyTest(unittest.TestCase):
                     for tied_weight in [True, False]:
                         for increasing_stride in [True, False]:
                             for ortho_init in [False, True]:
-                                for param in ['regular'] if complex else ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt', 'svd']:
+                                for param in ['regular'] if complex else ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt']:
                                     for nblocks in [0, 1, 2, 3] if param in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt'] else [0]:
                                         for expansion in [1, 2]:
                                             for double in [False, True]:
-                                                if param in ['obdobt', 'svd'] and tied_weight:
+                                                if param in ['obdobt'] and tied_weight:
                                                     continue
                                                 if nblocks > 0 and complex:
                                                     continue

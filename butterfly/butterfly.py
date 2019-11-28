@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from .utils import twiddle_normal_to_fast_format
 from .butterfly_multiply import butterfly_mult, butterfly_mult_untied
 from .butterfly_multiply import butterfly_ortho_mult_tied, bbt_ortho_mult_tied
-from .butterfly_multiply import butterfly_ortho_mult_untied, butterfly_mult_untied_svd
+from .butterfly_multiply import butterfly_ortho_mult_untied
 from .butterfly_multiply import bbt_mult_untied, bbt_ortho_mult_untied
 from .butterfly_multiply import odo_mult_untied
 
@@ -27,11 +27,11 @@ class Butterfly(nn.Module):
             Note that this only changes the order of multiplication, not how twiddle is stored.
             In other words, twiddle[@log_stride] always stores the twiddle for @stride.
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
-        param: The parameterization of the 2x2 butterfly factors, either 'regular', 'ortho', 'odo', or 'obdobt', or 'svd'.
-            'ortho' and 'svd' only support real, not complex.
+        param: The parameterization of the 2x2 butterfly factors, either 'regular', 'ortho', 'odo', or 'obdobt'
+            'ortho' only supports real, not complex.
             'odo' means two orthogonal butterfly matrices and one diagonal matrix.
             'obdobt' means the building block is (OB D OBT)^nblocks, where OB means orthogonal butterfly.
-        max_gain: (only for svd parameterization) controls the maximum and minimum singular values
+        max_gain: controls the maximum and minimum singular values
             of the whole matrix (not of each factor).
             For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
         nblocks: number of (BB^T) blocks. If 0, it's just a butterfly. If > 0, ignore @increasing_stride.
@@ -63,7 +63,7 @@ class Butterfly(nn.Module):
         self.tied_weight = tied_weight
         self.increasing_stride = increasing_stride
         self.ortho_init = ortho_init
-        assert param in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt', 'svd', 'ds', 'logit', 'ortho2']
+        assert param in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt', 'ds', 'logit', 'ortho2']
         self.param = param
         self.max_gain_per_factor = max_gain ** (1 / m)
         self.nblocks = nblocks
@@ -122,7 +122,7 @@ class Butterfly(nn.Module):
                     twiddle_fast = torch.cat(twiddle_fast, dim=1)
                 self.twiddle = nn.Parameter(twiddle_fast)
         else:
-            assert not complex, 'orthogonal/svd parameterization is only implemented for real, not complex'
+            assert not complex, 'orthogonal parameterization is only implemented for real, not complex'
             if diag_init == 'normal':
                 self.diag_gen = torch.randn # lambda s, n: torch.randn(s, n)
             elif diag_init == 'one':
@@ -179,11 +179,6 @@ class Butterfly(nn.Module):
                 #     self.diag = nn.Parameter(torch.ones(twiddle_core_shape[0], self.nstack, size))
                 self.diag = nn.Parameter(self.diag_gen(twiddle_core_shape[0], self.nstack, size))
                 self.diag._is_structured = True
-            elif param == 'svd':
-                assert not tied_weight, 'svd parameterization is only implemented for non-tied weight'
-                theta_phi = torch.rand(twiddle_core_shape + (2, )) * math.pi * 2
-                sigmas = torch.ones(twiddle_core_shape + (2, ), dtype=theta_phi.dtype) # Singular values
-                self.twiddle = nn.Parameter(torch.stack((theta_phi, sigmas) , dim=-2))
             elif param == 'ds':
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape))
             elif param == 'logit':
@@ -258,10 +253,6 @@ class Butterfly(nn.Module):
                 output = butterfly_ortho_mult_untied(t, output, False)
                 output = output * d
                 output = butterfly_ortho_mult_untied(t1, output, True)
-        elif self.param == 'svd':
-            with torch.no_grad():  # Projected SGD
-                self.twiddle[..., 1, :].clamp_(min=1 / self.max_gain_per_factor, max=self.max_gain_per_factor)
-            output = butterfly_mult_untied_svd(self.twiddle, output, self.increasing_stride)
         elif self.param == 'ds':
             p = self.twiddle
             twiddle = torch.stack((torch.stack((p, 1-p), dim=-1),
@@ -356,7 +347,7 @@ class ButterflyBmm(Butterfly):
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
         param: whether to parameterize the twiddle to always be orthogonal 2x2 matrices.
             Only implemented for real, not complex, for now.
-        max_gain: (only for svd parameterization) controls the maximum and minimum singular values
+        max_gain: controls the maximum and minimum singular values
             of the whole matrix (not of each factor).
             For example, max_gain=10.0 means that the singular values are in [0.1, 10.0].
         nblocks: number of (BB^T) blocks. If 0, it's just a butterfly. If > 0, ignore @increasing_stride.

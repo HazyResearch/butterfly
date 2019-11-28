@@ -5,7 +5,7 @@ sys.path.insert(0, project_root)
 import torch
 
 from butterfly import Butterfly
-from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_untied_svd, butterfly_mult_factors, butterfly_mult_inplace, bbt_mult_untied, bbt_ortho_mult_untied
+from butterfly.butterfly_multiply import butterfly_mult, butterfly_mult_untied, butterfly_mult_factors, butterfly_mult_inplace, bbt_mult_untied, bbt_ortho_mult_untied
 
 batch_size = 2048
 n = 512
@@ -144,28 +144,6 @@ for nblocks in range(4):
     end = time.perf_counter()
     print(f'Butterfly mult ortho {nblocks} nblocks together: {end - start}s')
 
-torch.cuda.synchronize()
-start = time.perf_counter()
-for _ in range(nsteps):
-    output = butterfly_mult_untied_svd(twiddle_untied, x.unsqueeze(1))
-torch.cuda.synchronize()
-end = time.perf_counter()
-print(f'Butterfly mult untied_svd forward: {end - start}s')
-torch.cuda.synchronize()
-start = time.perf_counter()
-for _ in range(nsteps):
-    torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1), retain_graph=True)
-torch.cuda.synchronize()
-end = time.perf_counter()
-print(f'Butterfly mult untied_svd backward: {end - start}s')
-torch.cuda.synchronize()
-start = time.perf_counter()
-for _ in range(nsteps):
-    output = butterfly_mult_untied_svd(twiddle_untied, x.unsqueeze(1))
-    torch.autograd.grad(output, (twiddle_untied, x), grad.unsqueeze(1))
-torch.cuda.synchronize()
-end = time.perf_counter()
-print(f'Butterfly mult untied_svd together: {end - start}s')
 
 # output = x @ W.t()  # Do it once so that cuBlas handles are initialized, etc.
 output = L(x)
