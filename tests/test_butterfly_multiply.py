@@ -386,7 +386,8 @@ class ButterflyMultTest(unittest.TestCase):
                         twiddle = torch.randn((nstack, m, n // 2, 2, 2) + (() if not complex else (2, )), requires_grad=True, device=device) * scaling
                         # twiddle = torch.arange(2 * n, dtype=torch.float, device=device, requires_grad=True).reshape(n // 2, 2, 2).unsqueeze(0).repeat(m, 1, 1, 1).unsqueeze(0)
                         # twiddle = torch.arange(m * n * 2, dtype=torch.float, device=device, requires_grad=True).reshape(m, n // 2, 2, 2).unsqueeze(0)
-                        twiddle_fast = twiddle_normal_to_fast_format(twiddle)
+                        # twiddle_fast = twiddle_normal_to_fast_format(twiddle)
+                        twiddle_fast = twiddle
                         # twiddle_fast = torch.randn((nstack, m, 2, n), requires_grad=True, device=device) * scaling
                         if not increasing_stride:
                             twiddle_fast = twiddle_fast.flip(1)
