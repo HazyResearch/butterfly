@@ -63,7 +63,7 @@ class Butterfly(nn.Module):
         self.tied_weight = tied_weight
         self.increasing_stride = increasing_stride
         self.ortho_init = ortho_init
-        assert param in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt', 'ds', 'logit', 'ortho2']
+        assert param in ['regular', 'ortho', 'odo', 'obdobt', 'ds', 'logit', 'ortho2']
         self.param = param
         self.max_gain_per_factor = max_gain ** (1 / m)
         self.nblocks = nblocks
@@ -77,8 +77,8 @@ class Butterfly(nn.Module):
         self.nstack *= self.expansion
         if nblocks > 0:
             assert not complex, 'native BBT with complex is not supported, use two separate Butterflies (e.g. nn.Sequential)'
-            if param not in  ['odo', 'odr', 'opdo']:  # Special case, we implement tied weight ODO with nblocks
-                assert not tied_weight and param in ['regular', 'ortho', 'odo', 'odr', 'opdo', 'obdobt'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
+            if param not in  ['odo']:  # Special case, we implement tied weight ODO with nblocks
+                assert not tied_weight and param in ['regular', 'ortho', 'odo', 'obdobt'], 'native BBT with tied_weight or complex or non-regular param is not supported, use two separate Butterflies'
         if tied_weight:
             twiddle_core_shape = (self.nstack, size - 1) if nblocks == 0 else (self.nstack, nblocks * 2, size - 1)
         else:
@@ -146,12 +146,9 @@ class Butterfly(nn.Module):
             elif param == 'ortho':
                 assert not complex
                 self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
-            elif param == 'odo' or param == 'odr' or param == 'opdo':
+            elif param == 'odo':
                 assert not complex
-                if param == 'odr':
-                    self.register_buffer('twiddle', torch.rand(twiddle_core_shape) * math.pi * 2)
-                else:
-                    self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
+                self.twiddle = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 self.twiddle1 = nn.Parameter(torch.rand(twiddle_core_shape) * math.pi * 2)
                 self.twiddle1._is_structured = True
                 # if diag_init == 'normal':
@@ -220,7 +217,7 @@ class Butterfly(nn.Module):
                 output = butterfly_ortho_mult_tied(self.twiddle, output, self.increasing_stride)
             else:
                 output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
-        elif self.param == 'odo' or self.param == 'odr' or self.param == 'opdo':
+        elif self.param == 'odo':
             diag = self.diag
             if self.diag_constraint == 'positive':
                 with torch.no_grad():  # Projected SGD
@@ -240,8 +237,6 @@ class Butterfly(nn.Module):
                 else:
                     output = butterfly_ortho_mult_untied(self.twiddle, output, self.increasing_stride) if self.nblocks == 0 else bbt_ortho_mult_untied(self.twiddle, output)
                 output = output * diag
-                if self.param == 'opdo' and self.expansion > 1:
-                    output = output.view(-1, self.expansion, output.shape[-1]).sum(dim=-2, keepdim=True).expand(-1, self.expansion, -1).reshape(output.shape)
                 if self.tied_weight:
                     output = butterfly_ortho_mult_tied(self.twiddle1, output, True) if self.nblocks == 0 else bbt_ortho_mult_tied(self.twiddle1, output)
                 else:
@@ -309,7 +304,7 @@ class Butterfly(nn.Module):
         s = 'in_size={}, out_size={}, bias={}, complex={}, tied_weight={}, increasing_stride={}, ortho_init={}, param={}, nblocks={}, expansion={}, diag_init={}, double={}'.format(
             self.in_size, self.out_size, self.bias is not None, self.complex, self.tied_weight, self.increasing_stride, self.ortho_init, self.param, self.nblocks, self.expansion, self.diag_init, self.double
         )
-        if self.param == 'odo' or self.param == 'odr' or self.param == 'opdo':
+        if self.param == 'odo':
             s += ', diag_constraint={}'.format('none' if self.diag_constraint is None else self.diag_constraint)
         return s
 
