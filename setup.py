@@ -82,5 +82,5 @@ setup(
         'build_ext':
         BuildExtension.with_options(no_python_abi_suffix=True, use_ninja=False)
     },
-    # packages=find_packages(),
+    packages=find_packages(),
 )
