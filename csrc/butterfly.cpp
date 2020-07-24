@@ -16,8 +16,7 @@ PyMODINIT_FUNC PyInit__butterfly(void) { return NULL; }
 
 torch::Tensor butterfly_multiply_fw(const torch::Tensor& twiddle,
                                     const torch::Tensor& input,
-                                    bool increasing_stride,
-                                    bool return_intermediates) {
+                                    bool increasing_stride) {
   /* Parameters:
          twiddle: (nstack, log n, n/2, 2, 2)
          input: (batch_size, nstack, n)
@@ -39,12 +38,12 @@ torch::Tensor butterfly_multiply_fw(const torch::Tensor& twiddle,
               "butterfly_multiply_fw: twiddle must have shape (nstack, log n, n/2, 2, 2)");
   if (input.device().is_cuda()) {
 #ifdef WITH_CUDA
-    return butterfly_multiply_fw_cuda(twiddle, input, increasing_stride, return_intermediates);
+    return butterfly_multiply_fw_cuda(twiddle, input, increasing_stride);
 #else
     TORCH_ERROR("Not compiled with CUDA support");
 #endif
   } else {
-    return butterfly_multiply_fw_cpu(twiddle, input, increasing_stride, return_intermediates);
+    return butterfly_multiply_fw_cpu(twiddle, input, increasing_stride);
   }
 }
 
