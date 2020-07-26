@@ -1,5 +1,7 @@
 #include <Python.h>
-#include <torch/script.h>
+// This has to be library.h instead of script.h otherwise won't work in
+// pytorch 1.6. There an error during import about "SourceLocation"
+#include <torch/library.h>
 
 #ifdef WITH_CUDA
 #include <cuda.h>
