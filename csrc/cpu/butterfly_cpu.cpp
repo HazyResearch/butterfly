@@ -4,12 +4,12 @@ torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor& twiddle,
                                         const torch::Tensor& input,
                                         bool increasing_stride) {
   const auto batch_size = input.size(0);
-  const auto nstack = input.size(1);
+  const auto nstacks = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double)n));
   const int nblocks = twiddle.size(1);
   auto output =
-    torch::empty({batch_size, nstack, n},
+    torch::empty({batch_size, nstacks, n},
                   torch::dtype(input.dtype()).device(input.device()));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "butterfly_multiply_fw_cpu", [&] {
     const auto twiddle_a = twiddle.accessor<scalar_t, 6>();
@@ -22,7 +22,7 @@ torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor& twiddle,
         int64_t log_stride = cur_increasing_stride ? idx : (log_n - 1 - idx);
         int64_t stride = 1 << log_stride;
         for (int64_t b = 0; b < batch_size; ++b) {
-          for (int64_t s = 0; s < nstack; ++s) {
+          for (int64_t s = 0; s < nstacks; ++s) {
             for (int64_t i = 0; i < n / 2; ++i) {
               int64_t low_order_bit = i % stride;
               int64_t pos = 2 * (i - low_order_bit) + low_order_bit;
