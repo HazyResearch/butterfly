@@ -3,6 +3,8 @@ from typing import Tuple
 
 import torch
 
+from .complex_utils import complex_mul
+
 
 @torch.jit.script
 def butterfly_fw(twiddle: torch.Tensor, input: torch.Tensor,
@@ -33,6 +35,6 @@ def butterfly_mult_torch(twiddle, input, increasing_stride=True):
                 nstacks, n // (2 * stride), stride, 2, 2).permute(0, 1, 3, 4, 2)
             output_reshape = output.view(
                 batch_size, nstacks, n // (2 * stride), 1, 2, stride)
-            output = (t * output_reshape).sum(dim=4)
+            output = complex_mul(t, output_reshape).sum(dim=4)
         cur_increasing_stride = not cur_increasing_stride
     return output.view(batch_size, nstacks, n)
