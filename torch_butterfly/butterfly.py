@@ -8,13 +8,13 @@ from .complex_utils import complex_mul
 
 @torch.jit.script
 def butterfly_multiply_fw(twiddle: torch.Tensor, input: torch.Tensor,
-                 increasing_stride: bool) -> torch.Tensor:
+                          increasing_stride: bool) -> torch.Tensor:
     return torch.ops.torch_butterfly.butterfly_multiply_fw(twiddle, input, increasing_stride)
 
 
 @torch.jit.script
 def butterfly_multiply_bw(twiddle: torch.Tensor, input: torch.Tensor,
-                 grad: torch.Tensor, increasing_stride: bool) -> Tuple[torch.Tensor, torch.Tensor]:
+                          grad: torch.Tensor, increasing_stride: bool) -> Tuple[torch.Tensor, torch.Tensor]:
     return torch.ops.torch_butterfly.butterfly_multiply_bw(twiddle, input, grad, increasing_stride)
 
 

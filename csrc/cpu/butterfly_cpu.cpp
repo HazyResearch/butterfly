@@ -29,7 +29,7 @@ torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor twiddle,
     auto output_a = output.accessor<scalar_t, 3>();
     for (int64_t block = 0; block < nblocks; ++block) {
       bool cur_increasing_stride = increasing_stride != bool(block % 2);
-      for (int64_t idx = 0; idx <= log_n - 1; ++idx) {
+      for (int64_t idx = 0; idx < log_n; ++idx) {
         auto prev_input_a = (block == 0 && idx == 0) ? input_a : output_a;
         int64_t log_stride = cur_increasing_stride ? idx : (log_n - 1 - idx);
         int64_t stride = 1 << log_stride;
@@ -79,7 +79,7 @@ std::tuple<torch::Tensor, torch::Tensor>
     for (int64_t block = 0; block < nblocks; ++block) {
       bool cur_increasing_stride = increasing_stride != bool(block % 2);
       // Don't need the very last output for the backward pass
-      for (int64_t idx = 0; idx <= (block == nblocks - 1 ? log_n - 2 : log_n - 1); ++idx) {
+      for (int64_t idx = 0; idx < (block == nblocks - 1 ? log_n - 1 : log_n); ++idx) {
         int64_t log_stride = cur_increasing_stride ? idx : (log_n - 1 - idx);
         int64_t stride = 1 << log_stride;
         for (int64_t b = 0; b < batch_size; ++b) {
