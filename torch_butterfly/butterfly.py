@@ -7,18 +7,24 @@ from .complex_utils import complex_mul
 
 
 @torch.jit.script
-def butterfly_fw(twiddle: torch.Tensor, input: torch.Tensor,
+def butterfly_multiply_fw(twiddle: torch.Tensor, input: torch.Tensor,
                  increasing_stride: bool) -> torch.Tensor:
     return torch.ops.torch_butterfly.butterfly_multiply_fw(twiddle, input, increasing_stride)
 
 
 @torch.jit.script
-def butterfly_bw(twiddle: torch.Tensor, input: torch.Tensor,
+def butterfly_multiply_bw(twiddle: torch.Tensor, input: torch.Tensor,
                  grad: torch.Tensor, increasing_stride: bool) -> Tuple[torch.Tensor, torch.Tensor]:
     return torch.ops.torch_butterfly.butterfly_multiply_bw(twiddle, input, grad, increasing_stride)
 
 
-def butterfly_mult_torch(twiddle, input, increasing_stride=True):
+@torch.jit.script
+def butterfly_multiply(twiddle: torch.Tensor, input: torch.Tensor,
+                       increasing_stride: bool) -> torch.Tensor:
+    return torch.ops.torch_butterfly.butterfly_multiply(twiddle, input, increasing_stride)
+
+
+def butterfly_multiply_torch(twiddle, input, increasing_stride=True):
     batch_size, nstacks, n = input.shape
     nblocks = twiddle.shape[1]
     log_n = int(math.log2(n))

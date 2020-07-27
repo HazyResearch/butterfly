@@ -31,13 +31,12 @@ class ButterflyMultTest(unittest.TestCase):
                         # scaling = 1 / math.sqrt(2) if not complex else 1 / 2  # TODO: complex randn already incorporate this scaling?
                         twiddle = torch.randn((nstack, nblocks, log_n, n // 2, 2, 2), dtype=dtype, requires_grad=True, device=device) * scaling
                         input = torch.randn((batch_size, nstack, n), dtype=dtype, requires_grad=True, device=twiddle.device)
-                        output = torch_butterfly.butterfly_fw(twiddle, input, increasing_stride)
-                        output_torch = torch_butterfly.butterfly.butterfly_mult_torch(twiddle, input, increasing_stride)
+                        output = torch_butterfly.butterfly_multiply(twiddle, input, increasing_stride)
+                        output_torch = torch_butterfly.butterfly.butterfly_multiply_torch(twiddle, input, increasing_stride)
                         self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
                                         ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
                         grad = torch.randn_like(output_torch)
-                        d_twiddle, d_input = torch_butterfly.butterfly_bw(twiddle, input, grad, increasing_stride)
-                        # d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input), grad, retain_graph=True)
+                        d_twiddle, d_input = torch.autograd.grad(output, (twiddle, input), grad, retain_graph=True)
                         d_twiddle_torch, d_input_torch = torch.autograd.grad(output_torch, (twiddle, input), grad, retain_graph=True)
                         self.assertTrue(torch.allclose(d_input, d_input_torch, rtol=self.rtol, atol=self.atol),
                                         ((d_input - d_input_torch).abs().max().item(), device, complex, increasing_stride))

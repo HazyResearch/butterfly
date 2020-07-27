@@ -12,8 +12,8 @@ static inline c10::complex<T> conj_wrapper(c10::complex<T> v) {
   return std::conj(v);
 }
 
-torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor& twiddle,
-                                        const torch::Tensor& input,
+torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor twiddle,
+                                        const torch::Tensor input,
                                         bool increasing_stride) {
   const auto batch_size = input.size(0);
   const auto nstacks = input.size(1);
@@ -54,9 +54,9 @@ torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor& twiddle,
 }
 
 std::tuple<torch::Tensor, torch::Tensor>
-  butterfly_multiply_bw_cpu(const torch::Tensor &twiddle,
-                            const torch::Tensor &input,
-                            const torch::Tensor &grad,
+  butterfly_multiply_bw_cpu(const torch::Tensor twiddle,
+                            const torch::Tensor input,
+                            const torch::Tensor grad,
                             bool increasing_stride) {
   const auto batch_size = input.size(0);
   const auto nstacks = input.size(1);

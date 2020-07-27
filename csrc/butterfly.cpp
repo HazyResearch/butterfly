@@ -17,8 +17,8 @@ PyMODINIT_FUNC PyInit__butterfly(void) { return NULL; }
 #define CHECK_DIM(x, y) TORCH_CHECK(x.dim() == y, #x " must have dimension " #y)
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
-torch::Tensor butterfly_multiply_fw(const torch::Tensor& twiddle,
-                                    const torch::Tensor& input,
+torch::Tensor butterfly_multiply_fw(const torch::Tensor twiddle,
+                                    const torch::Tensor input,
                                     bool increasing_stride) {
   /* Parameters:
          twiddle: (nstacks, nblocks, log n, n/2, 2, 2)
@@ -48,9 +48,9 @@ torch::Tensor butterfly_multiply_fw(const torch::Tensor& twiddle,
 
 // Has to be tuple and not pair, Pytorch doesn't like pair
 std::tuple<torch::Tensor, torch::Tensor>
-  butterfly_multiply_bw(const torch::Tensor &twiddle,
-                        const torch::Tensor &input,
-                        const torch::Tensor &grad,
+  butterfly_multiply_bw(const torch::Tensor twiddle,
+                        const torch::Tensor input,
+                        const torch::Tensor grad,
                         bool increasing_stride) {
   /* Parameters:
          twiddle: (nstacks, nblocks, log n, n/2, 2, 2)
@@ -83,7 +83,38 @@ std::tuple<torch::Tensor, torch::Tensor>
   }
 }
 
+using torch::autograd::AutogradContext;
+using torch::autograd::variable_list;
+
+// https://github.com/pytorch/pytorch/blob/master/test/custom_operator/op.cpp
+class ButterflyMultiply : public torch::autograd::Function<ButterflyMultiply> {
+public:
+  static torch::Tensor forward(AutogradContext *ctx, torch::Tensor twiddle,
+                               torch::Tensor input, bool increasing_stride) {
+    ctx->saved_data["increasing_stride"] = increasing_stride;
+    ctx->save_for_backward({twiddle, input});
+    return butterfly_multiply_fw(twiddle, input, increasing_stride);
+  }
+
+  static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+    auto grad = grad_output[0];
+    auto saved = ctx->get_saved_variables();
+    auto twiddle = saved[0], input = saved[1];
+    auto increasing_stride = ctx->saved_data["increasing_stride"].toBool();
+    auto result = butterfly_multiply_bw(twiddle, input, grad, increasing_stride);
+    auto d_twiddle = std::get<0>(result), d_input = std::get<1>(result);
+    return {d_twiddle, d_input, torch::Tensor()};
+  }
+};
+
+torch::Tensor butterfly_multiply(torch::Tensor twiddle,
+                                 torch::Tensor input,
+                                 bool increasing_stride) {
+  return ButterflyMultiply::apply(twiddle, input, increasing_stride);
+}
+
 TORCH_LIBRARY(torch_butterfly, m) {
   m.def("butterfly_multiply_fw", butterfly_multiply_fw);
   m.def("butterfly_multiply_bw", butterfly_multiply_bw);
+  m.def("butterfly_multiply", butterfly_multiply);
 }
