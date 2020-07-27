@@ -1,4 +1,5 @@
 #include "butterfly_cpu.h"
+#include <type_traits>  // for std::is_floating_type
 
 torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor& twiddle,
                                         const torch::Tensor& input,
@@ -13,7 +14,7 @@ torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor& twiddle,
                   torch::dtype(input.dtype()).device(input.device()));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "butterfly_multiply_fw_cpu", [&] {
     const auto twiddle_a = twiddle.accessor<scalar_t, 6>();
-    auto input_a = input.accessor<scalar_t, 3>();
+    const auto input_a = input.accessor<scalar_t, 3>();
     auto output_a = output.accessor<scalar_t, 3>();
     for (int64_t block = 0; block < nblocks; block++) {
       bool cur_increasing_stride = increasing_stride != bool(block % 2);
@@ -39,4 +40,12 @@ torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor& twiddle,
     }
   });
   return output;
+}
+
+std::tuple<torch::Tensor, torch::Tensor>
+  butterfly_multiply_bw_cpu(const torch::Tensor &twiddle,
+                            const torch::Tensor &input,
+                            const torch::Tensor &grad,
+                            bool increasing_stride) {
+  return std::make_tuple(input, grad);
 }

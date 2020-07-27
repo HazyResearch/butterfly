@@ -31,9 +31,10 @@ def check_cuda_version():
                 f'matches your PyTorch install.')
 
 check_cuda_version()
-from .butterfly import butterfly_fw  # noqa
+from .butterfly import butterfly_fw, butterfly_bw  # noqa
 
 __all__ = [
     'butterfly_fw',
+    'butterfly_bw',
     '__version__',
 ]

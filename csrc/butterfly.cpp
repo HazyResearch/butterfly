@@ -1,5 +1,6 @@
 #include <Python.h>
 #include <torch/script.h>
+#include <tuple>
 
 #include "cpu/butterfly_cpu.h"
 
@@ -13,6 +14,8 @@ PyMODINIT_FUNC PyInit__butterfly(void) { return NULL; }
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.device().type() == torch::kCPU || x.device().type() == torch::kCUDA, #x " must be on CPU or CUDA")
 #define CHECK_SAME_DEVICE(x, y) TORCH_CHECK(x.device() == y.device(), #x " and " #y " must be on the same device")
+#define CHECK_DIM(x, y) TORCH_CHECK(x.dim() == y, #x " must have dimension " #y)
+#define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
 torch::Tensor butterfly_multiply_fw(const torch::Tensor& twiddle,
                                     const torch::Tensor& input,
@@ -20,21 +23,18 @@ torch::Tensor butterfly_multiply_fw(const torch::Tensor& twiddle,
   /* Parameters:
          twiddle: (nstacks, nblocks, log n, n/2, 2, 2)
          input: (batch_size, nstacks, n)
-         increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
-             decreasing stride (e.g., n/2, n/4, ..., 1).
+         increasing_stride: whether the first block multiplies with increasing
+             stride (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
      Returns:
          output: (batch_size, nstacks, n)
   */
   CHECK_DEVICE(twiddle); CHECK_DEVICE(input); CHECK_SAME_DEVICE(twiddle, input);
-  // const auto batch_size = input.size(0);
   const auto nstacks = input.size(1);
   const auto n = input.size(2);
   const int log_n = int(log2((double) n));
-  const int nblocks = twiddle.size(1);
-  TORCH_CHECK((twiddle.dim() == 6 && input.dim() == 3),
-              "butterfly_multiply_fw: twiddle and input must have dimension 6, 3");
-  TORCH_CHECK(twiddle.sizes() == torch::IntArrayRef({nstacks, nblocks, log_n, n / 2, 2, 2}),
-              "butterfly_multiply_fw: twiddle must have shape (nstacks, nblocks, log n, n/2, 2, 2)");
+  const auto nblocks = twiddle.size(1);
+  CHECK_DIM(twiddle, 6); CHECK_DIM(input, 3);
+  CHECK_SHAPE(twiddle, nstacks, nblocks, log_n, n / 2, 2, 2);
   if (input.device().is_cuda()) {
 #ifdef WITH_CUDA
     return butterfly_multiply_fw_cuda(twiddle, input, increasing_stride);
@@ -46,5 +46,44 @@ torch::Tensor butterfly_multiply_fw(const torch::Tensor& twiddle,
   }
 }
 
-static auto registry = torch::RegisterOperators().op(
-    "torch_butterfly::butterfly_multiply_fw", &butterfly_multiply_fw);
+// Has to be tuple and not pair, Pytorch doesn't like pair
+std::tuple<torch::Tensor, torch::Tensor>
+  butterfly_multiply_bw(const torch::Tensor &twiddle,
+                        const torch::Tensor &input,
+                        const torch::Tensor &grad,
+                        bool increasing_stride) {
+  /* Parameters:
+         twiddle: (nstacks, nblocks, log n, n/2, 2, 2)
+         input: (batch_size, nstacks, n)
+         grad: (batch_size, nstacks, n)
+         increasing_stride: whether the first block multiplies with increasing
+             stride (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
+     Returns:
+         d_twiddle: (nstacks, nblocks, log n, n/2, 2, 2)
+         d_input: (batch_size, nstacks, n)
+  */
+  CHECK_DEVICE(twiddle); CHECK_DEVICE(input); CHECK_DEVICE(grad);
+  CHECK_SAME_DEVICE(twiddle, input); CHECK_SAME_DEVICE(input, grad);
+  const auto batch_size = input.size(0);
+  const auto nstacks = input.size(1);
+  const auto n = input.size(2);
+  const int log_n = int(log2((double) n));
+  const auto nblocks = twiddle.size(1);
+  CHECK_DIM(twiddle, 6); CHECK_DIM(input, 3); CHECK_DIM(grad, 3);
+  CHECK_SHAPE(twiddle, nstacks, nblocks, log_n, n / 2, 2, 2);
+  CHECK_SHAPE(grad, batch_size, nstacks, n);
+  if (input.device().is_cuda()) {
+#ifdef WITH_CUDA
+    return butterfly_multiply_bw_cuda(twiddle, input, grad, increasing_stride);
+#else
+    TORCH_ERROR("Not compiled with CUDA support");
+#endif
+  } else {
+    return butterfly_multiply_bw_cpu(twiddle, input, grad, increasing_stride);
+  }
+}
+
+TORCH_LIBRARY(torch_butterfly, m) {
+  m.def("butterfly_multiply_fw", butterfly_multiply_fw);
+  m.def("butterfly_multiply_bw", butterfly_multiply_bw);
+}
