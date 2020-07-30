@@ -52,6 +52,40 @@ static constexpr int MIN_BLOCKS_PER_MP_BACKWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 1
   static constexpr int MIN_BLOCKS_PER_MP_ORTHO_BACKWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1};
 #endif
 
+// Need to have general template, but construction will yield compilation error.
+template <typename scalar_t> struct maxstep {maxstep() = delete;};
+template <>
+struct maxstep<float> {
+  static constexpr int maxstep_fw = 9;
+};
+template <>
+struct maxstep<double> {
+  static constexpr int maxstep_fw = 8;
+};
+
+// This takes a lambda templated on int, and a number n between 1 and n_max, and call that lambda templated on n.
+// The lambda is templated using generic lambda (C++14), using std::integral_constant to encode the int template as type.
+// What Dispatch<n_max, decltype(lambda_int)>::call(lambda_int, n) does is equivalent to this:
+// switch (n):
+//   {
+//     case 1: lamda_int(std::integral_type<int, 1>()); break;
+//     case 2: lamda_int(std::integral_type<int, 2>()); break;
+//     ...
+//     case n_max: lamda_int(std::integral_type<int, n_max>()); break;
+//   }
+// The difficulty is of course how to do this for a constexpr n_max.
+// I would have preferred to write this as function but partial template speciallization isn't support for functions.
+template<int n_max, typename Function>
+struct Dispatch {
+  static void inline call(Function lambda_int, int n) {
+    n == n_max ? lambda_int(std::integral_constant<int, n_max>()) : Dispatch<n_max - 1, Function>::call(lambda_int, n);
+  }
+};
+template<typename Function>
+struct Dispatch<0, Function> {
+  static void inline call(Function lambda_int, int n) {}
+};
+
 template <typename T, size_t N>
 using CudaAcsr = at::PackedTensorAccessor32<T, N, at::RestrictPtrTraits>;
 
@@ -318,10 +352,8 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
           : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, false>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, twiddle_block_idx, start_bit);
       };
-      switch (nsteps) {
-        #define CASE_NSTEPS(nsteps_val) case nsteps_val: launch(std::integral_constant<int, nsteps_val>()); break;
-        MAP(CASE_NSTEPS, 1, 2, 3, 4, 5, 6, 7, 8, 9)
-      }
+      constexpr int maxstep_fw = maxstep<scalar_t>::maxstep_fw;
+      Dispatch<maxstep_fw, decltype(launch)>::call(launch, nsteps);
       twiddle_idx_start += nsteps;
       if (twiddle_idx_start >= log_n) {
         twiddle_idx_start = 0;
@@ -329,8 +361,6 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
       }
     }
   });
-  // Have to keep this #undef outside the AT_DISPATCH_FLOATING_TYPES macro for it to work
-  #undef CASE_NSTEPS
   TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_untied_forward_max5_fast_cuda failed with error code ",
      cudaGetLastError());
