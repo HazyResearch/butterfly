@@ -1,6 +1,6 @@
 #include "butterfly_cuda.h"
+#include "complex_utils.cuh"
 #include <ATen/cuda/CUDAContext.h>  // For getCurrentCUDAStream
-#include "map.h"  // For the MAP macro, i.e. for_each over the arguments
 
 // Only support float (not double) for now to speed up compilation time
 #undef AT_DISPATCH_FLOATING_TYPES
@@ -100,17 +100,6 @@ constexpr __host__ __device__ int div_up_const(int a, int b) { return (a + b - 1
 
 __host__ __device__ static inline int div_up(int a, int b) {
   return (a + b - 1) / b;
-}
-
-// This isn't implemented for c10::complex yet
-template <typename scalar_t>
-static __device__  __forceinline__
-c10::complex<scalar_t> __shfl_xor_sync(unsigned int mask,
-                                       c10::complex<scalar_t> value,
-                                       unsigned int laneMask,
-                                       int width = warpSize) {
-  return c10::complex<scalar_t>(__shfl_xor_sync(mask, value.real_, laneMask, width),
-                                __shfl_xor_sync(mask, value.imag_, laneMask, width));
 }
 
 // Delete the bit at position @position in the binary representation of x
@@ -260,10 +249,11 @@ __global__ void butterfly_multiply_untied_forward_max5_fast_cuda_kernel(const Cu
                                                                         int input_idx_start_bit) {
   constexpr int span = 1 << nsteps;
   constexpr int mult_per_warp = span > WARP_SIZE ? span / WARP_SIZE : 1;
-  // We just want a shared array like below, but it doesn't work for complex: https://github.com/pytorch/pytorch/issues/39270
+  // We just want a shared array:
   // __shared__ scalar_t s_twiddle[nsteps][2][span];
+  // But it doesn't work for complex: https://github.com/pytorch/pytorch/issues/39270.
   // So we declare a char array and cast it.
-  // The casting is sublte: https://stackoverflow.com/questions/12692310/convert-array-to-two-dimensional-array-by-pointer
+  // The casting is subtle: https://stackoverflow.com/questions/12692310/convert-array-to-two-dimensional-array-by-pointer
   __shared__ char s_twiddle_char[nsteps][2][span * sizeof(scalar_t)];
   scalar_t (*s_twiddle)[2][span] = (scalar_t (*)[2][span])&s_twiddle_char[0][0][0];
   scalar_t input_val[mult_per_warp][items_per_thread];
