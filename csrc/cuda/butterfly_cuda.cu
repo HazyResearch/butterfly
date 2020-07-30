@@ -4,21 +4,20 @@
 
 // Only support float (not double) for now to speed up compilation time
 #undef AT_DISPATCH_FLOATING_TYPES
-#define AT_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...)                          \
-  [&] {                                                                      \
-    const auto& the_type = TYPE;                                             \
-    /* don't use TYPE again in case it is an expensive or side-effect op */  \
-    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
-    switch (_st) {                                                           \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)        \
-      default:                                                               \
-        AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");       \
-    }                                                                        \
+#define AT_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...)                                        \
+  [&] {                                                                                    \
+    const auto& the_type = TYPE;                                                           \
+    /* don't use TYPE again in case it is an expensive or side-effect op */                \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                                  \
+    switch (_st) {                                                                         \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                      \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__) \
+      default:                                                                             \
+        AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");                     \
+    }                                                                                      \
   }()
 
 #define FULL_MASK 0xffffffff
-#define MAXSTEP_FW 9
-#define MAXSTEP_BW 8
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 700)
   static constexpr int SMEM_PER_MP = 96 * (1 << 10);
@@ -54,12 +53,13 @@ static constexpr int MIN_BLOCKS_PER_MP_BACKWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 1
 
 // Need to have general template, but construction will yield compilation error.
 template <typename scalar_t> struct maxstep {maxstep() = delete;};
-template <>
-struct maxstep<float> {
+template <> struct maxstep<float> {
   static constexpr int maxstep_fw = 9;
 };
-template <>
-struct maxstep<double> {
+template <> struct maxstep<double> {
+  static constexpr int maxstep_fw = 8;
+};
+template <> struct maxstep<c10::complex<float>> {
   static constexpr int maxstep_fw = 8;
 };
 
@@ -100,6 +100,17 @@ constexpr __host__ __device__ int div_up_const(int a, int b) { return (a + b - 1
 
 __host__ __device__ static inline int div_up(int a, int b) {
   return (a + b - 1) / b;
+}
+
+// This isn't implemented for c10::complex yet
+template <typename scalar_t>
+static __device__  __forceinline__
+c10::complex<scalar_t> __shfl_xor_sync(unsigned int mask,
+                                       c10::complex<scalar_t> value,
+                                       unsigned int laneMask,
+                                       int width = warpSize) {
+  return c10::complex<scalar_t>(__shfl_xor_sync(mask, value.real_, laneMask, width),
+                                __shfl_xor_sync(mask, value.imag_, laneMask, width));
 }
 
 // Delete the bit at position @position in the binary representation of x
@@ -249,7 +260,12 @@ __global__ void butterfly_multiply_untied_forward_max5_fast_cuda_kernel(const Cu
                                                                         int input_idx_start_bit) {
   constexpr int span = 1 << nsteps;
   constexpr int mult_per_warp = span > WARP_SIZE ? span / WARP_SIZE : 1;
-  __shared__ scalar_t s_twiddle[nsteps][2][span];
+  // We just want a shared array like below, but it doesn't work for complex: https://github.com/pytorch/pytorch/issues/39270
+  // __shared__ scalar_t s_twiddle[nsteps][2][span];
+  // So we declare a char array and cast it.
+  // The casting is sublte: https://stackoverflow.com/questions/12692310/convert-array-to-two-dimensional-array-by-pointer
+  __shared__ char s_twiddle_char[nsteps][2][span * sizeof(scalar_t)];
+  scalar_t (*s_twiddle)[2][span] = (scalar_t (*)[2][span])&s_twiddle_char[0][0][0];
   scalar_t input_val[mult_per_warp][items_per_thread];
   const int t_idx = threadIdx.x;
   const int batch_idx = (threadIdx.y + (blockIdx.x >> (log_n - nsteps)) * blockDim.y) * items_per_thread;
@@ -320,9 +336,10 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
   const int nblocks = twiddle.size(1);
   auto output = torch::empty({batch_size, nstacks, n}, torch::dtype(input.dtype()).device(input.device()));
   auto stream = at::cuda::getCurrentCUDAStream();
-  const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, MAXSTEP_FW, increasing_stride);
-  const int niters = bit_milestones.size() - 1;
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_max5_fast_cuda", [&] {
+    constexpr int maxstep_fw = maxstep<scalar_t>::maxstep_fw;
+    const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, maxstep_fw, increasing_stride);
+    const int niters = bit_milestones.size() - 1;
     const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 6, at::RestrictPtrTraits>();
     int twiddle_block_idx = 0;
     int twiddle_idx_start = 0;
@@ -352,7 +369,6 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
           : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, false>
           <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, twiddle_block_idx, start_bit);
       };
-      constexpr int maxstep_fw = maxstep<scalar_t>::maxstep_fw;
       Dispatch<maxstep_fw, decltype(launch)>::call(launch, nsteps);
       twiddle_idx_start += nsteps;
       if (twiddle_idx_start >= log_n) {

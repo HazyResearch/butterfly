@@ -12,7 +12,7 @@ class ButterflyMultTest(unittest.TestCase):
         self.atol = 1e-5
 
     def test_butterfly_untied(self):
-        for batch_size, n in [(10, 4096), (8192, 256)]:  # Test size smaller than 1024 and large batch size for race conditions
+        for batch_size, n in [(10, 4096), (8192, 512)]:  # Test size smaller than 1024 and large batch size for race conditions
         # for batch_size, n in [(10, 64)]:
         # for batch_size, n in [(1, 2)]:
             log_n = int(math.log2(n))
@@ -20,8 +20,8 @@ class ButterflyMultTest(unittest.TestCase):
             nblocks = 3
             # for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
             for device in ['cuda']:
-                # for complex in [False, True]:
-                for complex in [False]:
+                for complex in [False, True]:
+                # for complex in [False]:
                     for increasing_stride in [True, False]:
                     # for increasing_stride in [True]:
                         if batch_size > 1024 and (device == 'cpu'):
