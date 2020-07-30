@@ -305,13 +305,21 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
       dim3 block(block_x, min(max_block_y, div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1])));
       // grid.x must be at least n / span
       dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1] * block.y) * n_div_span, 1, nstacks);
+      // Template-metaprogramming hackery: we want nsteps as a constexpr so we can dispatch on it.
+      // Which means we want templated lambdas. But templated lambda isn't available until C++20.
+      // Generic lambdas (starting C++14) allows a kind of templated lambda, but only template on type (and not int).
+      // So we have to construct std::integral_constant to encode the int value as a type.
+      auto launch = [increasing_stride_this_iter, &grid, &block, &stream, &twiddle_a, &input_reader, &output_writer,
+                     log_n, twiddle_idx_start, twiddle_block_idx, start_bit] (auto dummy) {
+      // I can't capture all with [&] for some reason (nvcc complains that start_bit isn't captured).
+        constexpr int nsteps_val = decltype(dummy)::value;
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, true>
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, twiddle_block_idx, start_bit)
+          : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, false>
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, twiddle_block_idx, start_bit);
+      };
       switch (nsteps) {
-        #define CASE_NSTEPS(nsteps_val) case nsteps_val:                                                            \
-        increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, true>     \
-          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, twiddle_block_idx, start_bit) \
-          : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, false>                              \
-          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, twiddle_block_idx, start_bit); break;
-
+        #define CASE_NSTEPS(nsteps_val) case nsteps_val: launch(std::integral_constant<int, nsteps_val>()); break;
         MAP(CASE_NSTEPS, 1, 2, 3, 4, 5, 6, 7, 8, 9)
       }
       twiddle_idx_start += nsteps;
