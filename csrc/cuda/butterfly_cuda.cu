@@ -93,7 +93,7 @@ struct Dispatch<0, Function> {
 };
 
 template <typename T, size_t N>
-using CudaAcsr = at::PackedTensorAccessor32<T, N, at::RestrictPtrTraits>;
+using CudaAcsr = at::GenericPackedTensorAccessor<T, N, at::RestrictPtrTraits, int32_t>;
 
 constexpr __host__ __device__ int min_const(int x, int y) { return x <= y ? x : y; }
 constexpr __host__ __device__ int min_const(int x, int y, int z) { return min_const(min_const(x, y), z); }
@@ -118,9 +118,13 @@ __host__ __device__ static inline int delete_bit(int x, unsigned char position) 
 template<typename scalar_t> struct InputReader {
   const CudaAcsr<scalar_t, 3> input_a;
   const int batch_size;
-  InputReader(const at::Tensor input):
+
+  InputReader(const torch::Tensor input):
     input_a(input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>()),
       batch_size(input.size(0)) {}
+
+  InputReader(const CudaAcsr<scalar_t, 3> &input_a):
+    input_a(input_a), batch_size(input_a.size(0)) {}
 
   template<int items_per_thread, int mult_per_warp=1>
   __device__ __forceinline__ void load_max5(scalar_t input_val[mult_per_warp][items_per_thread],
@@ -141,9 +145,13 @@ template<typename scalar_t> struct InputReader {
 template<typename scalar_t> struct OutputWriter {
   CudaAcsr<scalar_t, 3> output_a;
   const int batch_size;
-  OutputWriter(at::Tensor output):
+
+  OutputWriter(torch::Tensor output):
     output_a(output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>()),
       batch_size(output.size(0)) {}
+
+  OutputWriter(CudaAcsr<scalar_t, 3> &output_a):
+    output_a(output_a), batch_size(output_a.size(0)) {}
 
   template<int items_per_thread, int mult_per_warp=1>
   __device__ __forceinline__ void save_max5(scalar_t output_val[mult_per_warp][items_per_thread],
@@ -155,43 +163,6 @@ template<typename scalar_t> struct OutputWriter {
       #pragma unroll
       for (int item = 0; (item < items_per_thread) && (batch_idx_start + item < batch_size); item++){
         output_a[batch_idx_start + item][s][i] = output_val[mult][item];
-      }
-    }
-  }
-
-};
-
-template<typename scalar_t> struct IntermediateStorage {
-  CudaAcsr<scalar_t, 4> storage_a;
-  IntermediateStorage(const at::Tensor storage):
-    storage_a(storage.packed_accessor32<scalar_t, 4, at::RestrictPtrTraits>()) {}
-
-  template<int items_per_thread, int mult_per_warp=1>
-  __device__ __forceinline__ void save(scalar_t output_val[mult_per_warp][items_per_thread],
-                                       int idx, int step) {
-    #pragma unroll
-    for (int mult = 0; mult < mult_per_warp; mult++) {
-      int i = mult * warpSize + idx;
-      const int s = blockIdx.z;
-      #pragma unroll
-      for (int item = 0; item < items_per_thread; item++){
-        const int b = blockIdx.x * items_per_thread + item;
-        storage_a[step][b][s][i] = output_val[mult][item];
-      }
-    }
-  }
-
-  template<int items_per_thread, int mult_per_warp=1>
-  __device__ __forceinline__ void load(scalar_t input_val[mult_per_warp][items_per_thread],
-                                       int idx, int step) {
-    #pragma unroll
-    for (int mult = 0; mult < mult_per_warp; mult++) {
-      int i = mult * warpSize + idx;
-      const int s = blockIdx.z;
-      #pragma unroll
-      for (int item = 0; item < items_per_thread; item++){
-        const int b = blockIdx.x * items_per_thread + item;
-        input_val[mult][item] = storage_a[step][b][s][i];
       }
     }
   }
@@ -337,11 +308,13 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
     const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, maxstep_fw, increasing_stride);
     const int niters = bit_milestones.size() - 1;
     const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 6, at::RestrictPtrTraits>();
+    const auto input_a = input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    OutputWriter<scalar_t> output_writer(output_a);
     int twiddle_block_idx = 0;
     int twiddle_idx_start = 0;
     for (int iter = 0; iter < niters; iter++) {
-      const InputReader<scalar_t> input_reader(iter == 0 ? input : output);
-      OutputWriter<scalar_t> output_writer(output);
+      const InputReader<scalar_t> input_reader(iter == 0 ? input_a : output_a);
       const bool increasing_stride_this_iter = bit_milestones[iter] <= bit_milestones[iter + 1];
       const int start_bit = increasing_stride_this_iter ? bit_milestones[iter] : bit_milestones[iter + 1];
       const int nsteps = abs(bit_milestones[iter + 1] - bit_milestones[iter]);
@@ -547,12 +520,14 @@ std::tuple<torch::Tensor, torch::Tensor>
     auto intermediate_storage = torch::empty({niters - 1, batch_size, nstacks, n},
                                               torch::dtype(input.dtype()).device(input.device()));
     const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 6, at::RestrictPtrTraits>();
-    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 6, at::RestrictPtrTraits>();
+    const auto grad_a = grad.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     // Forward pass
     int twiddle_block_idx = 0;
     int twiddle_idx_start = 0;
     // Don't need the very last output
     for (int iter = 0; iter < niters - 1; iter++) {
+      // We want to index on intermediate_storage_a but PackedTensorAccessor indexing only works on device code
+      // So we have the index on the tensor itself, not on the accessor.
       const InputReader<scalar_t> input_reader(iter == 0 ? input : intermediate_storage[iter - 1]);
       OutputWriter<scalar_t> output_writer(intermediate_storage[iter]);
       const bool increasing_stride_this_iter = bit_milestones[iter] <= bit_milestones[iter + 1];
@@ -581,12 +556,14 @@ std::tuple<torch::Tensor, torch::Tensor>
       }
     }
     // Backward pass
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 6, at::RestrictPtrTraits>();
+    auto d_input_a = d_input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
+    OutputWriter<scalar_t> d_input_writer(d_input_a);
     twiddle_block_idx = nblocks - 1;
     twiddle_idx_start = log_n;
     for (int iter = niters - 1; iter >= 0; iter--) {
       const InputReader<scalar_t> input_reader(iter == 0 ? input : intermediate_storage[iter - 1]);
-      const InputReader<scalar_t> grad_reader(iter == niters - 1 ? grad : d_input);
-      OutputWriter<scalar_t> d_input_writer(d_input);
+      const InputReader<scalar_t> grad_reader(iter == niters - 1 ? grad_a : d_input_a);
       const bool increasing_stride_this_iter = bit_milestones[iter] <= bit_milestones[iter + 1];
       const int start_bit = increasing_stride_this_iter ? bit_milestones[iter] : bit_milestones[iter + 1];
       const int nsteps = abs(bit_milestones[iter + 1] - bit_milestones[iter]);
