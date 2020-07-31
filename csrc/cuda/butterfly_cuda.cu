@@ -1,6 +1,8 @@
 #include "butterfly_cuda.h"
 #include "complex_utils.cuh"
 #include <ATen/cuda/CUDAContext.h>  // For getCurrentCUDAStream
+#include <ATen/AccumulateType.h>  // For at::acc_type
+#include "map.h"
 
 // Only support float (not double) for now to speed up compilation time
 #undef AT_DISPATCH_FLOATING_TYPES
@@ -11,11 +13,12 @@
     at::ScalarType _st = ::detail::scalar_type(the_type);                                  \
     switch (_st) {                                                                         \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                      \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__) \
       default:                                                                             \
         AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");                     \
     }                                                                                      \
   }()
+
+      // AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__) \
 
 #define FULL_MASK 0xffffffff
 
@@ -55,12 +58,15 @@ static constexpr int MIN_BLOCKS_PER_MP_BACKWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 1
 template <typename scalar_t> struct maxstep {maxstep() = delete;};
 template <> struct maxstep<float> {
   static constexpr int maxstep_fw = 9;
+  static constexpr int maxstep_bw = 8;
 };
 template <> struct maxstep<double> {
   static constexpr int maxstep_fw = 8;
+  static constexpr int maxstep_bw = 7;
 };
 template <> struct maxstep<c10::complex<float>> {
   static constexpr int maxstep_fw = 8;
+  static constexpr int maxstep_bw = 7;
 };
 
 // This takes a lambda templated on int, and a number n between 1 and n_max, and call that lambda templated on n.
@@ -326,7 +332,7 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
   const int nblocks = twiddle.size(1);
   auto output = torch::empty({batch_size, nstacks, n}, torch::dtype(input.dtype()).device(input.device()));
   auto stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_untied_forward_max5_fast_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_fw_cuda", [&] {
     constexpr int maxstep_fw = maxstep<scalar_t>::maxstep_fw;
     const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, maxstep_fw, increasing_stride);
     const int niters = bit_milestones.size() - 1;
@@ -368,9 +374,150 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
     }
   });
   TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-     "butterfly_multiply_untied_forward_max5_fast_cuda failed with error code ",
+     "butterfly_multiply_fw_cuda failed with error code ",
      cudaGetLastError());
   return output;
+}
+
+template <int nsteps, bool increasing_stride, int items_per_thread, int mult_per_warp=1,
+            typename scalar_t, typename accscalar_t=at::acc_type<scalar_t, true>>
+__device__ __forceinline__ void b_untied_forward_backward_shared_twiddle(const scalar_t s_twiddle[nsteps][2][1 << nsteps],
+                                                                         accscalar_t s_d_twiddle[nsteps][2][1 << nsteps],
+                                                                         scalar_t input_val[nsteps][mult_per_warp][items_per_thread],
+                                                                         scalar_t grad_val[mult_per_warp][items_per_thread],
+                                                                         int t_idx) {
+  // Forward pass
+  #pragma unroll
+  for (int step = 0; step < nsteps - 1; step++) {  // Don't need input for the last step
+    int log_stride = increasing_stride ? step : nsteps - 1 - step;
+    int lane_mask = 1 << log_stride;
+    #pragma unroll
+    for (int mult = 0; mult < mult_per_warp; mult++) {
+      const scalar_t twiddle_val[2] = {s_twiddle[step][0][mult * warpSize + t_idx],
+                                       s_twiddle[step][1][mult * warpSize + t_idx]};
+      #pragma unroll
+      for (int item = 0; item < items_per_thread; item++) {
+        scalar_t input_val_other = log_stride < 5 ?
+            __shfl_xor_sync(FULL_MASK, input_val[step][mult][item], lane_mask)
+          : input_val[step][mult ^ (1 << (log_stride - 5))][item];
+        input_val[step + 1][mult][item] = twiddle_val[0] * input_val[step][mult][item] + twiddle_val[1] * input_val_other;
+      }
+    }
+  }
+  // Backward pass
+  #pragma unroll
+  for (int step = nsteps - 1; step >= 0; step--) {
+    int log_stride = increasing_stride ? step : nsteps - 1 - step;
+    int lane_mask = 1 << log_stride;
+    #pragma unroll
+    for (int mult = 0; mult < mult_per_warp; mult++) {
+      const scalar_t twiddle_val[2] = {s_twiddle[step][0][mult * warpSize + t_idx],
+                                       s_twiddle[step][1][mult * warpSize + t_idx]};
+      accscalar_t d_twiddle_val[2] = {0};
+      #pragma unroll
+      for (int item = 0; item < items_per_thread; item++) {
+        d_twiddle_val[0] += grad_val[mult][item] * input_val[step][mult][item];
+        scalar_t input_val_other = log_stride < 5 ?
+            __shfl_xor_sync(FULL_MASK, input_val[step][mult][item], lane_mask)
+          : input_val[step][mult ^ (1 << (log_stride - 5))][item];
+        d_twiddle_val[1] += grad_val[mult][item] * input_val_other;
+        if (log_stride < 5) {
+          grad_val[mult][item] = twiddle_val[0] * grad_val[mult][item]
+            + __shfl_xor_sync(FULL_MASK, twiddle_val[1] * grad_val[mult][item], lane_mask);
+        }
+      }
+      atomicAdd(&s_d_twiddle[step][0][mult * warpSize + t_idx], d_twiddle_val[0]);
+      atomicAdd(&s_d_twiddle[step][1][mult * warpSize + t_idx], d_twiddle_val[1]);
+    }
+    if (log_stride >= 5) {
+      int mult_stride = 1 << (log_stride - 5);
+      #pragma unroll
+      for (int m = 0; m < mult_per_warp / 2; m++) {
+        int low_order_bits = m & (mult_stride - 1);  // int low_order_bits = m % mult_stride;
+        int mult = 2 * (m - low_order_bits) + low_order_bits;
+        const scalar_t twiddle_val[2][2]
+          = {{s_twiddle[step][0][mult * warpSize + t_idx],
+              s_twiddle[step][1][mult * warpSize + t_idx]},
+             {s_twiddle[step][0][(mult + mult_stride) * warpSize + t_idx],
+              s_twiddle[step][1][(mult + mult_stride) * warpSize + t_idx]}};
+        #pragma unroll
+        for (int item = 0; item < items_per_thread; item++) {
+          scalar_t grads[2] = {grad_val[mult][item], grad_val[mult + mult_stride][item]};
+          // The order of twiddle[1] is swapped by design
+          grad_val[mult][item] = twiddle_val[0][0] * grads[0] + twiddle_val[1][1] * grads[1];
+          grad_val[mult + mult_stride][item] = twiddle_val[0][1] * grads[0] + twiddle_val[1][0] * grads[1];
+        }
+      }
+    }
+  }
+}
+
+template <int nsteps, bool increasing_stride,
+            int items_per_thread=ITEMS_PER_THREAD_BACKWARD_MAX5[nsteps - 1],
+            int min_blocks_per_mp=MIN_BLOCKS_PER_MP_BACKWARD[nsteps - 1],
+            typename scalar_t, typename accscalar_t=at::acc_type<scalar_t, true>>
+C10_LAUNCH_BOUNDS_2(MAX5_BACKWARD_BLOCK_SIZE, min_blocks_per_mp)
+__global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel(const CudaAcsr<scalar_t, 6> twiddle_a,
+                                                                                 InputReader<scalar_t> input_reader,
+                                                                                 InputReader<scalar_t> grad_reader,
+                                                                                 CudaAcsr<scalar_t, 6> d_twiddle_a,
+                                                                                 OutputWriter<scalar_t> d_input_writer,
+                                                                                 int log_n,
+                                                                                 int twiddle_idx_start,
+                                                                                 int twiddle_block_idx,
+                                                                                 int input_idx_start_bit) {
+  constexpr int span = 1 << nsteps;
+  constexpr int mult_per_warp = span > WARP_SIZE ? span / WARP_SIZE : 1;
+  __shared__ scalar_t s_twiddle[nsteps][2][span];
+  __shared__ accscalar_t s_d_twiddle[nsteps][2][span];
+  scalar_t input_val[nsteps][mult_per_warp][items_per_thread];
+  scalar_t grad_val[mult_per_warp][items_per_thread];
+  const int t_idx = threadIdx.x;
+  const int batch_idx = (threadIdx.y + (blockIdx.x >> (log_n - nsteps)) * blockDim.y) * items_per_thread;
+  const int remaining_input_idx = blockIdx.x & ((1 << (log_n - nsteps)) - 1);
+  const int low_bits = remaining_input_idx & ((1 << input_idx_start_bit) - 1);
+  const int high_bits = (remaining_input_idx >> input_idx_start_bit) << (input_idx_start_bit + nsteps);
+  // All threads with the same t_idx should have the same input_idx
+  const int input_idx = high_bits | (t_idx << input_idx_start_bit) | low_bits;
+  const int input_idx_stride = (1 << input_idx_start_bit) * warpSize;
+  const int s = blockIdx.y + gridDim.y * blockIdx.z;  // For conv2d butterfly as well
+  for (int t = threadIdx.x + threadIdx.y * blockDim.x; t < nsteps * (span / 2); t += blockDim.x * blockDim.y) {
+    const int step = t / (span / 2);
+    const int twiddle_idx = twiddle_idx_start + step;
+    const int s_twiddle_stride = 1 << (increasing_stride ? step : nsteps - 1 - step);
+    const int remainder = t % (span / 2);
+    const int low_order_bits = remainder & (s_twiddle_stride - 1);
+    const int s_idx = 2 * (remainder - low_order_bits) + low_order_bits;
+    const int idx = (high_bits >> 1) | (remainder << input_idx_start_bit) | low_bits;
+    s_twiddle[step][0][s_idx] = twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][0][0];
+    s_twiddle[step][1][s_idx] = twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][0][1];
+    s_twiddle[step][1][s_idx + s_twiddle_stride] = twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][1][0];
+    s_twiddle[step][0][s_idx + s_twiddle_stride] = twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][1][1];
+    s_d_twiddle[step][0][s_idx] = 0;
+    s_d_twiddle[step][1][s_idx] = 0;
+    s_d_twiddle[step][1][s_idx + s_twiddle_stride] = 0;
+    s_d_twiddle[step][0][s_idx + s_twiddle_stride] = 0;
+  }
+  input_reader.load_max5<items_per_thread, mult_per_warp>(input_val[0], batch_idx, input_idx, input_idx_stride);
+  __syncthreads();
+  grad_reader.load_max5<items_per_thread, mult_per_warp>(grad_val, batch_idx, input_idx, input_idx_stride);
+  b_untied_forward_backward_shared_twiddle<nsteps, increasing_stride, items_per_thread, mult_per_warp>
+    (s_twiddle, s_d_twiddle, input_val, grad_val, t_idx);
+  d_input_writer.save_max5<items_per_thread, mult_per_warp>(grad_val, batch_idx, input_idx, input_idx_stride);
+  __syncthreads();
+  for (int t = threadIdx.x + threadIdx.y * blockDim.x; t < nsteps * (span / 2); t += blockDim.x * blockDim.y) {
+    const int step = t / (span / 2);
+    const int twiddle_idx = twiddle_idx_start + step;
+    const int s_twiddle_stride = 1 << (increasing_stride ? step : nsteps - 1 - step);
+    const int remainder = t % (span / 2);
+    const int low_order_bits = remainder & (s_twiddle_stride - 1);
+    const int s_idx = 2 * (remainder - low_order_bits) + low_order_bits;
+    const int idx = (high_bits >> 1) | (remainder << input_idx_start_bit) | low_bits;
+    atomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][0][0], (scalar_t) s_d_twiddle[step][0][s_idx]);
+    atomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][0][1], (scalar_t) s_d_twiddle[step][1][s_idx]);
+    atomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][1][0], (scalar_t) s_d_twiddle[step][1][s_idx + s_twiddle_stride]);
+    atomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][1][1], (scalar_t) s_d_twiddle[step][0][s_idx + s_twiddle_stride]);
+  }
 }
 
 std::tuple<torch::Tensor, torch::Tensor>
@@ -378,5 +525,94 @@ std::tuple<torch::Tensor, torch::Tensor>
                              const torch::Tensor input,
                              const torch::Tensor grad,
                              bool increasing_stride) {
-  return std::make_tuple(input, grad);
+  int batch_size = input.size(0);
+  const int nstacks = input.size(1);
+  const int n = input.size(2);
+  const int log_n = int(log2((double) n));
+  const int nblocks = twiddle.size(1);
+  auto d_input =
+      torch::empty({batch_size, nstacks, n},
+                   torch::dtype(input.dtype()).device(input.device()));
+  auto d_twiddle = torch::zeros_like(twiddle);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_bw_cuda", [&] {
+    constexpr int maxstep_bw = maxstep<scalar_t>::maxstep_bw;
+    const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, maxstep_bw, increasing_stride);
+    const int niters = bit_milestones.size() - 1;
+    auto intermediate_storage = torch::empty({niters - 1, batch_size, nstacks, n},
+                                              torch::dtype(input.dtype()).device(input.device()));
+    const auto twiddle_a = twiddle.packed_accessor32<scalar_t, 6, at::RestrictPtrTraits>();
+    auto d_twiddle_a = d_twiddle.packed_accessor32<scalar_t, 6, at::RestrictPtrTraits>();
+    // Forward pass
+    int twiddle_block_idx = 0;
+    int twiddle_idx_start = 0;
+    // Don't need the very last output
+    for (int iter = 0; iter < niters - 1; iter++) {
+      const InputReader<scalar_t> input_reader(iter == 0 ? input : intermediate_storage[iter - 1]);
+      OutputWriter<scalar_t> output_writer(intermediate_storage[iter]);
+      const bool increasing_stride_this_iter = bit_milestones[iter] <= bit_milestones[iter + 1];
+      const int start_bit = increasing_stride_this_iter ? bit_milestones[iter] : bit_milestones[iter + 1];
+      const int nsteps = abs(bit_milestones[iter + 1] - bit_milestones[iter]);
+      const int span = 1 << nsteps;
+      const int n_div_span = 1 << (log_n - nsteps);  // = n / span
+      const int block_x = min(span, WARP_SIZE);
+      const int max_block_y = MAX5_FORWARD_BLOCK_SIZE / block_x;
+      dim3 block(block_x, min(max_block_y, div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1])));
+      // grid.x must be at least n / span
+      dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1] * block.y) * n_div_span, 1, nstacks);
+      auto launch = [increasing_stride_this_iter, &grid, &block, &stream, &twiddle_a, &input_reader, &output_writer,
+                     log_n, twiddle_idx_start, twiddle_block_idx, start_bit] (auto dummy) {
+        constexpr int nsteps_val = decltype(dummy)::value;
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, true>
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, twiddle_block_idx, start_bit)
+          : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, false>
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, output_writer, log_n, twiddle_idx_start, twiddle_block_idx, start_bit);
+      };
+      Dispatch<maxstep_bw, decltype(launch)>::call(launch, nsteps);
+      twiddle_idx_start += nsteps;
+      if (twiddle_idx_start >= log_n) {
+        twiddle_idx_start = 0;
+        twiddle_block_idx++;
+      }
+    }
+    // Backward pass
+    twiddle_block_idx = nblocks - 1;
+    twiddle_idx_start = log_n;
+    for (int iter = niters - 1; iter >= 0; iter--) {
+      const InputReader<scalar_t> input_reader(iter == 0 ? input : intermediate_storage[iter - 1]);
+      const InputReader<scalar_t> grad_reader(iter == niters - 1 ? grad : d_input);
+      OutputWriter<scalar_t> d_input_writer(d_input);
+      const bool increasing_stride_this_iter = bit_milestones[iter] <= bit_milestones[iter + 1];
+      const int start_bit = increasing_stride_this_iter ? bit_milestones[iter] : bit_milestones[iter + 1];
+      const int nsteps = abs(bit_milestones[iter + 1] - bit_milestones[iter]);
+      twiddle_idx_start -= nsteps;
+      if (twiddle_idx_start < 0) {
+        twiddle_block_idx--;
+        twiddle_idx_start += log_n;
+      }
+      // std::cout << "TWIDDLE_IDX" << twiddle_block_idx << twiddle_idx_start << "\n";
+      const int span = 1 << nsteps;
+      const int n_div_span = 1 << (log_n - nsteps);  // = n / span
+      const int block_x = min(span, WARP_SIZE);
+      const int max_block_y = MAX5_BACKWARD_BLOCK_SIZE / block_x;
+      dim3 block(block_x, min(max_block_y, div_up(batch_size, ITEMS_PER_THREAD_BACKWARD_MAX5[nsteps - 1])));
+      // grid.x must be at least n / span
+      dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD_MAX5[nsteps - 1] * block.y) * n_div_span, 1, nstacks);
+      switch (nsteps) {
+        #define CASE_NSTEPS_BACKWARD(nsteps_val) case nsteps_val:                                                        \
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<nsteps_val, true> \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,                \
+          log_n, twiddle_idx_start, twiddle_block_idx, start_bit)        \
+          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<nsteps_val, false>                          \
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,                \
+                                       log_n, twiddle_idx_start, twiddle_block_idx, start_bit); break;
+
+        MAP(CASE_NSTEPS_BACKWARD, 1, 2, 3, 4, 5, 6, 7, 8)
+      }
+    }
+  });
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
+     "butterfly_multiply_bw_cuda failed with error code ",
+     cudaGetLastError());
+  return std::make_tuple(d_twiddle, d_input);
 }
