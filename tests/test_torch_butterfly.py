@@ -20,8 +20,8 @@ class ButterflyMultTest(unittest.TestCase):
             nblocks = 3
             # for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
             for device in ['cuda']:
-                # for complex in [False, True]:
-                for complex in [False]:
+                for complex in [False, True]:
+                # for complex in [False]:
                     for increasing_stride in [True, False]:
                     # for increasing_stride in [True]:
                         if batch_size > 1024 and (device == 'cpu'):

@@ -1,7 +1,7 @@
 #include "butterfly_cuda.h"
 #include "complex_utils.cuh"
 #include <ATen/cuda/CUDAContext.h>  // For getCurrentCUDAStream
-#include <ATen/AccumulateType.h>  // For at::acc_type
+#include <THC/THCAtomics.cuh>  // For atomicAdd on complex
 #include "map.h"
 
 // Only support float (not double) for now to speed up compilation time
@@ -13,12 +13,12 @@
     at::ScalarType _st = ::detail::scalar_type(the_type);                                  \
     switch (_st) {                                                                         \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                      \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__) \
       default:                                                                             \
         AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");                     \
     }                                                                                      \
   }()
 
-      // AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__) \
 
 #define FULL_MASK 0xffffffff
 
@@ -416,18 +416,18 @@ __device__ __forceinline__ void b_untied_forward_backward_shared_twiddle(const s
       accscalar_t d_twiddle_val[2] = {0};
       #pragma unroll
       for (int item = 0; item < items_per_thread; item++) {
-        d_twiddle_val[0] += grad_val[mult][item] * input_val[step][mult][item];
+        d_twiddle_val[0] += grad_val[mult][item] * conj_wrapper(input_val[step][mult][item]);
         scalar_t input_val_other = log_stride < 5 ?
             __shfl_xor_sync(FULL_MASK, input_val[step][mult][item], lane_mask)
           : input_val[step][mult ^ (1 << (log_stride - 5))][item];
-        d_twiddle_val[1] += grad_val[mult][item] * input_val_other;
+        d_twiddle_val[1] += grad_val[mult][item] * conj_wrapper(input_val_other);
         if (log_stride < 5) {
-          grad_val[mult][item] = twiddle_val[0] * grad_val[mult][item]
-            + __shfl_xor_sync(FULL_MASK, twiddle_val[1] * grad_val[mult][item], lane_mask);
+          grad_val[mult][item] = conj_wrapper(twiddle_val[0]) * grad_val[mult][item]
+            + __shfl_xor_sync(FULL_MASK, conj_wrapper(twiddle_val[1]) * grad_val[mult][item], lane_mask);
         }
       }
-      atomicAdd(&s_d_twiddle[step][0][mult * warpSize + t_idx], d_twiddle_val[0]);
-      atomicAdd(&s_d_twiddle[step][1][mult * warpSize + t_idx], d_twiddle_val[1]);
+      gpuAtomicAdd(&s_d_twiddle[step][0][mult * warpSize + t_idx], d_twiddle_val[0]);
+      gpuAtomicAdd(&s_d_twiddle[step][1][mult * warpSize + t_idx], d_twiddle_val[1]);
     }
     if (log_stride >= 5) {
       int mult_stride = 1 << (log_stride - 5);
@@ -444,8 +444,8 @@ __device__ __forceinline__ void b_untied_forward_backward_shared_twiddle(const s
         for (int item = 0; item < items_per_thread; item++) {
           scalar_t grads[2] = {grad_val[mult][item], grad_val[mult + mult_stride][item]};
           // The order of twiddle[1] is swapped by design
-          grad_val[mult][item] = twiddle_val[0][0] * grads[0] + twiddle_val[1][1] * grads[1];
-          grad_val[mult + mult_stride][item] = twiddle_val[0][1] * grads[0] + twiddle_val[1][0] * grads[1];
+          grad_val[mult][item] = conj_wrapper(twiddle_val[0][0]) * grads[0] + conj_wrapper(twiddle_val[1][1]) * grads[1];
+          grad_val[mult + mult_stride][item] = conj_wrapper(twiddle_val[0][1]) * grads[0] + conj_wrapper(twiddle_val[1][0]) * grads[1];
         }
       }
     }
@@ -455,7 +455,7 @@ __device__ __forceinline__ void b_untied_forward_backward_shared_twiddle(const s
 template <int nsteps, bool increasing_stride,
             int items_per_thread=ITEMS_PER_THREAD_BACKWARD_MAX5[nsteps - 1],
             int min_blocks_per_mp=MIN_BLOCKS_PER_MP_BACKWARD[nsteps - 1],
-            typename scalar_t, typename accscalar_t=at::acc_type<scalar_t, true>>
+            typename scalar_t>
 C10_LAUNCH_BOUNDS_2(MAX5_BACKWARD_BLOCK_SIZE, min_blocks_per_mp)
 __global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel(const CudaAcsr<scalar_t, 6> twiddle_a,
                                                                                  InputReader<scalar_t> input_reader,
@@ -466,10 +466,15 @@ __global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel
                                                                                  int twiddle_idx_start,
                                                                                  int twiddle_block_idx,
                                                                                  int input_idx_start_bit) {
+  using accscalar_t = at::acc_type<scalar_t, true>;
   constexpr int span = 1 << nsteps;
   constexpr int mult_per_warp = span > WARP_SIZE ? span / WARP_SIZE : 1;
-  __shared__ scalar_t s_twiddle[nsteps][2][span];
-  __shared__ accscalar_t s_d_twiddle[nsteps][2][span];
+  // __shared__ scalar_t s_twiddle[nsteps][2][span];
+  __shared__ char s_twiddle_char[nsteps][2][span * sizeof(scalar_t)];
+  scalar_t (*s_twiddle)[2][span] = (scalar_t (*)[2][span])&s_twiddle_char[0][0][0];
+  // __shared__ accscalar_t s_d_twiddle[nsteps][2][span];
+  __shared__ char s_d_twiddle_char[nsteps][2][span * sizeof(accscalar_t)];
+  accscalar_t (*s_d_twiddle)[2][span] = (accscalar_t (*)[2][span])&s_d_twiddle_char[0][0][0];
   scalar_t input_val[nsteps][mult_per_warp][items_per_thread];
   scalar_t grad_val[mult_per_warp][items_per_thread];
   const int t_idx = threadIdx.x;
@@ -513,10 +518,10 @@ __global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel
     const int low_order_bits = remainder & (s_twiddle_stride - 1);
     const int s_idx = 2 * (remainder - low_order_bits) + low_order_bits;
     const int idx = (high_bits >> 1) | (remainder << input_idx_start_bit) | low_bits;
-    atomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][0][0], (scalar_t) s_d_twiddle[step][0][s_idx]);
-    atomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][0][1], (scalar_t) s_d_twiddle[step][1][s_idx]);
-    atomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][1][0], (scalar_t) s_d_twiddle[step][1][s_idx + s_twiddle_stride]);
-    atomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][1][1], (scalar_t) s_d_twiddle[step][0][s_idx + s_twiddle_stride]);
+    gpuAtomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][0][0], (scalar_t) s_d_twiddle[step][0][s_idx]);
+    gpuAtomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][0][1], (scalar_t) s_d_twiddle[step][1][s_idx]);
+    gpuAtomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][1][0], (scalar_t) s_d_twiddle[step][1][s_idx + s_twiddle_stride]);
+    gpuAtomicAdd(&d_twiddle_a[s][twiddle_block_idx][twiddle_idx][idx][1][1], (scalar_t) s_d_twiddle[step][0][s_idx + s_twiddle_stride]);
   }
 }
 
@@ -590,7 +595,6 @@ std::tuple<torch::Tensor, torch::Tensor>
         twiddle_block_idx--;
         twiddle_idx_start += log_n;
       }
-      // std::cout << "TWIDDLE_IDX" << twiddle_block_idx << twiddle_idx_start << "\n";
       const int span = 1 << nsteps;
       const int n_div_span = 1 << (log_n - nsteps);  // = n / span
       const int block_x = min(span, WARP_SIZE);
@@ -598,17 +602,18 @@ std::tuple<torch::Tensor, torch::Tensor>
       dim3 block(block_x, min(max_block_y, div_up(batch_size, ITEMS_PER_THREAD_BACKWARD_MAX5[nsteps - 1])));
       // grid.x must be at least n / span
       dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD_MAX5[nsteps - 1] * block.y) * n_div_span, 1, nstacks);
-      switch (nsteps) {
-        #define CASE_NSTEPS_BACKWARD(nsteps_val) case nsteps_val:                                                        \
-        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<nsteps_val, true> \
-          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,                \
-          log_n, twiddle_idx_start, twiddle_block_idx, start_bit)        \
-          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<nsteps_val, false>                          \
-          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,                \
-                                       log_n, twiddle_idx_start, twiddle_block_idx, start_bit); break;
-
-        MAP(CASE_NSTEPS_BACKWARD, 1, 2, 3, 4, 5, 6, 7, 8)
-      }
+      auto launch = [increasing_stride_this_iter, &grid, &block, &stream, &twiddle_a, &input_reader,
+                     &grad_reader, &d_twiddle_a, &d_input_writer, log_n, twiddle_idx_start,
+                     twiddle_block_idx, start_bit] (auto dummy) {
+        constexpr int nsteps_val = decltype(dummy)::value;
+        increasing_stride_this_iter ? butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<nsteps_val, true>
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,
+                                       log_n, twiddle_idx_start, twiddle_block_idx, start_bit)
+          : butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel<nsteps_val, false>
+          <<<grid, block, 0, stream>>>(twiddle_a, input_reader, grad_reader, d_twiddle_a, d_input_writer,
+                                       log_n, twiddle_idx_start, twiddle_block_idx, start_bit);
+      };
+      Dispatch<maxstep_bw, decltype(launch)>::call(launch, nsteps);
     }
   });
   TORCH_CHECK(cudaGetLastError() == cudaSuccess,
