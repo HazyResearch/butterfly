@@ -57,16 +57,16 @@ static constexpr int MIN_BLOCKS_PER_MP_BACKWARD[14] = {1, 1, 1, 1, 1, 1, 1, 1, 1
 // Need to have general template, but construction will yield compilation error.
 template <typename scalar_t> struct maxstep {maxstep() = delete;};
 template <> struct maxstep<float> {
-  static constexpr int maxstep_fw = 9;
-  static constexpr int maxstep_bw = 8;
+  static constexpr int MAXSTEP_FW = 9;
+  static constexpr int MAXSTEP_BW = 8;
 };
 template <> struct maxstep<double> {
-  static constexpr int maxstep_fw = 8;
-  static constexpr int maxstep_bw = 7;
+  static constexpr int MAXSTEP_FW = 8;
+  static constexpr int MAXSTEP_BW = 7;
 };
 template <> struct maxstep<c10::complex<float>> {
-  static constexpr int maxstep_fw = 8;
-  static constexpr int maxstep_bw = 7;
+  static constexpr int MAXSTEP_FW = 8;
+  static constexpr int MAXSTEP_BW = 7;
 };
 
 // This takes a lambda templated on int, and a number n between 1 and n_max, and call that lambda templated on n.
@@ -351,8 +351,8 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
   auto output = torch::empty({batch_size, nstacks, n}, torch::dtype(input.dtype()).device(input.device()));
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_fw_cuda", [&] {
-    constexpr int maxstep_fw = maxstep<scalar_t>::maxstep_fw;
-    const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, maxstep_fw, increasing_stride);
+    constexpr int MAXSTEP_FW = maxstep<scalar_t>::MAXSTEP_FW;
+    const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, MAXSTEP_FW, increasing_stride);
     const int niters = bit_milestones.size() - 1;
     const auto input_a = input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
@@ -388,7 +388,7 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
           : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, false>
           <<<grid, block, 0, stream>>>(twiddle_reader, input_reader, output_writer, log_n, start_bit);
       };
-      Dispatch<maxstep_fw, decltype(launch)>::call(launch, nsteps);
+      Dispatch<MAXSTEP_FW, decltype(launch)>::call(launch, nsteps);
       twiddle_idx_start += nsteps;
       if (twiddle_idx_start >= log_n) {
         twiddle_idx_start = 0;
@@ -534,8 +534,8 @@ std::tuple<torch::Tensor, torch::Tensor>
   auto d_twiddle = torch::zeros_like(twiddle);
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_bw_cuda", [&] {
-    constexpr int maxstep_bw = maxstep<scalar_t>::maxstep_bw;
-    const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, maxstep_bw, increasing_stride);
+    constexpr int MAXSTEP_BW = maxstep<scalar_t>::MAXSTEP_BW;
+    const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, MAXSTEP_BW, increasing_stride);
     const int niters = bit_milestones.size() - 1;
     auto intermediate_storage = torch::empty({niters - 1, batch_size, nstacks, n},
                                               torch::dtype(input.dtype()).device(input.device()));
@@ -570,7 +570,7 @@ std::tuple<torch::Tensor, torch::Tensor>
           : butterfly_multiply_untied_forward_max5_fast_cuda_kernel<nsteps_val, false>
           <<<grid, block, 0, stream>>>(twiddle_reader, input_reader, output_writer, log_n, start_bit);
       };
-      Dispatch<maxstep_bw, decltype(launch)>::call(launch, nsteps);
+      Dispatch<MAXSTEP_BW, decltype(launch)>::call(launch, nsteps);
       twiddle_idx_start += nsteps;
       if (twiddle_idx_start >= log_n) {
         twiddle_idx_start = 0;
@@ -615,7 +615,7 @@ std::tuple<torch::Tensor, torch::Tensor>
           <<<grid, block, 0, stream>>>(twiddle_reader, input_reader, grad_reader, d_twiddle_writer, d_input_writer,
                                        log_n, start_bit);
       };
-      Dispatch<maxstep_bw, decltype(launch)>::call(launch, nsteps);
+      Dispatch<MAXSTEP_BW, decltype(launch)>::call(launch, nsteps);
     }
   });
   TORCH_CHECK(cudaGetLastError() == cudaSuccess,
