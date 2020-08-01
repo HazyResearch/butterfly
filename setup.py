@@ -65,7 +65,7 @@ setup(
     author='Tri Dao',
     author_email='trid@stanford.edu',
     url='https://github.com/hazyresearch/learning-circuits',
-    description=('Implementation of butterfly matrix multiplication in PyTorch'),
+    description=('Butterfly matrix multiplication in PyTorch'),
     keywords=[
         'pytorch',
         'butterfly',
@@ -80,7 +80,8 @@ setup(
     ext_modules=get_extensions() if not BUILD_DOCS else [],
     cmdclass={
         'build_ext':
-        BuildExtension.with_options(no_python_abi_suffix=True, use_ninja=False)
+        BuildExtension.with_options(no_python_abi_suffix=True, use_ninja=True)
     },
-    packages=find_packages(),
+    # packages=find_packages(),
+    packages=['torch_butterfly'],
 )
