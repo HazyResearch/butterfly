@@ -5,8 +5,8 @@
 #include "map.h"
 
 // Only support float (not double) for now to speed up compilation time
-#undef AT_DISPATCH_FLOATING_TYPES
-#define AT_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...)                                        \
+#undef AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES
+#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(TYPE, NAME, ...)                            \
   [&] {                                                                                    \
     const auto& the_type = TYPE;                                                           \
     /* don't use TYPE again in case it is an expensive or side-effect op */                \
@@ -350,7 +350,7 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
   const int nblocks = twiddle.size(1);
   auto output = torch::empty({batch_size, nstacks, n}, torch::dtype(input.dtype()).device(input.device()));
   auto stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_fw_cuda", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "butterfly_multiply_fw_cuda", [&] {
     constexpr int MAXSTEP_FW = maxstep<scalar_t>::MAXSTEP_FW;
     const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, MAXSTEP_FW, increasing_stride);
     const int niters = bit_milestones.size() - 1;
@@ -533,7 +533,7 @@ std::tuple<torch::Tensor, torch::Tensor>
                    torch::dtype(input.dtype()).device(input.device()));
   auto d_twiddle = torch::zeros_like(twiddle);
   auto stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "butterfly_multiply_bw_cuda", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "butterfly_multiply_bw_cuda", [&] {
     constexpr int MAXSTEP_BW = maxstep<scalar_t>::MAXSTEP_BW;
     const std::vector<int> bit_milestones = butterfly_max5_plan(log_n, nblocks, MAXSTEP_BW, increasing_stride);
     const int niters = bit_milestones.size() - 1;
