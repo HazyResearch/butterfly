@@ -1,17 +1,41 @@
 import math
 import unittest
 
+import numpy as np
+
 import torch
 import torch_butterfly
 
 
-class ButterflyMultTest(unittest.TestCase):
+class ButterflyTest(unittest.TestCase):
 
     def setUp(self):
         self.rtol = 1e-3
         self.atol = 1e-5
 
-    def test_butterfly_untied(self):
+    def test_butterfly(self):
+        batch_size = 10
+        for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+            for in_size, out_size in [(7, 15), (15, 7)]:
+                for complex in [False, True]:
+                    for increasing_stride in [True, False]:
+                        for ortho_init in [False, True]:
+                            for nblocks in [1, 2, 3]:
+                                b = torch_butterfly.Butterfly(in_size, out_size, True, complex,
+                                                              increasing_stride, ortho_init, nblocks=nblocks).to(device)
+                                dtype = torch.float32 if not complex else torch.complex64
+                                input = torch.randn(batch_size, in_size, dtype=dtype, device=device)
+                                output = b(input)
+                                self.assertTrue(output.shape == (batch_size, out_size),
+                                                (output.shape, device, (in_size, out_size), complex, ortho_init, nblocks))
+                                if ortho_init:
+                                    twiddle_np = b.twiddle.detach().to('cpu').numpy()
+                                    twiddle_np = twiddle_np.reshape(-1, 2, 2)
+                                    twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
+                                    self.assertTrue(np.allclose(twiddle_norm, 1),
+                                                    (twiddle_norm, device, (in_size, out_size), complex, ortho_init))
+
+    def test_multiply(self):
         for batch_size, n in [(10, 4096), (8192, 512)]:  # Test size smaller than 1024 and large batch size for race conditions
         # for batch_size, n in [(10, 64)]:
         # for batch_size, n in [(1, 2)]:
@@ -32,7 +56,7 @@ class ButterflyMultTest(unittest.TestCase):
                         twiddle = torch.randn((nstack, nblocks, log_n, n // 2, 2, 2), dtype=dtype, requires_grad=True, device=device) * scaling
                         input = torch.randn((batch_size, nstack, n), dtype=dtype, requires_grad=True, device=twiddle.device)
                         output = torch_butterfly.butterfly_multiply(twiddle, input, increasing_stride)
-                        output_torch = torch_butterfly.butterfly.butterfly_multiply_torch(twiddle, input, increasing_stride)
+                        output_torch = torch_butterfly.multiply.butterfly_multiply_torch(twiddle, input, increasing_stride)
                         self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
                                         ((output - output_torch).abs().max().item(), device, complex, increasing_stride))
                         grad = torch.randn_like(output_torch)

@@ -23,7 +23,9 @@ __host__ __device__ static inline c10::complex<T> conj_wrapper(c10::complex<T> v
   return std::conj(v);
 }
 
-// This isn't defined yet for c10::complex with is_cuda=True for some reason
+// This isn't defined yet (pytorch 1.6) for c10::complex with is_cuda=True
+// until https://github.com/pytorch/pytorch/commit/324c18fcad579b1afa63ae45528bf598ba8ec4ca
+// TODO: remove if compiling with pytorch-nightly or once pytorch 1.7 is released.
 namespace at {
 template <> struct AccumulateType<c10::complex<float>, true> { using type = c10::complex<float>; };
 template <> struct AccumulateType<c10::complex<double>, true> { using type = c10::complex<double>; };
