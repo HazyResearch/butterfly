@@ -23,7 +23,7 @@ class Butterfly(nn.Module):
     """
 
     def __init__(self, in_size, out_size, bias=True, complex=False,
-                 increasing_stride=True, ortho_init=False, nblocks=0):
+                 increasing_stride=True, ortho_init=False, nblocks=1):
         super().__init__()
         self.in_size = in_size
         log_n = int(math.ceil(math.log2(in_size)))
@@ -34,6 +34,7 @@ class Butterfly(nn.Module):
         self.complex = complex
         self.increasing_stride = increasing_stride
         self.ortho_init = ortho_init
+        assert nblocks >= 1
         self.nblocks = nblocks
         float_dtype_to_complex = {torch.float32: torch.complex64, torch.float64: torch.complex128}
         dtype = torch.get_default_dtype() if not complex else float_dtype_to_complex[torch.get_default_dtype()]
@@ -89,7 +90,7 @@ class Butterfly(nn.Module):
 
     def pre_process(self, input):
         # Reshape to (N, in_size)
-        output = input.view(-1, input.size(-1))
+        output = input.reshape(-1, input.size(-1))
         batch = output.shape[0]
         if self.in_size != self.in_size_extended:  # Zero-pad
             output = F.pad(output, (0, self.in_size_extended - self.in_size))
