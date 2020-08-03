@@ -3,7 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from .multiply import butterfly_multiply
+from torch_butterfly.multiply import butterfly_multiply
 
 
 class Butterfly(nn.Module):

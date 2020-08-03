@@ -3,7 +3,7 @@ from typing import Tuple
 
 import torch
 
-from .complex_utils import complex_mul
+from torch_butterfly.complex_utils import complex_mul
 
 
 @torch.jit.script
