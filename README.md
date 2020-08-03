@@ -1,11 +1,34 @@
 Code to accompany the paper <a href="https://arxiv.org/abs/1903.05895">Learning Fast Algorithms for Linear Transforms Using Butterfly Factorizations.
 
 ## Requirements
-Python 3.6+  
-PyTorch >=1.2
-Numpy
+python>=3.6  
+pytorch>=1.6  
+numpy  
+scipy
 
 ## Usage
+
+2020-08-03: The new interface to butterfly C++/CUDA code is in `csrc` and
+`torch_butterfly`.
+It is tested in `tests/test_torch_butterfly.py` (which also shows example
+usage).
+
+To install:
+```
+python setup.py install
+```
+That is, use the `setup.py` file in this root directory.
+
+The file `torch_butterfly/special.py` shows how to construct butterfly matrices
+that performs FFT, inverse FFT, circulant matrix multiplication,
+Hadamard transform, and torch.nn.Conv1d with circular padding. The tests in
+`tests/test_special.py` show that these butterfly matrices exactly perform
+those operations.
+
+## Old interface
+
+Note: this interface is being rewritten. Only use this if you need some feature
+that's not supported in the new interface.
 
 * The module `Butterfly` in `butterfly/butterfly.py` can be used as a drop-in
 replacement for a `nn.Linear` layer. The files in `butterfly` directory are all

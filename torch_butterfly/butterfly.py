@@ -17,10 +17,10 @@ class Butterfly(nn.Module):
         bias: If set to False, the layer will not learn an additive bias.
                 Default: ``True``
         complex: whether complex or real
-        increasing_stride: whether to multiply with increasing stride (e.g. 1, 2, ..., n/2) or
-            decreasing stride (e.g., n/2, n/4, ..., 1).
+        increasing_stride: whether the first butterfly block will multiply with increasing stride
+            (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
         ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
-        nblocks: number of (BB^T) blocks.
+        nblocks: number of B or B^T blocks. The B and B^T will alternate.
     """
 
     def __init__(self, in_size, out_size, bias=True, complex=False,
