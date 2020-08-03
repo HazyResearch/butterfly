@@ -31,7 +31,8 @@ def fft(n, normalized=False, br_first=True, with_br_perm=True):
     twiddle = torch.stack(factors, dim=0).unsqueeze(0).unsqueeze(0)
     if not br_first:  # Take conjugate transpose of the BP decomposition of ifft
         twiddle = twiddle.transpose(-1, -2).flip(dims=(2,))
-    if normalized:  # Divide the whole transform by sqrt(n) by dividing each factor by n^(1/2 log_n) = sqrt(2)
+    # Divide the whole transform by sqrt(n) by dividing each factor by n^(1/2 log_n) = sqrt(2)
+    if normalized:
         twiddle /= math.sqrt(2)
     b = Butterfly(n, n, bias=False, complex=True, increasing_stride=br_first)
     with torch.no_grad():
@@ -47,9 +48,9 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True):
     """ Construct an nn.Module based on Butterfly that exactly performs the inverse FFT.
     Parameters:
         n: size of the iFFT. Must be a power of 2.
-        normalized: if True, corresponds to the unitary iFFT (i.e. multiplied by 1/sqrt(n), not 1/n)
-        br_first: which decomposition of iFFT. br_first=True corresponds to decimation-in-frequency.
-                  br_first=False corresponds to decimation-in-time.
+        normalized: if True, corresponds to unitary iFFT (i.e. multiplied by 1/sqrt(n), not 1/n)
+        br_first: which decomposition of iFFT. True corresponds to decimation-in-frequency.
+                  False corresponds to decimation-in-time.
         with_br_perm: whether to return both the butterfly and the bit reversal permutation.
     """
     log_n = int(math.ceil(math.log2(n)))
@@ -65,7 +66,8 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True):
     twiddle = torch.stack(factors, dim=0).unsqueeze(0).unsqueeze(0)
     if not br_first:  # Take conjugate transpose of the BP decomposition of fft
         twiddle = twiddle.transpose(-1, -2).flip(dims=(2,))
-    if normalized:  # Divide the whole transform by sqrt(n) by dividing each factor by n^(1/2 log_n) = sqrt(2)
+    # Divide the whole transform by sqrt(n) by dividing each factor by n^(1/2 log_n) = sqrt(2)
+    if normalized:
         twiddle /= math.sqrt(2)
     else:
         twiddle /= 2
@@ -112,7 +114,7 @@ def circulant(col, transposed=False, separate_diagonal=True):
     col_f = torch.view_as_complex(torch.fft(torch.view_as_real(col),
                                             signal_ndim=1, normalized=False))
     if transposed:
-        # We could have just transpose the iFFT * Diag * FFT to get FFT * Diag * iFFT.
+        # We could have just transposed the iFFT * Diag * FFT to get FFT * Diag * iFFT.
         # Instead we use the fact that row is the reverse of col, but the 0-th element stays put.
         # This corresponds to the same reversal in the frequency domain.
         # https://en.wikipedia.org/wiki/Discrete_Fourier_transform#Time_and_frequency_reversal
@@ -136,3 +138,24 @@ def circulant(col, transposed=False, separate_diagonal=True):
         with torch.no_grad():
             b.twiddle.copy_(torch.cat((b_fft.twiddle, b_ifft.twiddle), dim=1))
         return b
+
+
+def hadamard(n, normalized=False, increasing_stride=True):
+    """ Construct an nn.Module based on Butterfly that exactly performs the Hadamard transform.
+    Parameters:
+        n: size of the Hadamard transform. Must be a power of 2.
+        normalized: if True, corresponds to the orthogonal Hadamard transform
+                    (i.e. multiplied by 1/sqrt(n))
+        increasing_stride: whether the returned Butterfly has increasing stride.
+    """
+    log_n = int(math.ceil(math.log2(n)))
+    assert n == 1 << log_n, 'n must be a power of 2'
+    twiddle = torch.tensor([[1, 1], [1, -1]], dtype=torch.float)
+    if normalized:
+        twiddle /= math.sqrt(2)
+    twiddle = twiddle.reshape(1, 1, 1, 1, 2, 2).expand((1, 1, log_n, n // 2, 2, 2))
+    # Divide the whole transform by sqrt(n) by dividing each factor by n^(1/2 log_n) = sqrt(2)
+    b = Butterfly(n, n, bias=False, increasing_stride=increasing_stride)
+    with torch.no_grad():
+        b.twiddle.copy_(twiddle)
+    return b

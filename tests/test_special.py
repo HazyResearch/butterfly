@@ -1,14 +1,20 @@
-# import math
+import math
 import unittest
 
 import numpy as np
 from scipy import linalg as la
 
 import torch
+from torch.nn import functional as F
+
 import torch_butterfly
 
 
 class ButterflySpecialTest(unittest.TestCase):
+
+    def setUp(self):
+        self.rtol = 1e-3
+        self.atol = 1e-5
 
     def test_fft(self):
         batch_size = 10
@@ -20,7 +26,7 @@ class ButterflySpecialTest(unittest.TestCase):
                 out = b(input)
                 out_torch = torch.view_as_complex(torch.fft(torch.view_as_real(input),
                                                             signal_ndim=1, normalized=normalized))
-                self.assertTrue(torch.allclose(out, out_torch))
+                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_ifft(self):
         batch_size = 10
@@ -32,7 +38,7 @@ class ButterflySpecialTest(unittest.TestCase):
                 out = b(input)
                 out_torch = torch.view_as_complex(torch.ifft(torch.view_as_real(input),
                                                              signal_ndim=1, normalized=normalized))
-                self.assertTrue(torch.allclose(out, out_torch))
+                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_circulant(self):
         batch_size = 10
@@ -48,7 +54,7 @@ class ButterflySpecialTest(unittest.TestCase):
             b = torch_butterfly.special.circulant(col, transposed=False,
                                                   separate_diagonal=separate_diagonal)
             out = b(input)
-            self.assertTrue(torch.allclose(out, out_torch))
+            self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
         row = torch.randn(n, dtype=torch.complex64)
         C = la.circulant(row.numpy()).T
@@ -66,8 +72,20 @@ class ButterflySpecialTest(unittest.TestCase):
             b = torch_butterfly.special.circulant(row, transposed=True,
                                                   separate_diagonal=separate_diagonal)
             out = b(input)
-            self.assertTrue(torch.allclose(out, out_torch))
+            self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
+
+    def test_hadamard(self):
+        batch_size = 10
+        n = 16
+        H = torch.tensor(la.hadamard(n), dtype=torch.float32)
+        input = torch.randn(batch_size, n)
+        out_torch = F.linear(input, H) / math.sqrt(n)
+        for increasing_stride in [True, False]:
+            b = torch_butterfly.special.hadamard(n, normalized=True,
+                                                 increasing_stride=increasing_stride)
+            out = b(input)
+            self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
 if __name__ == "__main__":
     unittest.main()
