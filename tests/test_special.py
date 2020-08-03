@@ -20,25 +20,25 @@ class ButterflySpecialTest(unittest.TestCase):
     def test_fft(self):
         batch_size = 10
         n = 16
+        input = torch.randn(batch_size, n, dtype=torch.complex64)
         for normalized in [False, True]:
+            out_torch = torch.view_as_complex(torch.fft(torch.view_as_real(input),
+                                                        signal_ndim=1, normalized=normalized))
             for br_first in [True, False]:
-                input = torch.randn(batch_size, n, dtype=torch.complex64)
                 b = torch_butterfly.special.fft(n, normalized=normalized, br_first=br_first)
                 out = b(input)
-                out_torch = torch.view_as_complex(torch.fft(torch.view_as_real(input),
-                                                            signal_ndim=1, normalized=normalized))
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_ifft(self):
         batch_size = 10
         n = 16
+        input = torch.randn(batch_size, n, dtype=torch.complex64)
         for normalized in [False, True]:
+            out_torch = torch.view_as_complex(torch.ifft(torch.view_as_real(input),
+                                                         signal_ndim=1, normalized=normalized))
             for br_first in [True, False]:
-                input = torch.randn(batch_size, n, dtype=torch.complex64)
                 b = torch_butterfly.special.ifft(n, normalized=normalized, br_first=br_first)
                 out = b(input)
-                out_torch = torch.view_as_complex(torch.ifft(torch.view_as_real(input),
-                                                             signal_ndim=1, normalized=normalized))
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_circulant(self):
@@ -55,7 +55,7 @@ class ButterflySpecialTest(unittest.TestCase):
             self.assertTrue(torch.allclose(out_torch, out_np, self.rtol, self.atol))
             for separate_diagonal in [True, False]:
                 b = torch_butterfly.special.circulant(col, transposed=False,
-                                                    separate_diagonal=separate_diagonal)
+                                                      separate_diagonal=separate_diagonal)
                 out = b(input)
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
@@ -73,7 +73,7 @@ class ButterflySpecialTest(unittest.TestCase):
             self.assertTrue(torch.allclose(out_torch, out_np, self.rtol, self.atol))
             for separate_diagonal in [True, False]:
                 b = torch_butterfly.special.circulant(row, transposed=True,
-                                                    separate_diagonal=separate_diagonal)
+                                                      separate_diagonal=separate_diagonal)
                 out = b(input)
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 

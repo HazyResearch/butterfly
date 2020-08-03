@@ -118,7 +118,6 @@ def circulant(col, transposed=False, separate_diagonal=True):
         # Instead we use the fact that row is the reverse of col, but the 0-th element stays put.
         # This corresponds to the same reversal in the frequency domain.
         # https://en.wikipedia.org/wiki/Discrete_Fourier_transform#Time_and_frequency_reversal
-        # col_f = np.fft.fft(row.numpy())
         col_f = torch.cat((col_f[:1], col_f[1:].flip(dims=(0,))))
     br_perm = (bitreversal_permutation(n_extended, pytorch_format=True))
     diag = col_f[..., br_perm]
@@ -248,11 +247,10 @@ def conv1d_circular_multichannel(n, weight):
             Return:
                 output: (batch, out_channels, size)
             """
-            # return input * self.diagonal
             return complex_mul(input.unsqueeze(1), self.diagonal).sum(dim=2)
 
     if not complex:
         return nn.Sequential(Real2Complex(), b_fft, DiagonalMultiplySum(col_f), b_ifft,
-                                Complex2Real())
+                             Complex2Real())
     else:
         return nn.Sequential(b_fft, DiagonalMultiplySum(col_f), b_ifft)
