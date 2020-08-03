@@ -4,6 +4,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from torch_butterfly.multiply import butterfly_multiply
+from torch_butterfly.complex_utils import real_dtype_to_complex
 
 
 class Butterfly(nn.Module):
@@ -36,8 +37,7 @@ class Butterfly(nn.Module):
         self.ortho_init = ortho_init
         assert nblocks >= 1
         self.nblocks = nblocks
-        float_dtype_to_complex = {torch.float32: torch.complex64, torch.float64: torch.complex128}
-        dtype = torch.get_default_dtype() if not complex else float_dtype_to_complex[torch.get_default_dtype()]
+        dtype = torch.get_default_dtype() if not complex else real_dtype_to_complex[torch.get_default_dtype()]
         twiddle_core_shape = (self.nstacks, nblocks, log_n, size // 2)
         if not ortho_init:
             twiddle_shape = twiddle_core_shape + (2, 2)

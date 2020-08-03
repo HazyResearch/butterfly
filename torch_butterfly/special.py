@@ -7,6 +7,7 @@ from torch.nn import functional as F
 from torch_butterfly.butterfly import Butterfly
 from torch_butterfly.permutation import FixedPermutation, bitreversal_permutation
 from torch_butterfly.diagonal import Diagonal
+from torch_butterfly.complex_utils import real2complex, Real2Complex, Complex2Real
 
 
 def fft(n, normalized=False, br_first=True, with_br_perm=True):
@@ -92,6 +93,7 @@ def circulant(col, transposed=False, separate_diagonal=True):
                            if False, the diagonal is combined into the Butterfly part.
     """
     assert col.dim() == 1, 'Vector col must have dimension 1'
+    complex = col.is_complex()
     n = col.shape[0]
     log_n = int(math.ceil(math.log2(n)))
     # For non-power-of-2, maybe there's a way to only pad up to size 1 << log_n?
@@ -106,9 +108,7 @@ def circulant(col, transposed=False, separate_diagonal=True):
         col_0 = F.pad(col, (0, 2 * ((1 << log_n) - n)))
         col = torch.cat((col_0, col))
     if not col.is_complex():
-        float_dtype_to_complex = {torch.float32: torch.complex64, torch.float64: torch.complex128}
-        dtype = float_dtype_to_complex[col.dtype]
-        col = col.to(dtype)
+        col = real2complex(col)
     # This fft must have normalized=False for the correct scaling. These are the eigenvalues of the
     # circulant matrix.
     col_f = torch.view_as_complex(torch.fft(torch.view_as_real(col),
@@ -123,7 +123,11 @@ def circulant(col, transposed=False, separate_diagonal=True):
     br_perm = (bitreversal_permutation(n_extended, pytorch_format=True))
     diag = col_f[..., br_perm]
     if separate_diagonal:
-        return nn.Sequential(b_fft, Diagonal(n_extended, diag), b_ifft)
+        if not complex:
+            return nn.Sequential(Real2Complex(), b_fft, Diagonal(n_extended, diag), b_ifft,
+                                 Complex2Real())
+        else:
+            return nn.Sequential(b_fft, Diagonal(n_extended, diag), b_ifft)
     else:
         # Combine the diagonal with the last twiddle factor of b_fft
         with torch.no_grad():
@@ -137,7 +141,7 @@ def circulant(col, transposed=False, separate_diagonal=True):
         b.out_size = n
         with torch.no_grad():
             b.twiddle.copy_(torch.cat((b_fft.twiddle, b_ifft.twiddle), dim=1))
-        return b
+        return b if complex else nn.Sequential(Real2Complex(), b, Complex2Real())
 
 
 def hadamard(n, normalized=False, increasing_stride=True):
