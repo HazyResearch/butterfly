@@ -99,7 +99,25 @@ class ButterflySpecialTest(unittest.TestCase):
                 weight = conv.weight
                 input = torch.randn(batch_size, 1, n)
                 out_torch = conv(input)
-                b = torch_butterfly.special.conv1d_circular_singlechannel(n, weight)
+                for separate_diagonal in [True, False]:
+                    b = torch_butterfly.special.conv1d_circular_singlechannel(n, weight,
+                                                                              separate_diagonal)
+                    out = b(input)
+                    self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
+    def test_conv1d_circular_multichannel(self):
+        batch_size = 10
+        in_channels = 3
+        out_channels = 4
+        for n in [13, 16]:
+            for kernel_size in [1, 3, 5, 7]:
+                conv = nn.Conv1d(in_channels, out_channels, kernel_size,
+                                 padding=(kernel_size - 1) // 2, padding_mode='circular',
+                                 bias=False)
+                weight = conv.weight
+                input = torch.randn(batch_size, in_channels, n)
+                out_torch = conv(input)
+                b = torch_butterfly.special.conv1d_circular_multichannel(n, weight)
                 out = b(input)
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 

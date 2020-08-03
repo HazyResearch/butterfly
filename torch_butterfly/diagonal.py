@@ -5,6 +5,8 @@ import numpy as np
 import torch
 from torch import nn
 
+from torch_butterfly.complex_utils import complex_mul
+
 
 class Diagonal(nn.Module):
 
@@ -29,4 +31,5 @@ class Diagonal(nn.Module):
         Return:
             output: (batch, *, size)
         """
-        return input * self.diagonal
+        # return input * self.diagonal
+        return complex_mul(input, self.diagonal)
