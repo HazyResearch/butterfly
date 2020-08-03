@@ -163,3 +163,25 @@ def hadamard(n, normalized=False, increasing_stride=True):
     with torch.no_grad():
         b.twiddle.copy_(twiddle)
     return b
+
+
+def conv1d_circular_singlechannel(n, weight, separate_diagonal=True):
+    """ Construct an nn.Module based on Butterfly that exactly performs nn.Conv1d
+    with a single in-channel and single out-channel, with circular padding.
+    The output of nn.Conv1d must have the same size as the input (i.e. kernel size must be 2k + 1,
+    and padding k for some integer k).
+    Parameters:
+        n: size of the input.
+        weight: torch.Tensor of size (1, 1, kernel_size). Kernel_size must be odd, and smaller than
+                n. Padding is assumed to be (kernel_size - 1) // 2.
+        separate_diagonal: if True, the returned nn.Module is Butterfly, Diagonal, Butterfly.
+                           if False, the diagonal is combined into the Butterfly part.
+    """
+    assert weight.dim() == 3, 'Weight must have dimension 3'
+    kernel_size = weight.shape[-1]
+    assert kernel_size < n
+    assert kernel_size % 2 == 1, 'Kernel size must be odd'
+    assert weight.shape[:2] == (1, 1), 'Only support single in-channel and single out-channel'
+    padding = (kernel_size - 1) // 2
+    col = F.pad(weight.flip(dims=(-1,)), (0, n - kernel_size)).roll(-padding, dims=-1)
+    return circulant(col.squeeze(1).squeeze(0))

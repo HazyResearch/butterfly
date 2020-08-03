@@ -5,6 +5,7 @@ import numpy as np
 from scipy import linalg as la
 
 import torch
+from torch import nn
 from torch.nn import functional as F
 
 import torch_butterfly
@@ -88,6 +89,20 @@ class ButterflySpecialTest(unittest.TestCase):
                                                  increasing_stride=increasing_stride)
             out = b(input)
             self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
+    def test_conv1d_circular_singlechannel(self):
+        batch_size = 10
+        for n in [13, 16]:
+            for kernel_size in [1, 3, 5, 7]:
+                conv = nn.Conv1d(1, 1, kernel_size, padding=(kernel_size - 1) // 2,
+                                padding_mode='circular', bias=False)
+                weight = conv.weight
+                input = torch.randn(batch_size, 1, n)
+                out_torch = conv(input)
+                b = torch_butterfly.special.conv1d_circular_singlechannel(n, weight)
+                out = b(input)
+                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
 
 if __name__ == "__main__":
     unittest.main()
