@@ -37,7 +37,7 @@ def fft(n, normalized=False, br_first=True, with_br_perm=True):
         twiddle /= math.sqrt(2)
     b = Butterfly(n, n, bias=False, complex=True, increasing_stride=br_first)
     with torch.no_grad():
-        b.twiddle.copy_(twiddle)
+        torch.view_as_complex(b.twiddle).copy_(twiddle)
     if with_br_perm:
         br_perm = FixedPermutation(bitreversal_permutation(n, pytorch_format=True))
         return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
@@ -74,7 +74,7 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True):
         twiddle /= 2
     b = Butterfly(n, n, bias=False, complex=True, increasing_stride=br_first)
     with torch.no_grad():
-        b.twiddle.copy_(twiddle)
+        torch.view_as_complex(b.twiddle).copy_(twiddle)
     if with_br_perm:
         br_perm = FixedPermutation(bitreversal_permutation(n, pytorch_format=True))
         return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
@@ -130,8 +130,9 @@ def circulant(col, transposed=False, separate_diagonal=True):
     else:
         # Combine the diagonal with the last twiddle factor of b_fft
         with torch.no_grad():
-            b_fft.twiddle[:, :, -1, :, 0, :] *= diag[::2].unsqueeze(-1)
-            b_fft.twiddle[:, :, -1, :, 1, :] *= diag[1::2].unsqueeze(-1)
+            twiddle = torch.view_as_complex(b_fft.twiddle)
+            twiddle[:, :, -1, :, 0, :] *= diag[::2].unsqueeze(-1)
+            twiddle[:, :, -1, :, 1, :] *= diag[1::2].unsqueeze(-1)
         # Combine the b_fft and b_ifft into one Butterfly (with nblocks=2).
         # Need to force the internal twiddle to have size n_extended.
         b = Butterfly(n_extended, n_extended, bias=False, complex=True,
@@ -139,6 +140,7 @@ def circulant(col, transposed=False, separate_diagonal=True):
         b.in_size = n
         b.out_size = n
         with torch.no_grad():
+            # Don't need torch.view_as_complex here since all the twiddles are stored in real.
             b.twiddle.copy_(torch.cat((b_fft.twiddle, b_ifft.twiddle), dim=1))
         return b if complex else nn.Sequential(Real2Complex(), b, Complex2Real())
 
@@ -239,6 +241,9 @@ def conv1d_circular_multichannel(n, weight):
             """
             super().__init__()
             self.diagonal = nn.Parameter(diagonal_init.detach().clone())
+            self.complex = self.diagonal.is_complex()
+            if self.complex:
+                self.diagonal = nn.Parameter(torch.view_as_real(self.diagonal))
 
         def forward(self, input):
             """
@@ -247,7 +252,8 @@ def conv1d_circular_multichannel(n, weight):
             Return:
                 output: (batch, out_channels, size)
             """
-            return complex_mul(input.unsqueeze(1), self.diagonal).sum(dim=2)
+            diagonal = self.diagonal if not self.complex else torch.view_as_complex(self.diagonal)
+            return complex_mul(input.unsqueeze(1), diagonal).sum(dim=2)
 
     if not complex:
         return nn.Sequential(Real2Complex(), b_fft, DiagonalMultiplySum(col_f), b_ifft,

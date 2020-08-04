@@ -29,7 +29,8 @@ class ButterflyTest(unittest.TestCase):
                                 self.assertTrue(output.shape == (batch_size, out_size),
                                                 (output.shape, device, (in_size, out_size), complex, ortho_init, nblocks))
                                 if ortho_init:
-                                    twiddle_np = b.twiddle.detach().to('cpu').numpy()
+                                    twiddle = b.twiddle if not b.complex else torch.view_as_complex(b.twiddle)
+                                    twiddle_np = twiddle.detach().to('cpu').numpy()
                                     twiddle_np = twiddle_np.reshape(-1, 2, 2)
                                     twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
                                     self.assertTrue(np.allclose(twiddle_norm, 1),

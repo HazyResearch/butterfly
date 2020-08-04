@@ -69,6 +69,13 @@ class Butterfly(nn.Module):
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
+        # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
+        # This is used in optimizers such as SGD.
+        # So we have to store the parameters as real.
+        if complex:
+            self.twiddle = nn.Parameter(torch.view_as_real(self.twiddle))
+            if self.bias is not None:
+                self.bias = nn.Parameter(torch.view_as_real(self.bias))
 
     def reset_parameters(self):
         """Initialize bias the same way as torch.nn.Linear."""
@@ -85,7 +92,8 @@ class Butterfly(nn.Module):
             output: (batch, *, out_size)
         """
         output = self.pre_process(input)
-        output = butterfly_multiply(self.twiddle, output, self.increasing_stride)
+        twiddle = self.twiddle if not self.complex else torch.view_as_complex(self.twiddle)
+        output = butterfly_multiply(twiddle, output, self.increasing_stride)
         return self.post_process(input, output)
 
     def pre_process(self, input):
@@ -104,7 +112,8 @@ class Butterfly(nn.Module):
         if self.out_size != out_size_extended:  # Take top rows
             output = output[:, :self.out_size]
         if self.bias is not None:
-            output = output + self.bias
+            bias = self.bias if not self.complex else torch.view_as_complex(self.bias)
+            output = output + bias
         return output.view(*input.size()[:-1], self.out_size)
 
     def extra_repr(self):
