@@ -123,10 +123,10 @@ def circulant(col, transposed=False, separate_diagonal=True):
     diag = col_f[..., br_perm]
     if separate_diagonal:
         if not complex:
-            return nn.Sequential(Real2Complex(), b_fft, Diagonal(n_extended, diag), b_ifft,
+            return nn.Sequential(Real2Complex(), b_fft, Diagonal(diagonal_init=diag), b_ifft,
                                  Complex2Real())
         else:
-            return nn.Sequential(b_fft, Diagonal(n_extended, diag), b_ifft)
+            return nn.Sequential(b_fft, Diagonal(diagonal_init=diag), b_ifft)
     else:
         # Combine the diagonal with the last twiddle factor of b_fft
         with torch.no_grad():
@@ -185,7 +185,7 @@ def conv1d_circular_singlechannel(n, weight, separate_diagonal=True):
     assert weight.shape[:2] == (1, 1), 'Only support single in-channel and single out-channel'
     padding = (kernel_size - 1) // 2
     col = F.pad(weight.flip(dims=(-1,)), (0, n - kernel_size)).roll(-padding, dims=-1)
-    return circulant(col.squeeze(1).squeeze(0))
+    return circulant(col.squeeze(1).squeeze(0), separate_diagonal=separate_diagonal)
 
 
 def conv1d_circular_multichannel(n, weight):
