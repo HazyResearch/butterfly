@@ -101,9 +101,9 @@ def circulant(col, transposed=False, separate_diagonal=True):
     # I've only figured out how to pad to size 1 << (log_n + 1).
     # e.g., [a, b, c] -> [a, b, c, 0, 0, a, b, c]
     n_extended = n if n == 1 << log_n else 1 << (log_n + 1)
-    b_fft = fft(n_extended, normalized=True, br_first=False, with_br_perm=False)
+    b_fft = fft(n_extended, normalized=True, br_first=False, with_br_perm=False).to(col.device)
     b_fft.in_size = n
-    b_ifft = ifft(n_extended, normalized=True, br_first=True, with_br_perm=False)
+    b_ifft = ifft(n_extended, normalized=True, br_first=True, with_br_perm=False).to(col.device)
     b_ifft.out_size = n
     if n < n_extended:
         col_0 = F.pad(col, (0, 2 * ((1 << log_n) - n)))
@@ -119,7 +119,7 @@ def circulant(col, transposed=False, separate_diagonal=True):
         # This corresponds to the same reversal in the frequency domain.
         # https://en.wikipedia.org/wiki/Discrete_Fourier_transform#Time_and_frequency_reversal
         col_f = torch.cat((col_f[:1], col_f[1:].flip(dims=(0,))))
-    br_perm = (bitreversal_permutation(n_extended, pytorch_format=True))
+    br_perm = bitreversal_permutation(n_extended, pytorch_format=True).to(col.device)
     diag = col_f[..., br_perm]
     if separate_diagonal:
         if not complex:
@@ -136,7 +136,7 @@ def circulant(col, transposed=False, separate_diagonal=True):
         # Combine the b_fft and b_ifft into one Butterfly (with nblocks=2).
         # Need to force the internal twiddle to have size n_extended.
         b = Butterfly(n_extended, n_extended, bias=False, complex=True,
-                      increasing_stride=False, nblocks=2)
+                      increasing_stride=False, nblocks=2).to(col.device)
         b.in_size = n
         b.out_size = n
         with torch.no_grad():
@@ -213,9 +213,9 @@ def conv1d_circular_multichannel(n, weight):
     # I've only figured out how to pad to size 1 << (log_n + 1).
     # e.g., [a, b, c] -> [a, b, c, 0, 0, a, b, c]
     n_extended = n if n == 1 << log_n else 1 << (log_n + 1)
-    b_fft = fft(n_extended, normalized=True, br_first=False, with_br_perm=False)
+    b_fft = fft(n_extended, normalized=True, br_first=False, with_br_perm=False).to(col.device)
     b_fft.in_size = n
-    b_ifft = ifft(n_extended, normalized=True, br_first=True, with_br_perm=False)
+    b_ifft = ifft(n_extended, normalized=True, br_first=True, with_br_perm=False).to(col.device)
     b_ifft.out_size = n
     if n < n_extended:
         col_0 = F.pad(col, (0, 2 * ((1 << log_n) - n)))
@@ -225,7 +225,7 @@ def conv1d_circular_multichannel(n, weight):
     # This fft must have normalized=False for the correct scaling. These are the eigenvalues of the
     # circulant matrix.
     col_f = view_as_complex(torch.fft(view_as_real(col), signal_ndim=1, normalized=False))
-    br_perm = (bitreversal_permutation(n_extended, pytorch_format=True))
+    br_perm = bitreversal_permutation(n_extended, pytorch_format=True).to(col.device)
     col_f = col_f[..., br_perm]
     # We just want (input_f.unsqueeze(1) * col_f).sum(dim=2).
     # This can be written as matrix multiply but Pytorch 1.6 doesn't yet support complex matrix
