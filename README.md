@@ -1,4 +1,5 @@
-Code to accompany the paper <a href="https://arxiv.org/abs/1903.05895">Learning Fast Algorithms for Linear Transforms Using Butterfly Factorizations.
+Code to accompany the papers [Learning Fast Algorithms for Linear Transforms
+Using Butterfly Factorizations](https://arxiv.org/abs/1903.05895) and [Kaleidoscope: An Efficient, Learnable Representation For All Structured Linear Maps](https://openreview.net/forum?id=BkgrBgSYDS).
 
 ## Requirements
 python>=3.6  

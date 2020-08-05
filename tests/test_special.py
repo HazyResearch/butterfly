@@ -78,7 +78,6 @@ class ButterflySpecialTest(unittest.TestCase):
                 out = b(input)
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
-
     def test_hadamard(self):
         batch_size = 10
         n = 16

@@ -299,5 +299,3 @@ def perm_to_butterfly_module(v, check=False):
         result = module(torch.eye(n))
         assert (torch.norm(result - torch.tensor(perm_vec_to_mat(invert(v))).float()).item() < 1e-6)
     return module
-
-
