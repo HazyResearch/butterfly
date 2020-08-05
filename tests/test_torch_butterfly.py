@@ -4,7 +4,9 @@ import unittest
 import numpy as np
 
 import torch
+
 import torch_butterfly
+from torch_butterfly.complex_utils import view_as_complex
 
 
 class ButterflyTest(unittest.TestCase):
@@ -29,7 +31,7 @@ class ButterflyTest(unittest.TestCase):
                                 self.assertTrue(output.shape == (batch_size, out_size),
                                                 (output.shape, device, (in_size, out_size), complex, ortho_init, nblocks))
                                 if ortho_init:
-                                    twiddle = b.twiddle if not b.complex else torch.view_as_complex(b.twiddle)
+                                    twiddle = b.twiddle if not b.complex else view_as_complex(b.twiddle)
                                     twiddle_np = twiddle.detach().to('cpu').numpy()
                                     twiddle_np = twiddle_np.reshape(-1, 2, 2)
                                     twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
@@ -43,8 +45,8 @@ class ButterflyTest(unittest.TestCase):
             log_n = int(math.log2(n))
             nstack = 2
             nblocks = 3
-            # for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
-            for device in ['cuda']:
+            for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+            # for device in ['cuda']:
                 for complex in [False, True]:
                 # for complex in [False]:
                     for increasing_stride in [True, False]:
@@ -52,8 +54,8 @@ class ButterflyTest(unittest.TestCase):
                         if batch_size > 1024 and (device == 'cpu'):
                             continue
                         dtype = torch.float32 if not complex else torch.complex64
+                        # complex randn already has the correct scaling of stddev=1.0
                         scaling = 1 / math.sqrt(2)
-                        # scaling = 1 / math.sqrt(2) if not complex else 1 / 2  # TODO: complex randn already incorporate this scaling?
                         twiddle = torch.randn((nstack, nblocks, log_n, n // 2, 2, 2), dtype=dtype, requires_grad=True, device=device) * scaling
                         input = torch.randn((batch_size, nstack, n), dtype=dtype, requires_grad=True, device=twiddle.device)
                         output = torch_butterfly.butterfly_multiply(twiddle, input, increasing_stride)

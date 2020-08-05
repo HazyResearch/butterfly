@@ -4,7 +4,8 @@ from torch import nn
 import torch.nn.functional as F
 
 from torch_butterfly.multiply import butterfly_multiply
-from torch_butterfly.complex_utils import real_dtype_to_complex
+from torch_butterfly.multiply import butterfly_multiply_torch
+from torch_butterfly.complex_utils import real_dtype_to_complex, view_as_real, view_as_complex
 
 
 class Butterfly(nn.Module):
@@ -41,7 +42,7 @@ class Butterfly(nn.Module):
         twiddle_core_shape = (self.nstacks, nblocks, log_n, size // 2)
         if not ortho_init:
             twiddle_shape = twiddle_core_shape + (2, 2)
-            # TODO: Check that complex randn has the correct variance
+            # complex randn already has the correct scaling of stddev=1.0
             scaling = 1.0 / math.sqrt(2)
             self.twiddle = nn.Parameter(torch.randn(twiddle_shape, dtype=dtype) * scaling)
         else:
@@ -73,9 +74,9 @@ class Butterfly(nn.Module):
         # This is used in optimizers such as SGD.
         # So we have to store the parameters as real.
         if complex:
-            self.twiddle = nn.Parameter(torch.view_as_real(self.twiddle))
+            self.twiddle = nn.Parameter(view_as_real(self.twiddle))
             if self.bias is not None:
-                self.bias = nn.Parameter(torch.view_as_real(self.bias))
+                self.bias = nn.Parameter(view_as_real(self.bias))
 
     def reset_parameters(self):
         """Initialize bias the same way as torch.nn.Linear."""
@@ -92,7 +93,7 @@ class Butterfly(nn.Module):
             output: (batch, *, out_size)
         """
         output = self.pre_process(input)
-        twiddle = self.twiddle if not self.complex else torch.view_as_complex(self.twiddle)
+        twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
         output = butterfly_multiply(twiddle, output, self.increasing_stride)
         return self.post_process(input, output)
 
@@ -112,7 +113,7 @@ class Butterfly(nn.Module):
         if self.out_size != out_size_extended:  # Take top rows
             output = output[:, :self.out_size]
         if self.bias is not None:
-            bias = self.bias if not self.complex else torch.view_as_complex(self.bias)
+            bias = self.bias if not self.complex else view_as_complex(self.bias)
             output = output + bias
         return output.view(*input.size()[:-1], self.out_size)
 

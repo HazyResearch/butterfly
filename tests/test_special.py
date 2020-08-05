@@ -9,6 +9,7 @@ from torch import nn
 from torch.nn import functional as F
 
 import torch_butterfly
+from torch_butterfly.complex_utils import view_as_real, view_as_complex
 
 
 class ButterflySpecialTest(unittest.TestCase):
@@ -22,8 +23,8 @@ class ButterflySpecialTest(unittest.TestCase):
         n = 16
         input = torch.randn(batch_size, n, dtype=torch.complex64)
         for normalized in [False, True]:
-            out_torch = torch.view_as_complex(torch.fft(torch.view_as_real(input),
-                                                        signal_ndim=1, normalized=normalized))
+            out_torch = view_as_complex(torch.fft(view_as_real(input),
+                                                  signal_ndim=1, normalized=normalized))
             for br_first in [True, False]:
                 b = torch_butterfly.special.fft(n, normalized=normalized, br_first=br_first)
                 out = b(input)
@@ -34,8 +35,8 @@ class ButterflySpecialTest(unittest.TestCase):
         n = 16
         input = torch.randn(batch_size, n, dtype=torch.complex64)
         for normalized in [False, True]:
-            out_torch = torch.view_as_complex(torch.ifft(torch.view_as_real(input),
-                                                         signal_ndim=1, normalized=normalized))
+            out_torch = view_as_complex(torch.ifft(view_as_real(input),
+                                                   signal_ndim=1, normalized=normalized))
             for br_first in [True, False]:
                 b = torch_butterfly.special.ifft(n, normalized=normalized, br_first=br_first)
                 out = b(input)

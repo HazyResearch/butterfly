@@ -28,6 +28,42 @@ class ComplexMul(torch.autograd.Function):
 complex_mul = ComplexMul.apply
 
 
+# In Pytorch 1.6, torch.view_as_real and torch.view_as_complex conjugate their gradients.
+# This follow Jax's convention. However, we currently follow Tensorflow's convention, where
+# the gradient should be as if everything is done with real numbers.
+# See the discussion here: https://github.com/pytorch/pytorch/issues/41857
+# As a result, we redefine these functions with the gradient following Tensorflow's convention.
+# For now, DO NOT use torch.view_as_real and torch.view_as_complex directly.
+# Only use view_as_real and view_as_complex defined in this file.
+
+class ViewAsReal(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, X):
+        return torch.view_as_real(X)
+
+    @staticmethod
+    def backward(ctx, grad):
+        return torch.view_as_complex(grad)
+
+
+view_as_real = ViewAsReal.apply
+
+
+class ViewAsComplex(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, X):
+        return torch.view_as_complex(X)
+
+    @staticmethod
+    def backward(ctx, grad):
+        return torch.view_as_real(grad)
+
+
+view_as_complex = ViewAsComplex.apply
+
+
 def real2complex(X):
     return X.to(real_dtype_to_complex[X.dtype])
 
