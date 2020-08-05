@@ -4,6 +4,8 @@ import unittest
 import numpy as np
 
 import torch
+from torch import nn
+from torch.nn import functional as F
 
 import torch_butterfly
 from torch_butterfly.complex_utils import view_as_complex
@@ -79,6 +81,37 @@ class ButterflyTest(unittest.TestCase):
                                                        atol=self.atol * (10 if batch_size > 1024 else 1)),
                                         (((d_twiddle - d_twiddle_torch) / d_twiddle_torch).abs().max().item(),
                                          (batch_size, n), device, complex, increasing_stride))
+
+    def test_autograd(self):
+        """Check if autograd works (especially for complex), by trying to match a 4x4 matrix.
+        """
+        size = 4
+        niters = 10000
+        true_model = nn.Linear(size, size, bias=False)
+        x = torch.eye(size)
+        with torch.no_grad():
+            y = true_model(x)
+        for complex in [False, True]:
+            if complex:
+                model = nn.Sequential(
+                    torch_butterfly.complex_utils.Real2Complex(),
+                    torch_butterfly.Butterfly(size, size, bias=False, complex=complex),
+                    torch_butterfly.complex_utils.Complex2Real(),
+                )
+            else:
+                model = torch_butterfly.Butterfly(size, size, bias=False, complex=complex)
+            with torch.no_grad():
+                inital_loss = F.mse_loss(model(x), y)
+            optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+            for i in range(niters):
+                out = model(x)
+                loss = F.mse_loss(out, y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            # At least loss should decrease
+            # print(inital_loss, loss)
+            self.assertTrue(loss.item() < inital_loss.item())
 
 
 if __name__ == "__main__":

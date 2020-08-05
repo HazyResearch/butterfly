@@ -29,7 +29,7 @@ complex_mul = ComplexMul.apply
 
 
 # In Pytorch 1.6, torch.view_as_real and torch.view_as_complex conjugate their gradients.
-# This follow Jax's convention. However, we currently follow Tensorflow's convention, where
+# This follows Jax's convention. However, we currently follow Tensorflow's convention, where
 # the gradient should be as if everything is done with real numbers.
 # See the discussion here: https://github.com/pytorch/pytorch/issues/41857
 # As a result, we redefine these functions with the gradient following Tensorflow's convention.
