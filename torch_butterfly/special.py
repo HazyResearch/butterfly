@@ -9,6 +9,7 @@ from torch_butterfly.permutation import FixedPermutation, bitreversal_permutatio
 from torch_butterfly.diagonal import Diagonal
 from torch_butterfly.complex_utils import view_as_real, view_as_complex
 from torch_butterfly.complex_utils import complex_mul, real2complex, Real2Complex, Complex2Real
+from torch_butterfly.combine import diagonal_butterfly, TensorProduct
 
 
 def fft(n, normalized=False, br_first=True, with_br_perm=True):
@@ -130,10 +131,9 @@ def circulant(col, transposed=False, separate_diagonal=True):
     else:
         # Combine the diagonal with the last twiddle factor of b_fft
         with torch.no_grad():
-            twiddle = view_as_complex(b_fft.twiddle)
-            twiddle[:, :, -1, :, 0, :] *= diag[::2].unsqueeze(-1)
-            twiddle[:, :, -1, :, 1, :] *= diag[1::2].unsqueeze(-1)
+            b_fft = diagonal_butterfly(b_fft, diag, diag_first=False, inplace=True)
         # Combine the b_fft and b_ifft into one Butterfly (with nblocks=2).
+        # TODO: move to combine.py
         # Need to force the internal twiddle to have size n_extended.
         b = Butterfly(n_extended, n_extended, bias=False, complex=True,
                       increasing_stride=False, nblocks=2).to(col.device)
@@ -259,3 +259,49 @@ def conv1d_circular_multichannel(n, weight):
                              Complex2Real())
     else:
         return nn.Sequential(b_fft, DiagonalMultiplySum(col_f), b_ifft)
+
+
+def fft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
+          with_br_perm: bool = True):
+    """ Construct an nn.Module based on Butterfly that exactly performs the 2D FFT.
+    Parameters:
+        n1: size of the FFT on the last input dimension. Must be a power of 2.
+        n2: size of the FFT on the second to last input dimension. Must be a power of 2.
+        normalized: if True, corresponds to the unitary FFT (i.e. multiplied by 1/sqrt(n))
+        br_first: which decomposition of FFT. br_first=True corresponds to decimation-in-time.
+                  br_first=False corresponds to decimation-in-frequency.
+        with_br_perm: whether to return both the butterfly and the bit reversal permutation.
+    """
+    b_fft1 = fft(n1, normalized=normalized, br_first=br_first, with_br_perm=False)
+    b_fft2 = fft(n2, normalized=normalized, br_first=br_first, with_br_perm=False)
+    b = TensorProduct(b_fft1, b_fft2)
+    if with_br_perm:
+        br_perm1 = FixedPermutation(bitreversal_permutation(n1, pytorch_format=True))
+        br_perm2 = FixedPermutation(bitreversal_permutation(n2, pytorch_format=True))
+        br_perm = TensorProduct(br_perm1, br_perm2)
+        return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
+    else:
+        return b
+
+
+def ifft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
+           with_br_perm: bool = True):
+    """ Construct an nn.Module based on Butterfly that exactly performs the 2D iFFT.
+    Parameters:
+        n1: size of the iFFT on the last input dimension. Must be a power of 2.
+        n2: size of the iFFT on the second to last input dimension. Must be a power of 2.
+        normalized: if True, corresponds to the unitary iFFT (i.e. multiplied by 1/sqrt(n))
+        br_first: which decomposition of iFFT. True corresponds to decimation-in-frequency.
+                  False corresponds to decimation-in-time.
+        with_br_perm: whether to return both the butterfly and the bit reversal permutation.
+    """
+    b_ifft1 = ifft(n1, normalized=normalized, br_first=br_first, with_br_perm=False)
+    b_ifft2 = ifft(n2, normalized=normalized, br_first=br_first, with_br_perm=False)
+    b = TensorProduct(b_ifft1, b_ifft2)
+    if with_br_perm:
+        br_perm1 = FixedPermutation(bitreversal_permutation(n1, pytorch_format=True))
+        br_perm2 = FixedPermutation(bitreversal_permutation(n2, pytorch_format=True))
+        br_perm = TensorProduct(br_perm1, br_perm2)
+        return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
+    else:
+        return b

@@ -33,6 +33,9 @@ def check_cuda_version():
 check_cuda_version()
 from .butterfly import Butterfly  # noqa
 from .multiply import butterfly_multiply  # noqa
+from . import complex_utils
+from . import diagonal
+from . import permutation
 from . import special
 
 __all__ = [
