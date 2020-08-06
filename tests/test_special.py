@@ -141,11 +141,32 @@ class ButterflySpecialTest(unittest.TestCase):
         input = torch.randn(batch_size, n2, n1, dtype=torch.complex64)
         for normalized in [False, True]:
             out_torch = view_as_complex(torch.ifft(view_as_real(input),
-                                                  signal_ndim=2, normalized=normalized))
+                                                   signal_ndim=2, normalized=normalized))
             for br_first in [True, False]:
-                b = torch_butterfly.special.ifft2d(n1, n2, normalized=normalized, br_first=br_first)
+                b = torch_butterfly.special.ifft2d(
+                    n1, n2, normalized=normalized, br_first=br_first)
                 out = b(input)
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
+    def test_conv2d_circular_multichannel(self):
+        batch_size = 10
+        in_channels = 3
+        out_channels = 4
+        for n1 in [13, 16]:
+            for n2 in [27, 32]:
+                for kernel_size1 in [1, 3, 5, 7]:
+                    for kernel_size2 in [1, 3, 5, 7]:
+                        padding1 = (kernel_size1 - 1) // 2
+                        padding2 = (kernel_size2 - 1) // 2
+                    conv = nn.Conv2d(in_channels, out_channels, (kernel_size2, kernel_size1),
+                                     padding=(padding2, padding1), padding_mode='circular',
+                                     bias=False)
+                    weight = conv.weight
+                    input = torch.randn(batch_size, in_channels, n2, n1)
+                    out_torch = conv(input)
+                    b = torch_butterfly.special.conv2d_circular_multichannel(n1, n2, weight)
+                    out = b(input)
+                    self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
 
 if __name__ == "__main__":
