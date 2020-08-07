@@ -132,9 +132,11 @@ class ButterflySpecialTest(unittest.TestCase):
             out_torch = view_as_complex(torch.fft(view_as_real(input),
                                                   signal_ndim=2, normalized=normalized))
             for br_first in [True, False]:
-                b = torch_butterfly.special.fft2d(n1, n2, normalized=normalized, br_first=br_first)
-                out = b(input)
-                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+                for flatten in [False, True]:
+                    b = torch_butterfly.special.fft2d(n1, n2, normalized=normalized,
+                                                      br_first=br_first, flatten=flatten)
+                    out = b(input)
+                    self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_ifft2d(self):
         batch_size = 10
@@ -145,10 +147,11 @@ class ButterflySpecialTest(unittest.TestCase):
             out_torch = view_as_complex(torch.ifft(view_as_real(input),
                                                    signal_ndim=2, normalized=normalized))
             for br_first in [True, False]:
-                b = torch_butterfly.special.ifft2d(
-                    n1, n2, normalized=normalized, br_first=br_first)
-                out = b(input)
-                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+                for flatten in [False, True]:
+                    b = torch_butterfly.special.ifft2d(n1, n2, normalized=normalized,
+                                                       br_first=br_first, flatten=flatten)
+                    out = b(input)
+                    self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_conv2d_circular_multichannel(self):
         batch_size = 10

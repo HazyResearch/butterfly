@@ -11,6 +11,8 @@ from torch_butterfly.diagonal import Diagonal
 from torch_butterfly.complex_utils import view_as_real, view_as_complex
 from torch_butterfly.complex_utils import complex_mul, real2complex, Real2Complex, Complex2Real
 from torch_butterfly.combine import diagonal_butterfly, TensorProduct
+from torch_butterfly.combine import butterfly_kronecker, permutation_kronecker
+from torch_butterfly.combine import Flatten2D, Unflatten2D
 
 
 def fft(n, normalized=False, br_first=True, with_br_perm=True):
@@ -264,7 +266,7 @@ def conv1d_circular_multichannel(n, weight):
 
 
 def fft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
-          with_br_perm: bool = True):
+          with_br_perm: bool = True, flatten=False):
     """ Construct an nn.Module based on Butterfly that exactly performs the 2D FFT.
     Parameters:
         n1: size of the FFT on the last input dimension. Must be a power of 2.
@@ -273,21 +275,27 @@ def fft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
         br_first: which decomposition of FFT. br_first=True corresponds to decimation-in-time.
                   br_first=False corresponds to decimation-in-frequency.
         with_br_perm: whether to return both the butterfly and the bit reversal permutation.
+        flatten: whether to combine the 2 butterflies into 1 with Kronecker product.
     """
     b_fft1 = fft(n1, normalized=normalized, br_first=br_first, with_br_perm=False)
     b_fft2 = fft(n2, normalized=normalized, br_first=br_first, with_br_perm=False)
-    b = TensorProduct(b_fft1, b_fft2)
+    b = TensorProduct(b_fft1, b_fft2) if not flatten else butterfly_kronecker(b_fft1, b_fft2)
     if with_br_perm:
         br_perm1 = FixedPermutation(bitreversal_permutation(n1, pytorch_format=True))
         br_perm2 = FixedPermutation(bitreversal_permutation(n2, pytorch_format=True))
-        br_perm = TensorProduct(br_perm1, br_perm2)
-        return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
+        br_perm = (TensorProduct(br_perm1, br_perm2)
+                   if not flatten else permutation_kronecker(br_perm1, br_perm2))
+        if not flatten:
+            return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
+        else:
+            return (nn.Sequential(Flatten2D(), br_perm, b, Unflatten2D(n1)) if br_first
+                    else nn.Sequential(Flatten2D(), b, br_perm, Unflatten2D(n1)))
     else:
-        return b
+        return b if not flatten else nn.Sequential(Flatten2D(), b, Unflatten2D(n1))
 
 
 def ifft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
-           with_br_perm: bool = True):
+           with_br_perm: bool = True, flatten=False):
     """ Construct an nn.Module based on Butterfly that exactly performs the 2D iFFT.
     Parameters:
         n1: size of the iFFT on the last input dimension. Must be a power of 2.
@@ -296,17 +304,23 @@ def ifft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
         br_first: which decomposition of iFFT. True corresponds to decimation-in-frequency.
                   False corresponds to decimation-in-time.
         with_br_perm: whether to return both the butterfly and the bit reversal permutation.
+        flatten: whether to combine the 2 butterflies into 1 with Kronecker product.
     """
     b_ifft1 = ifft(n1, normalized=normalized, br_first=br_first, with_br_perm=False)
     b_ifft2 = ifft(n2, normalized=normalized, br_first=br_first, with_br_perm=False)
-    b = TensorProduct(b_ifft1, b_ifft2)
+    b = TensorProduct(b_ifft1, b_ifft2) if not flatten else butterfly_kronecker(b_ifft1, b_ifft2)
     if with_br_perm:
         br_perm1 = FixedPermutation(bitreversal_permutation(n1, pytorch_format=True))
         br_perm2 = FixedPermutation(bitreversal_permutation(n2, pytorch_format=True))
-        br_perm = TensorProduct(br_perm1, br_perm2)
-        return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
+        br_perm = (TensorProduct(br_perm1, br_perm2)
+                   if not flatten else permutation_kronecker(br_perm1, br_perm2))
+        if not flatten:
+            return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
+        else:
+            return (nn.Sequential(Flatten2D(), br_perm, b, Unflatten2D(n1)) if br_first
+                    else nn.Sequential(Flatten2D(), b, br_perm, Unflatten2D(n1)))
     else:
-        return b
+        return b if not flatten else nn.Sequential(Flatten2D(), b, Unflatten2D(n1))
 
 
 def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor):
@@ -376,7 +390,7 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor):
 
 def wavelet_haar(n, with_perm=True):
     """ Construct an nn.Module based on Butterfly that exactly performs the multilevel discrete
-    wavelet transform with Haar wavelet.
+    wavelet transform with the Haar wavelet.
     Parameters:
         n: size of the discrete wavelet transform. Must be a power of 2.
         with_perm: whether to return both the butterfly and the wavelet rearrangement permutation.
