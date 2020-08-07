@@ -15,7 +15,7 @@ from torch_butterfly.combine import butterfly_kronecker, permutation_kronecker
 from torch_butterfly.combine import Flatten2D, Unflatten2D
 
 
-def fft(n, normalized=False, br_first=True, with_br_perm=True):
+def fft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs the FFT.
     Parameters:
         n: size of the FFT. Must be a power of 2.
@@ -50,7 +50,7 @@ def fft(n, normalized=False, br_first=True, with_br_perm=True):
         return b
 
 
-def ifft(n, normalized=False, br_first=True, with_br_perm=True):
+def ifft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs the inverse FFT.
     Parameters:
         n: size of the iFFT. Must be a power of 2.
@@ -87,7 +87,7 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True):
         return b
 
 
-def circulant(col, transposed=False, separate_diagonal=True):
+def circulant(col, transposed=False, separate_diagonal=True) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs circulant matrix
     multiplication.
     Parameters:
@@ -148,7 +148,7 @@ def circulant(col, transposed=False, separate_diagonal=True):
         return b if complex else nn.Sequential(Real2Complex(), b, Complex2Real())
 
 
-def hadamard(n, normalized=False, increasing_stride=True):
+def hadamard(n, normalized=False, increasing_stride=True) -> Butterfly:
     """ Construct an nn.Module based on Butterfly that exactly performs the Hadamard transform.
     Parameters:
         n: size of the Hadamard transform. Must be a power of 2.
@@ -169,7 +169,7 @@ def hadamard(n, normalized=False, increasing_stride=True):
     return b
 
 
-def conv1d_circular_singlechannel(n, weight, separate_diagonal=True):
+def conv1d_circular_singlechannel(n, weight, separate_diagonal=True) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs nn.Conv1d
     with a single in-channel and single out-channel, with circular padding.
     The output of nn.Conv1d must have the same size as the input (i.e. kernel size must be 2k + 1,
@@ -215,7 +215,7 @@ class DiagonalMultiplySum(nn.Module):
         return complex_mul(input.unsqueeze(1), diagonal).sum(dim=2)
 
 
-def conv1d_circular_multichannel(n, weight):
+def conv1d_circular_multichannel(n, weight) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs nn.Conv1d
     with multiple in/out channels, with circular padding.
     The output of nn.Conv1d must have the same size as the input (i.e. kernel size must be 2k + 1,
@@ -266,7 +266,7 @@ def conv1d_circular_multichannel(n, weight):
 
 
 def fft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
-          with_br_perm: bool = True, flatten=False):
+          with_br_perm: bool = True, flatten=False) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs the 2D FFT.
     Parameters:
         n1: size of the FFT on the last input dimension. Must be a power of 2.
@@ -295,7 +295,7 @@ def fft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
 
 
 def ifft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
-           with_br_perm: bool = True, flatten=False):
+           with_br_perm: bool = True, flatten=False) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs the 2D iFFT.
     Parameters:
         n1: size of the iFFT on the last input dimension. Must be a power of 2.
@@ -323,7 +323,8 @@ def ifft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
         return b if not flatten else nn.Sequential(Flatten2D(), b, Unflatten2D(n1))
 
 
-def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor):
+def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
+                                 flatten: bool=False) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs nn.Conv2d
     with multiple in/out channels, with circular padding.
     The output of nn.Conv2d must have the same size as the input (i.e. kernel size must be 2k + 1,
@@ -334,6 +335,8 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor):
         weight: torch.Tensor of size (out_channels, in_channels, kernel_size2, kernel_size1).
             Kernel_size must be odd, and smaller than n1/n2. Padding is assumed to be
             (kernel_size - 1) // 2.
+        flatten: whether to internally flatten the last 2 dimensions of the input. Only support n1
+            and n2 being powers of 2.
     """
     assert weight.dim() == 4, 'Weight must have dimension 4'
     kernel_size2, kernel_size1 = weight.shape[-2], weight.shape[-1]
@@ -349,19 +352,27 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor):
     complex = col.is_complex()
     log_n1 = int(math.ceil(math.log2(n1)))
     log_n2 = int(math.ceil(math.log2(n2)))
+    if flatten:
+        assert n1 == 1 << log_n1, n2 == 1 << log_n2
     # For non-power-of-2, maybe there's a way to only pad up to size 1 << log_n1?
     # I've only figured out how to pad to size 1 << (log_n1 + 1).
     # e.g., [a, b, c] -> [a, b, c, 0, 0, a, b, c]
     n_extended1 = n1 if n1 == 1 << log_n1 else 1 << (log_n1 + 1)
     n_extended2 = n2 if n2 == 1 << log_n2 else 1 << (log_n2 + 1)
     b_fft = fft2d(n_extended1, n_extended2, normalized=True, br_first=False,
-                  with_br_perm=False).to(col.device)
-    b_fft.map1.in_size = n1
-    b_fft.map2.in_size = n2
+                  with_br_perm=False, flatten=flatten).to(col.device)
+    if not flatten:
+        b_fft.map1.in_size = n1
+        b_fft.map2.in_size = n2
+    else:
+        b_fft = b_fft[1]  # Ignore the Flatten2D and Unflatten2D
     b_ifft = ifft2d(n_extended1, n_extended2, normalized=True, br_first=True,
-                    with_br_perm=False).to(col.device)
-    b_ifft.map1.out_size = n1
-    b_ifft.map2.out_size = n2
+                    with_br_perm=False, flatten=flatten).to(col.device)
+    if not flatten:
+        b_ifft.map1.out_size = n1
+        b_ifft.map2.out_size = n2
+    else:
+        b_ifft = b_ifft[1]  # Ignore the Flatten2D and Unflatten2D
     if n1 < n_extended1:
         col_0 = F.pad(col, (0, 2 * ((1 << log_n1) - n1)))
         col = torch.cat((col_0, col), dim=-1)
@@ -378,17 +389,27 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor):
     # col_f[..., br_perm2, br_perm1] would error "shape mismatch: indexing tensors could not be
     # broadcast together"
     col_f = col_f[..., br_perm2, :][..., br_perm1]
+    if flatten:
+        col_f = col_f.reshape(*col_f.shape[:-2], col_f.shape[-2] * col_f.shape[-1])
     # We just want (input_f.unsqueeze(1) * col_f).sum(dim=2).
     # This can be written as matrix multiply but Pytorch 1.6 doesn't yet support complex matrix
     # multiply.
     if not complex:
-        return nn.Sequential(Real2Complex(), b_fft, DiagonalMultiplySum(col_f), b_ifft,
-                             Complex2Real())
+        if not flatten:
+            return nn.Sequential(Real2Complex(), b_fft, DiagonalMultiplySum(col_f), b_ifft,
+                                Complex2Real())
+        else:
+            return nn.Sequential(Real2Complex(), Flatten2D(), b_fft, DiagonalMultiplySum(col_f),
+                                 b_ifft, Unflatten2D(n1), Complex2Real())
     else:
-        return nn.Sequential(b_fft, DiagonalMultiplySum(col_f), b_ifft)
+        if not flatten:
+            return nn.Sequential(b_fft, DiagonalMultiplySum(col_f), b_ifft)
+        else:
+            return nn.Sequential(Flatten2D(), b_fft, DiagonalMultiplySum(col_f), b_ifft,
+                                 Unflatten2D(n1))
 
 
-def wavelet_haar(n, with_perm=True):
+def wavelet_haar(n, with_perm=True) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs the multilevel discrete
     wavelet transform with the Haar wavelet.
     Parameters:

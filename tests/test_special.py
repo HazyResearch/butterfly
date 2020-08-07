@@ -140,8 +140,8 @@ class ButterflySpecialTest(unittest.TestCase):
 
     def test_ifft2d(self):
         batch_size = 10
-        n1 = 16
-        n2 = 32
+        n1 = 32
+        n2 = 16
         input = torch.randn(batch_size, n2, n1, dtype=torch.complex64)
         for normalized in [False, True]:
             out_torch = view_as_complex(torch.ifft(view_as_real(input),
@@ -159,6 +159,11 @@ class ButterflySpecialTest(unittest.TestCase):
         out_channels = 4
         for n1 in [13, 16]:
             for n2 in [27, 32]:
+                # flatten is only supported for powers of 2 for now
+                if n1 == 1 << int(math.log2(n1)) and n2 == 1 << int(math.log2(n2)):
+                    flatten_cases = [False, True]
+                else:
+                    flatten_cases = [False]
                 for kernel_size1 in [1, 3, 5, 7]:
                     for kernel_size2 in [1, 3, 5, 7]:
                         padding1 = (kernel_size1 - 1) // 2
@@ -169,9 +174,11 @@ class ButterflySpecialTest(unittest.TestCase):
                     weight = conv.weight
                     input = torch.randn(batch_size, in_channels, n2, n1)
                     out_torch = conv(input)
-                    b = torch_butterfly.special.conv2d_circular_multichannel(n1, n2, weight)
-                    out = b(input)
-                    self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+                    for flatten in flatten_cases:
+                        b = torch_butterfly.special.conv2d_circular_multichannel(n1, n2, weight,
+                                                                                 flatten=flatten)
+                        out = b(input)
+                        self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_wavelet_haar(self):
         batch_size = 10
