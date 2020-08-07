@@ -6,6 +6,7 @@ from torch.nn import functional as F
 
 from torch_butterfly.butterfly import Butterfly
 from torch_butterfly.permutation import FixedPermutation, bitreversal_permutation
+from torch_butterfly.permutation import wavelet_permutation
 from torch_butterfly.diagonal import Diagonal
 from torch_butterfly.complex_utils import view_as_real, view_as_complex
 from torch_butterfly.complex_utils import complex_mul, real2complex, Real2Complex, Complex2Real
@@ -371,3 +372,31 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor):
                              Complex2Real())
     else:
         return nn.Sequential(b_fft, DiagonalMultiplySum(col_f), b_ifft)
+
+
+def wavelet_haar(n, with_perm=True):
+    """ Construct an nn.Module based on Butterfly that exactly performs the multilevel discrete
+    wavelet transform with Haar wavelet.
+    Parameters:
+        n: size of the discrete wavelet transform. Must be a power of 2.
+        with_perm: whether to return both the butterfly and the wavelet rearrangement permutation.
+    """
+    log_n = int(math.ceil(math.log2(n)))
+    assert n == 1 << log_n, 'n must be a power of 2'
+    factors = []
+    for log_size in range(1, log_n + 1):
+        size = 1 << log_size
+        factor = torch.tensor([[1, 1], [1, -1]], dtype=torch.float).reshape(1, 2, 2) / math.sqrt(2)
+        identity = torch.eye(2).reshape(1, 2, 2)
+        num_identity = size // 2 - 1
+        twiddle_factor = torch.cat((factor, identity.expand(num_identity, 2, 2)))
+        factors.append(twiddle_factor.repeat(n // size, 1, 1))
+    twiddle = torch.stack(factors, dim=0).unsqueeze(0).unsqueeze(0)
+    b = Butterfly(n, n, bias=False, increasing_stride=True)
+    with torch.no_grad():
+        b.twiddle.copy_(twiddle)
+    if with_perm:
+        perm = FixedPermutation(wavelet_permutation(n, pytorch_format=True))
+        return nn.Sequential(b, perm)
+    else:
+        return b

@@ -8,6 +8,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+import pywt  # To test wavelet
+
 import torch_butterfly
 from torch_butterfly.complex_utils import view_as_real, view_as_complex
 
@@ -167,6 +169,15 @@ class ButterflySpecialTest(unittest.TestCase):
                     b = torch_butterfly.special.conv2d_circular_multichannel(n1, n2, weight)
                     out = b(input)
                     self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
+    def test_wavelet_haar(self):
+        batch_size = 10
+        n = 32
+        input = torch.randn(batch_size, n)
+        out_pywt = torch.tensor(np.hstack(pywt.wavedec(input.numpy(), 'haar')))
+        b = torch_butterfly.special.wavelet_haar(n)
+        out = b(input)
+        self.assertTrue(torch.allclose(out, out_pywt, self.rtol, self.atol))
 
 
 if __name__ == "__main__":

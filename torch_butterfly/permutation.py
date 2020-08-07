@@ -27,6 +27,29 @@ def bitreversal_permutation(n, pytorch_format=False):
     return perm if not pytorch_format else torch.tensor(perm)
 
 
+def wavelet_permutation(n, pytorch_format=False):
+    """Return the bit reversal permutation used in discrete wavelet transform.
+    Example: [0, 1, ..., 7] -> [0, 4, 2, 6, 1, 3, 5, 7]
+    By default, the permutation is stored in numpy array.
+    Parameter:
+        n: integer, must be a power of 2.
+        pytorch_format: whether the permutation is stored as numpy array or pytorch tensor.
+    Return:
+        perm: numpy array of size n
+    """
+    log_n = int(math.log2(n))
+    assert n == 1 << log_n, 'n must be a power of 2'
+    perm = np.arange(n)
+    head, tail = perm[:], perm[:0]  # empty tail
+    for i in range(log_n):
+        even = head[::2]
+        odd = head[1::2]
+        head = even
+        tail = np.hstack((odd, tail))
+    perm = np.hstack((head, tail))
+    return perm if not pytorch_format else torch.tensor(perm)
+
+
 class FixedPermutation(nn.Module):
 
     def __init__(self, permutation):
