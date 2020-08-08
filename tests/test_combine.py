@@ -1,4 +1,5 @@
 import copy
+import itertools
 import unittest
 
 import torch
@@ -38,6 +39,25 @@ class ButterflyCombineTest(unittest.TestCase):
                                 if not inplace:
                                     self.assertTrue(torch.allclose(b.twiddle, twiddle_copy,
                                                                    self.rtol, self.atol))
+
+    def test_butterfly_product(self):
+        batch_size = 10
+        n = 16
+        in_size = 13
+        out_size = 15
+        for complex in [False, True]:
+            for inc_stride1, inc_stride2 in itertools.product([True, False], [True, False]):
+                dtype = torch.float32 if not complex else torch.complex64
+                input = torch.randn(batch_size, in_size, dtype=dtype)
+                b1 = torch_butterfly.Butterfly(in_size, n, bias=False, complex=complex,
+                                               increasing_stride=inc_stride1)
+                b2 = torch_butterfly.Butterfly(n, out_size, bias=False, complex=complex,
+                                               increasing_stride=inc_stride2)
+                out = b2(b1(input))
+                b = torch_butterfly.combine.butterfly_product(b1, b2)
+                out_prod = b(input)
+                self.assertTrue(torch.allclose(out_prod, out, self.rtol, self.atol))
+
 
     def test_butterfly_kronecker(self):
         batch_size = 10

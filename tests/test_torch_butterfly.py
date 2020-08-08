@@ -23,22 +23,22 @@ class ButterflyTest(unittest.TestCase):
             for in_size, out_size in [(7, 15), (15, 7)]:
                 for complex in [False, True]:
                     for increasing_stride in [True, False]:
-                        for ortho_init in [False, True]:
+                        for init in ['randn', 'ortho', 'identity']:
                             for nblocks in [1, 2, 3]:
                                 b = torch_butterfly.Butterfly(in_size, out_size, True, complex,
-                                                              increasing_stride, ortho_init, nblocks=nblocks).to(device)
+                                                              increasing_stride, init, nblocks=nblocks).to(device)
                                 dtype = torch.float32 if not complex else torch.complex64
                                 input = torch.randn(batch_size, in_size, dtype=dtype, device=device)
                                 output = b(input)
                                 self.assertTrue(output.shape == (batch_size, out_size),
-                                                (output.shape, device, (in_size, out_size), complex, ortho_init, nblocks))
-                                if ortho_init:
+                                                (output.shape, device, (in_size, out_size), complex, init, nblocks))
+                                if init == 'ortho':
                                     twiddle = b.twiddle if not b.complex else view_as_complex(b.twiddle)
                                     twiddle_np = twiddle.detach().to('cpu').numpy()
                                     twiddle_np = twiddle_np.reshape(-1, 2, 2)
                                     twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
                                     self.assertTrue(np.allclose(twiddle_norm, 1),
-                                                    (twiddle_norm, device, (in_size, out_size), complex, ortho_init))
+                                                    (twiddle_norm, device, (in_size, out_size), complex, init))
 
     def test_multiply(self):
         for batch_size, n in [(10, 4096), (8192, 512)]:  # Test size smaller than 1024 and large batch size for race conditions

@@ -100,6 +100,23 @@ class ButterflySpecialTest(unittest.TestCase):
             out = b(input)
             self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
+    def test_hadamard_diagonal(self):
+        batch_size = 10
+        n = 16
+        H = torch.tensor(la.hadamard(n), dtype=torch.float32) / math.sqrt(n)
+        for k in [1, 2, 3]:
+            diagonals = torch.randn(k, n)
+            input = torch.randn(batch_size, n)
+            out_torch = input
+            for diagonal in diagonals.unbind():
+                out_torch = F.linear(out_torch * diagonal, H)
+            # for increasing_stride in [True, False]:
+            for increasing_stride in [True]:
+                b = torch_butterfly.special.hadamard_diagonal(
+                    diagonals, normalized=True, increasing_stride=increasing_stride)
+                out = b(input)
+                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
     def test_conv1d_circular_singlechannel(self):
         batch_size = 10
         for n in [13, 16]:

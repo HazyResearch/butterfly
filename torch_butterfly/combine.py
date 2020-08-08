@@ -55,6 +55,32 @@ def diagonal_butterfly(butterfly: Butterfly,
     return out_butterfly
 
 
+def butterfly_product(butterfly1: Butterfly, butterfly2: Butterfly) -> Butterfly:
+    """
+    Combine product of two butterfly matrices into one Butterfly.
+    """
+    assert butterfly1.bias is None and butterfly2.bias is None
+    assert butterfly1.complex == butterfly2.complex
+    assert butterfly1.nstacks == butterfly2.nstacks
+    assert butterfly1.log_n == butterfly2.log_n
+    b1_end_increasing_stride = butterfly1.increasing_stride != (butterfly1.nblocks % 2 == 1)
+    if b1_end_increasing_stride != butterfly2.increasing_stride:
+        # Need to insert an Identity block
+        identity = Butterfly(butterfly1.in_size, butterfly1.out_size, bias=False,
+                             complex=butterfly1.complex,
+                             increasing_stride=b1_end_increasing_stride, init='identity')
+        butterfly1 = butterfly_product(butterfly1, identity)
+    b = Butterfly(1 << butterfly1.log_n, 1 << butterfly1.log_n, bias=False,
+                  complex=butterfly1.complex, increasing_stride=butterfly1.increasing_stride,
+                  nblocks=butterfly1.nblocks + butterfly2.nblocks).to(butterfly1.twiddle.device)
+    b.in_size = butterfly1.in_size
+    b.out_size = butterfly2.out_size
+    with torch.no_grad():
+        # Don't need view_as_complex here since all the twiddles are stored in real.
+        b.twiddle.copy_(torch.cat((butterfly1.twiddle, butterfly2.twiddle), dim=1))
+    return b
+
+
 class TensorProduct(nn.Module):
 
     def __init__(self, map1, map2) -> None:
@@ -131,7 +157,8 @@ def butterfly_kronecker(butterfly1: Butterfly, butterfly2: Butterfly) -> Butterf
     twiddle2 = twiddle2.repeat_interleave(1 << log_n1, dim=3)
     twiddle = (torch.cat((twiddle1, twiddle2), dim=2) if increasing_stride else
                torch.cat((twiddle2, twiddle1), dim=2))
-    b = Butterfly(n, n, bias=False, complex=complex, increasing_stride=increasing_stride)
+    b = Butterfly(n, n, bias=False, complex=complex,
+                  increasing_stride=increasing_stride).to(twiddle.device)
     b.in_size = butterfly1.in_size * butterfly2.in_size
     b.out_size = butterfly1.out_size * butterfly2.out_size
     with torch.no_grad():

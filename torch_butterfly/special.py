@@ -1,4 +1,5 @@
 import math
+from functools import reduce
 
 import torch
 from torch import nn
@@ -10,7 +11,7 @@ from torch_butterfly.permutation import wavelet_permutation
 from torch_butterfly.diagonal import Diagonal
 from torch_butterfly.complex_utils import view_as_real, view_as_complex
 from torch_butterfly.complex_utils import complex_mul, real2complex, Real2Complex, Complex2Real
-from torch_butterfly.combine import diagonal_butterfly, TensorProduct
+from torch_butterfly.combine import diagonal_butterfly, TensorProduct, butterfly_product
 from torch_butterfly.combine import butterfly_kronecker, permutation_kronecker
 from torch_butterfly.combine import Flatten2D, Unflatten2D
 
@@ -136,15 +137,9 @@ def circulant(col, transposed=False, separate_diagonal=True) -> nn.Module:
         with torch.no_grad():
             b_fft = diagonal_butterfly(b_fft, diag, diag_first=False, inplace=True)
         # Combine the b_fft and b_ifft into one Butterfly (with nblocks=2).
-        # TODO: move to combine.py
-        # Need to force the internal twiddle to have size n_extended.
-        b = Butterfly(n_extended, n_extended, bias=False, complex=True,
-                      increasing_stride=False, nblocks=2).to(col.device)
+        b = butterfly_product(b_fft, b_ifft)
         b.in_size = n
         b.out_size = n
-        with torch.no_grad():
-            # Don't need view_as_complex here since all the twiddles are stored in real.
-            b.twiddle.copy_(torch.cat((b_fft.twiddle, b_ifft.twiddle), dim=1))
         return b if complex else nn.Sequential(Real2Complex(), b, Complex2Real())
 
 
@@ -167,6 +162,26 @@ def hadamard(n, normalized=False, increasing_stride=True) -> Butterfly:
     with torch.no_grad():
         b.twiddle.copy_(twiddle)
     return b
+
+
+def hadamard_diagonal(diagonals: torch.Tensor, normalized=False,
+                      increasing_stride=True) -> Butterfly:
+    """ Construct an nn.Module based on Butterfly that performs multiplication by H D H D ... H D,
+    where H is the Hadamard matrix and D is a diagonal matrix
+    Parameters:
+        diagonals: (k, n), where k is the number of diagonal matrices and n is the dimension of the
+            Hadamard transform.
+        normalized: if True, corresponds to the orthogonal Hadamard transform
+                    (i.e. multiplied by 1/sqrt(n))
+        increasing_stride: whether the returned Butterfly has increasing stride.
+    """
+    k, n = diagonals.shape
+    butterflies = []
+    for i, diagonal in enumerate(diagonals.unbind()):
+        cur_increasing_stride = increasing_stride != (i % 2 == 1)
+        h = hadamard(n, normalized, cur_increasing_stride)
+        butterflies.append(diagonal_butterfly(h, diagonal, diag_first=True))
+    return reduce(butterfly_product, butterflies)
 
 
 def conv1d_circular_singlechannel(n, weight, separate_diagonal=True) -> nn.Module:

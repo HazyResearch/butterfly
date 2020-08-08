@@ -20,12 +20,13 @@ class Butterfly(nn.Module):
         complex: whether complex or real
         increasing_stride: whether the first butterfly block will multiply with increasing stride
             (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
-        ortho_init: whether the weight matrix should be initialized to be orthogonal/unitary.
+        init: 'randn', 'ortho', or 'identity'. Whether the weight matrix should be initialized to
+            from randn twiddle, or to be randomly orthogonal/unitary, or to be the identity matrix.
         nblocks: number of B or B^T blocks. The B and B^T will alternate.
     """
 
     def __init__(self, in_size, out_size, bias=True, complex=False,
-                 increasing_stride=True, ortho_init=False, nblocks=1):
+                 increasing_stride=True, init='randn', nblocks=1):
         super().__init__()
         self.in_size = in_size
         log_n = int(math.ceil(math.log2(in_size)))
@@ -35,17 +36,18 @@ class Butterfly(nn.Module):
         self.nstacks = int(math.ceil(out_size / self.in_size_extended))
         self.complex = complex
         self.increasing_stride = increasing_stride
-        self.ortho_init = ortho_init
         assert nblocks >= 1
         self.nblocks = nblocks
         dtype = torch.get_default_dtype() if not complex else real_dtype_to_complex[torch.get_default_dtype()]
         twiddle_core_shape = (self.nstacks, nblocks, log_n, size // 2)
-        if not ortho_init:
+        assert init in ['randn', 'ortho', 'identity']
+        self.init = init
+        if self.init == 'randn':
             twiddle_shape = twiddle_core_shape + (2, 2)
             # complex randn already has the correct scaling of stddev=1.0
             scaling = 1.0 / math.sqrt(2)
             self.twiddle = nn.Parameter(torch.randn(twiddle_shape, dtype=dtype) * scaling)
-        else:
+        elif self.init == 'ortho':
             if not complex:
                 theta = torch.rand(twiddle_core_shape) * math.pi * 2
                 c, s = torch.cos(theta), torch.sin(theta)
@@ -64,6 +66,11 @@ class Butterfly(nn.Module):
                 D = torch.exp(1j * (alpha - psi)) * c
                 self.twiddle = nn.Parameter(torch.stack((torch.stack((A, B), dim=-1),
                                                          torch.stack((C, D), dim=-1)), dim=-2))
+        elif self.init == 'identity':
+            twiddle_shape = twiddle_core_shape + (2, 2)
+            twiddle = torch.eye(2, dtype=dtype).reshape(1, 1, 1, 1, 2, 2)
+            twiddle = twiddle.expand(*twiddle_shape)
+            self.twiddle = nn.Parameter(twiddle)
         self.twiddle._is_structured = True  # Flag to avoid weight decay
         if bias:
             self.bias = nn.Parameter(torch.empty(out_size, dtype=dtype))
@@ -118,6 +125,6 @@ class Butterfly(nn.Module):
         return output.view(*input.size()[:-1], self.out_size)
 
     def extra_repr(self):
-        s = 'in_size={}, out_size={}, bias={}, complex={}, increasing_stride={}, ortho_init={}, nblocks={}'.format(
-            self.in_size, self.out_size, self.bias is not None, self.complex, self.increasing_stride, self.ortho_init, self.nblocks,)
+        s = 'in_size={}, out_size={}, bias={}, complex={}, increasing_stride={}, init={}, nblocks={}'.format(
+            self.in_size, self.out_size, self.bias is not None, self.complex, self.increasing_stride, self.init, self.nblocks,)
         return s
