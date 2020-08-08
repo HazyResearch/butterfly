@@ -2,10 +2,11 @@ import copy
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from torch_butterfly import Butterfly
 from torch_butterfly.permutation import FixedPermutation
-from torch_butterfly.complex_utils import view_as_complex
+from torch_butterfly.complex_utils import view_as_real, view_as_complex
 
 
 def diagonal_butterfly(butterfly: Butterfly,
@@ -13,37 +14,44 @@ def diagonal_butterfly(butterfly: Butterfly,
                        diag_first: bool = True,
                        inplace: bool = True) -> Butterfly:
     """
-    Combine a Butterfly and a diagonal into another Butterfly
+    Combine a Butterfly and a diagonal into another Butterfly.
+    Only support nstacks==1 for now.
     Parameters:
-        butterfly: Butterfly of size n
-        diagonal: size (n, ). Should be of type complex if butterfly.complex == True.
+        butterfly: Butterfly(in_size, out_size)
+        diagonal: size (in_size,) if diag_first, else (out_size,). Should be of type complex
+            if butterfly.complex == True.
         diag_first: If True, the map is input -> diagonal -> butterfly.
             If False, the map is input -> butterfly -> diagonal.
         inplace: whether to modify the input Butterfly
     """
-    # TODO: test
-    out_butterfly = butterfly if inplace else copy.deepcopy(butterfly)
-    twiddle = out_butterfly.twiddle
-    if out_butterfly.complex:
-        twiddle = view_as_complex(out_butterfly.twiddle)
+    assert butterfly.nstacks == 1
+    assert butterfly.bias is None
+    twiddle = (butterfly.twiddle.clone() if not butterfly.complex else
+               view_as_complex(butterfly.twiddle).clone())
+    n = 1 << twiddle.shape[2]
+    if diagonal.shape[-1] < n:
+        diagonal = F.pad(diagonal, (0, n - diagonal.shape[-1]), value=1)
     if diag_first:
         if butterfly.increasing_stride:
-            twiddle[:, :, 0, :, 0, :] *= diagonal[::2].unsqueeze(-1)
-            twiddle[:, :, 0, :, 1, :] *= diagonal[1::2].unsqueeze(-1)
+            twiddle[:, 0, 0, :, :, 0] *= diagonal[::2].unsqueeze(-1)
+            twiddle[:, 0, 0, :, :, 1] *= diagonal[1::2].unsqueeze(-1)
         else:
             n = diagonal.shape[-1]
-            twiddle[:, :, 0, :, :, 0] *= diagonal[:n // 2].unsqueeze(-1)
-            twiddle[:, :, 0, :, :, 1] *= diagonal[n // 2:].unsqueeze(-1)
+            twiddle[:, 0, 0, :, :, 0] *= diagonal[:n // 2].unsqueeze(-1)
+            twiddle[:, 0, 0, :, :, 1] *= diagonal[n // 2:].unsqueeze(-1)
     else:
         # Whether the last block is increasing or decreasing stride
         increasing_stride = butterfly.increasing_stride != ((butterfly.nblocks - 1) % 2 == 1)
         if increasing_stride:
             n = diagonal.shape[-1]
-            twiddle[:, :, 0, :, :, 0] *= diagonal[:n // 2].unsqueeze(-1)
-            twiddle[:, :, 0, :, :, 1] *= diagonal[n // 2:].unsqueeze(-1)
+            twiddle[:, -1, -1, :, 0, :] *= diagonal[:n // 2].unsqueeze(-1)
+            twiddle[:, -1, -1, :, 1, :] *= diagonal[n // 2:].unsqueeze(-1)
         else:
-            twiddle[:, :, -1, :, 0, :] *= diagonal[::2].unsqueeze(-1)
-            twiddle[:, :, -1, :, 1, :] *= diagonal[1::2].unsqueeze(-1)
+            twiddle[:, -1, -1, :, 0, :] *= diagonal[::2].unsqueeze(-1)
+            twiddle[:, -1, -1, :, 1, :] *= diagonal[1::2].unsqueeze(-1)
+    out_butterfly = butterfly if inplace else copy.deepcopy(butterfly)
+    with torch.no_grad():
+        out_butterfly.twiddle.copy_(twiddle if not butterfly.complex else view_as_real(twiddle))
     return out_butterfly
 
 
