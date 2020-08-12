@@ -133,8 +133,7 @@ class ButterflySpecialTest(unittest.TestCase):
             out_torch = input
             for diagonal in diagonals.unbind():
                 out_torch = F.linear(out_torch * diagonal, H)
-            # for increasing_stride in [True, False]:
-            for increasing_stride in [True]:
+            for increasing_stride in [True, False]:
                 b = torch_butterfly.special.hadamard_diagonal(
                     diagonals, normalized=True, increasing_stride=increasing_stride)
                 out = b(input)
