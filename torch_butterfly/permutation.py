@@ -52,7 +52,7 @@ def wavelet_permutation(n, pytorch_format=False):
 
 class FixedPermutation(nn.Module):
 
-    def __init__(self, permutation):
+    def __init__(self, permutation: torch.Tensor) -> None:
         """Fixed permutation.
         Parameter:
             permutation: (n, ) tensor of ints
@@ -60,7 +60,7 @@ class FixedPermutation(nn.Module):
         super().__init__()
         self.register_buffer('permutation', permutation)
 
-    def forward(self, input):
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         """
         Parameters:
             input: (batch, *, size)

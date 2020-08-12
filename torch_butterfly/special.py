@@ -88,6 +88,28 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
         return b
 
 
+def dct(n, normalized=False) -> nn.Module:
+    """ Construct an nn.Module based on Butterfly that exactly performs the DCT type II.
+    Parameters:
+        n: size of the DCT. Must be a power of 2.
+        normalized: if True, corresponds to the orthogonal DCT-II (see scipy.fft.dct's notes)
+    """
+    b_fft = fft(n, normalized=normalized, br_first=True, with_br_perm=False)
+    # Construct the permutation before the FFT: separate the even and odd and then reverse the odd
+    # e.g., [0, 1, 2, 3] -> [0, 2, 3, 1].
+    perm = torch.arange(n)
+    perm = torch.cat((perm[::2], perm[1::2].flip(dims=(0,))))
+    br = bitreversal_permutation(n, pytorch_format=True)
+    perm = perm[br]
+    perm = FixedPermutation(perm)
+    exp = 2 * torch.exp(-1j * torch.arange(n, dtype=torch.float) / (2 * n) * math.pi)
+    if normalized:
+        exp[0] /= 2.0
+        exp[1:] /= math.sqrt(2)
+    b = diagonal_butterfly(b_fft, exp, diag_first=False)
+    return nn.Sequential(Real2Complex(), perm, b, Complex2Real())
+
+
 def circulant(col, transposed=False, separate_diagonal=True) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs circulant matrix
     multiplication.

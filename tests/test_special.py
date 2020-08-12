@@ -3,6 +3,7 @@ import unittest
 
 import numpy as np
 from scipy import linalg as la
+import scipy.fft
 
 import torch
 from torch import nn
@@ -44,6 +45,17 @@ class ButterflySpecialTest(unittest.TestCase):
                 b = torch_butterfly.special.ifft(n, normalized=normalized, br_first=br_first)
                 out = b(input)
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
+    def test_dct(self):
+        batch_size = 10
+        n = 16
+        input = torch.randn(batch_size, n)
+        for normalized in [False, True]:
+            out_sp = torch.tensor(scipy.fft.dct(input.numpy(),
+                                                norm=None if not normalized else 'ortho'))
+            b = torch_butterfly.special.dct(n, normalized=normalized)
+            out = b(input)
+            self.assertTrue(torch.allclose(out, out_sp, self.rtol, self.atol))
 
     def test_circulant(self):
         batch_size = 10
