@@ -30,7 +30,7 @@ def fft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
     factors = []
     for log_size in range(1, log_n + 1):
         size = 1 << log_size
-        exp = torch.exp(-1j * torch.arange(size // 2, dtype=torch.float) / size * 2 * math.pi)
+        exp = torch.exp(-2j * math.pi * torch.arange(size // 2, dtype=torch.float) / size)
         o = torch.ones_like(exp)
         twiddle_factor = torch.stack((torch.stack((o, exp), dim=-1),
                                       torch.stack((o, -exp), dim=-1)), dim=-2)
@@ -65,7 +65,7 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
     factors = []
     for log_size in range(1, log_n + 1):
         size = 1 << log_size
-        exp = torch.exp(1j * torch.arange(size // 2, dtype=torch.float) / size * 2 * math.pi)
+        exp = torch.exp(2j * math.pi * torch.arange(size // 2, dtype=torch.float) / size)
         o = torch.ones_like(exp)
         twiddle_factor = torch.stack((torch.stack((o, exp), dim=-1),
                                       torch.stack((o, -exp), dim=-1)), dim=-2)
@@ -102,11 +102,41 @@ def dct(n, normalized=False) -> nn.Module:
     br = bitreversal_permutation(n, pytorch_format=True)
     perm = perm[br]
     perm = FixedPermutation(perm)
-    exp = 2 * torch.exp(-1j * torch.arange(n, dtype=torch.float) / (2 * n) * math.pi)
+    exp = 2 * torch.exp(-1j * math.pi * torch.arange(n, dtype=torch.float) / (2 * n))
     if normalized:
         exp[0] /= 2.0
         exp[1:] /= math.sqrt(2)
     b = diagonal_butterfly(b_fft, exp, diag_first=False)
+    return nn.Sequential(Real2Complex(), perm, b, Complex2Real())
+
+
+def dst(n, normalized=False) -> nn.Module:
+    """ Construct an nn.Module based on Butterfly that exactly performs the DST type II.
+    Parameters:
+        n: size of the DST. Must be a power of 2.
+        normalized: if True, corresponds to the orthogonal DST-II (see scipy.fft.dst's notes)
+    """
+    b_fft = fft(n, normalized=normalized, br_first=True, with_br_perm=False)
+    # Construct the permutation before the FFT: separate the even and odd and then reverse the odd
+    # e.g., [0, 1, 2, 3] -> [0, 2, 3, 1].
+    perm = torch.arange(n)
+    perm = torch.cat((perm[::2], perm[1::2].flip(dims=(0,))))
+    br = bitreversal_permutation(n, pytorch_format=True)
+    perm = perm[br]
+    perm = FixedPermutation(perm)
+    o = torch.ones(n // 2)
+    preprocess_diag = torch.cat((o, -o))
+    preprocess_diag = preprocess_diag * torch.exp(-2j * math.pi
+                                                  * torch.arange(n, dtype=torch.float) / n)
+    # This proprocess_diag is before the bit-reversal permutation.
+    # To move it after the permutation, we have to permute the diagonal
+    b = diagonal_butterfly(b_fft, preprocess_diag[br], diag_first=True)
+    postprocess_diag = 2j * torch.exp(-1j * math.pi * torch.arange(1, n + 1, dtype=torch.float)
+                                      / (2 * n))
+    if normalized:
+        postprocess_diag[0] /= 2.0
+        postprocess_diag[1:] /= math.sqrt(2)
+    b = diagonal_butterfly(b, postprocess_diag, diag_first=False)
     return nn.Sequential(Real2Complex(), perm, b, Complex2Real())
 
 

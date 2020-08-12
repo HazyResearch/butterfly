@@ -11,7 +11,7 @@ from torch_butterfly.complex_utils import view_as_real, view_as_complex
 
 def diagonal_butterfly(butterfly: Butterfly,
                        diagonal: torch.Tensor,
-                       diag_first: bool = True,
+                       diag_first: bool,
                        inplace: bool = True) -> Butterfly:
     """
     Combine a Butterfly and a diagonal into another Butterfly.
