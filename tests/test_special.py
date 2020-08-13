@@ -50,12 +50,13 @@ class ButterflySpecialTest(unittest.TestCase):
         batch_size = 10
         n = 16
         input = torch.randn(batch_size, n)
-        for normalized in [False, True]:
-            out_sp = torch.tensor(scipy.fft.dct(input.numpy(),
-                                                norm=None if not normalized else 'ortho'))
-            b = torch_butterfly.special.dct(n, normalized=normalized)
-            out = b(input)
-            self.assertTrue(torch.allclose(out, out_sp, self.rtol, self.atol))
+        for type in [2, 4]:
+            for normalized in [False, True]:
+                out_sp = torch.tensor(scipy.fft.dct(input.numpy(), type=type,
+                                                    norm=None if not normalized else 'ortho'))
+                b = torch_butterfly.special.dct(n, type=type, normalized=normalized)
+                out = b(input)
+                self.assertTrue(torch.allclose(out, out_sp, self.rtol, self.atol))
 
     def test_dst(self):
         batch_size = 1
