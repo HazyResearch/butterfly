@@ -102,19 +102,7 @@ class TensorProduct(nn.Module):
         return self.map2(out.transpose(-1, -2)).transpose(-1, -2)
 
 
-class Flatten2D(nn.Module):
-    """Combine the last 2 dimensions of the input. """
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        """
-        Parameter:
-            input: (*, n2, n1)
-        Return:
-            output: (*, n2 * n1)
-        """
-        return input.reshape(*input.shape[:-2], input.shape[-2] * input.shape[-1])
-
-
+# TODO: replace with nn.Unflatten when Pytorch 1.7 is released
 class Unflatten2D(nn.Module):
     """Reshape the last dimension of the input into 2 dimensions. """
 
