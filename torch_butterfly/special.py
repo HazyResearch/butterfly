@@ -37,7 +37,7 @@ def fft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
         factors.append(twiddle_factor.repeat(n // size, 1, 1))
     twiddle = torch.stack(factors, dim=0).unsqueeze(0).unsqueeze(0)
     if not br_first:  # Take conjugate transpose of the BP decomposition of ifft
-        twiddle = twiddle.transpose(-1, -2).flip(dims=(2,))
+        twiddle = twiddle.transpose(-1, -2).flip([2])
     # Divide the whole transform by sqrt(n) by dividing each factor by n^(1/2 log_n) = sqrt(2)
     if normalized:
         twiddle /= math.sqrt(2)
@@ -72,7 +72,7 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
         factors.append(twiddle_factor.repeat(n // size, 1, 1))
     twiddle = torch.stack(factors, dim=0).unsqueeze(0).unsqueeze(0)
     if not br_first:  # Take conjugate transpose of the BP decomposition of fft
-        twiddle = twiddle.transpose(-1, -2).flip(dims=(2,))
+        twiddle = twiddle.transpose(-1, -2).flip([2])
     # Divide the whole transform by sqrt(n) by dividing each factor by n^(1/2 log_n) = sqrt(2)
     if normalized:
         twiddle /= math.sqrt(2)
@@ -100,7 +100,7 @@ def dct(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     # Construct the permutation before the FFT: separate the even and odd and then reverse the odd
     # e.g., [0, 1, 2, 3] -> [0, 2, 3, 1].
     perm = torch.arange(n)
-    perm = torch.cat((perm[::2], perm[1::2].flip(dims=(0,))))
+    perm = torch.cat((perm[::2], perm[1::2].flip([0])))
     br = bitreversal_permutation(n, pytorch_format=True)
     perm = perm[br]
     perm = FixedPermutation(perm)
@@ -134,7 +134,7 @@ def dst(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     # Construct the permutation before the FFT: separate the even and odd and then reverse the odd
     # e.g., [0, 1, 2, 3] -> [0, 2, 3, 1].
     perm = torch.arange(n)
-    perm = torch.cat((perm[::2], perm[1::2].flip(dims=(0,))))
+    perm = torch.cat((perm[::2], perm[1::2].flip([0])))
     br = bitreversal_permutation(n, pytorch_format=True)
     perm = perm[br]
     perm = FixedPermutation(perm)
@@ -197,7 +197,7 @@ def circulant(col, transposed=False, separate_diagonal=True) -> nn.Module:
         # Instead we use the fact that row is the reverse of col, but the 0-th element stays put.
         # This corresponds to the same reversal in the frequency domain.
         # https://en.wikipedia.org/wiki/Discrete_Fourier_transform#Time_and_frequency_reversal
-        col_f = torch.cat((col_f[:1], col_f[1:].flip(dims=(0,))))
+        col_f = torch.cat((col_f[:1], col_f[1:].flip([0])))
     br_perm = bitreversal_permutation(n_extended, pytorch_format=True).to(col.device)
     diag = col_f[..., br_perm]
     if separate_diagonal:
@@ -276,7 +276,7 @@ def conv1d_circular_singlechannel(n, weight, separate_diagonal=True) -> nn.Modul
     assert kernel_size % 2 == 1, 'Kernel size must be odd'
     assert weight.shape[:2] == (1, 1), 'Only support single in-channel and single out-channel'
     padding = (kernel_size - 1) // 2
-    col = F.pad(weight.flip(dims=(-1,)), (0, n - kernel_size)).roll(-padding, dims=-1)
+    col = F.pad(weight.flip([-1]), (0, n - kernel_size)).roll(-padding, dims=-1)
     return circulant(col.squeeze(1).squeeze(0), separate_diagonal=separate_diagonal)
 
 
@@ -320,7 +320,7 @@ def conv1d_circular_multichannel(n, weight) -> nn.Module:
     assert kernel_size % 2 == 1, 'Kernel size must be odd'
     out_channels, in_channels = weight.shape[:2]
     padding = (kernel_size - 1) // 2
-    col = F.pad(weight.flip(dims=(-1,)), (0, n - kernel_size)).roll(-padding, dims=-1)
+    col = F.pad(weight.flip([-1]), (0, n - kernel_size)).roll(-padding, dims=-1)
     # From here we mimic the circulant construction, but the diagonal multiply is replaced with
     # multiply and then sum across the in-channels.
     complex = col.is_complex()
@@ -436,8 +436,8 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
     out_channels, in_channels = weight.shape[:2]
     padding1 = (kernel_size1 - 1) // 2
     padding2 = (kernel_size2 - 1) // 2
-    col = F.pad(weight.flip(dims=(-1,)), (0, n1 - kernel_size1)).roll(-padding1, dims=-1)
-    col = F.pad(col.flip(dims=(-2,)), (0, 0, 0, n2 - kernel_size2)).roll(-padding2, dims=-2)
+    col = F.pad(weight.flip([-1]), (0, n1 - kernel_size1)).roll(-padding1, dims=-1)
+    col = F.pad(col.flip([-2]), (0, 0, 0, n2 - kernel_size2)).roll(-padding2, dims=-2)
     # From here we mimic the circulant construction, but the diagonal multiply is replaced with
     # multiply and then sum across the in-channels.
     complex = col.is_complex()

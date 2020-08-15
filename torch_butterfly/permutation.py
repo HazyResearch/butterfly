@@ -42,8 +42,7 @@ def wavelet_permutation(n, pytorch_format=False):
     perm = np.arange(n)
     head, tail = perm[:], perm[:0]  # empty tail
     for i in range(log_n):
-        even = head[::2]
-        odd = head[1::2]
+        even, odd = head[::2], head[1::2]
         head = even
         tail = np.hstack((odd, tail))
     perm = np.hstack((head, tail))
@@ -117,10 +116,15 @@ def permute(v, perm):
 
 def invert(perm):
     # Get the inverse of a given permutation vector.
-    perm = np.array(perm).astype(np.int32)
-    result = [0]*len(perm)
-    for i in range(len(perm)):
-        result[perm[i]] = i
+    # Works with both numpy array and Pytorch Tensor
+    assert isinstance(perm, (np.ndarray, torch.Tensor))
+    n = perm.shape[-1]
+    if isinstance(perm, np.ndarray):
+        result = np.empty(n, dtype=int)
+        result[perm] = np.arange(n, dtype=int)
+    else:
+        result = torch.empty(n, dtype=int, device=perm.device)
+        result[perm] = torch.arange(n, dtype=int)
     return result
 
 def block_diag(mat):
