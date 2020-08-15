@@ -30,7 +30,7 @@ def fft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
     factors = []
     for log_size in range(1, log_n + 1):
         size = 1 << log_size
-        exp = torch.exp(-2j * math.pi * torch.arange(size // 2, dtype=torch.float) / size)
+        exp = torch.exp(-2j * math.pi * torch.arange(0.0, size // 2) / size)
         o = torch.ones_like(exp)
         twiddle_factor = torch.stack((torch.stack((o, exp), dim=-1),
                                       torch.stack((o, -exp), dim=-1)), dim=-2)
@@ -65,7 +65,7 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
     factors = []
     for log_size in range(1, log_n + 1):
         size = 1 << log_size
-        exp = torch.exp(2j * math.pi * torch.arange(size // 2, dtype=torch.float) / size)
+        exp = torch.exp(2j * math.pi * torch.arange(0.0, size // 2) / size)
         o = torch.ones_like(exp)
         twiddle_factor = torch.stack((torch.stack((o, exp), dim=-1),
                                       torch.stack((o, -exp), dim=-1)), dim=-2)
@@ -92,7 +92,7 @@ def dct(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs the DCT.
     Parameters:
         n: size of the DCT. Must be a power of 2.
-        type: eitehr 2 or 4. These are the only types supported. See scipy.fft.dct's notes.
+        type: either 2 or 4. These are the only types supported. See scipy.fft.dct's notes.
         normalized: if True, corresponds to the orthogonal DCT-II (see scipy.fft.dct's notes)
     """
     assert type in [2, 4]
@@ -105,14 +105,13 @@ def dct(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     perm = perm[br]
     perm = FixedPermutation(perm)
     if type == 4:
-        even_mul = torch.exp(-1j * math.pi / (2 * n) * (torch.arange(0.0, n, 2)  + 0.5))
-        odd_mul = torch.exp(1j * math.pi / (2 * n)
-                            * (torch.arange(1.0, n, 2).flip(dims=(0,)) + 0.5))
-        preprocess_diag = torch.cat((even_mul, odd_mul))
-        # This proprocess_diag is before the bit-reversal permutation.
+        even_mul = torch.exp(-1j * math.pi / (2 * n) * (torch.arange(0.0, n, 2) + 0.5))
+        odd_mul = torch.exp(1j * math.pi / (2 * n) * (torch.arange(1.0, n, 2) + 0.5))
+        preprocess_diag = torch.stack((even_mul, odd_mul), dim=-1).flatten()
+        # This proprocess_diag is before the permutation.
         # To move it after the permutation, we have to permute the diagonal
-        b_fft = diagonal_butterfly(b_fft, preprocess_diag[br], diag_first=True)
-    postprocess_diag = 2 * torch.exp(-1j * math.pi * torch.arange(n, dtype=torch.float) / (2 * n))
+        b_fft = diagonal_butterfly(b_fft, preprocess_diag[perm.permutation], diag_first=True)
+    postprocess_diag = 2 * torch.exp(-1j * math.pi * torch.arange(0.0, n) / (2 * n))
     if normalized:
         if type == 2:
             postprocess_diag[0] /= 2.0
@@ -123,12 +122,14 @@ def dct(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     return nn.Sequential(Real2Complex(), perm, b, Complex2Real())
 
 
-def dst(n: int, normalized: bool = False) -> nn.Module:
-    """ Construct an nn.Module based on Butterfly that exactly performs the DST type II.
+def dst(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
+    """ Construct an nn.Module based on Butterfly that exactly performs the DST.
     Parameters:
         n: size of the DST. Must be a power of 2.
+        type: either 2 or 4. These are the only types supported. See scipy.fft.dct's notes.
         normalized: if True, corresponds to the orthogonal DST-II (see scipy.fft.dst's notes)
     """
+    assert type in [2, 4]
     b_fft = fft(n, normalized=normalized, br_first=True, with_br_perm=False)
     # Construct the permutation before the FFT: separate the even and odd and then reverse the odd
     # e.g., [0, 1, 2, 3] -> [0, 2, 3, 1].
@@ -137,18 +138,26 @@ def dst(n: int, normalized: bool = False) -> nn.Module:
     br = bitreversal_permutation(n, pytorch_format=True)
     perm = perm[br]
     perm = FixedPermutation(perm)
-    o = torch.ones(n // 2)
-    preprocess_diag = torch.cat((o, -o))
-    preprocess_diag = preprocess_diag * torch.exp(-2j * math.pi
-                                                  * torch.arange(n, dtype=torch.float) / n)
-    # This proprocess_diag is before the bit-reversal permutation.
+    if type == 2:
+        even_mul = torch.exp(-1j * math.pi * torch.arange(0.0, n, 2) / n)
+        odd_mul = -torch.exp(1j * math.pi * (torch.arange(1.0, n, 2) + 1) / n)
+    elif type == 4:
+        even_mul = torch.exp(-1j * math.pi * torch.arange(0.0, n, 2) / (2 * n))
+        odd_mul = -torch.exp(1j * math.pi * (torch.arange(1.0, n, 2) + 1) / (2 * n))
+    preprocess_diag = torch.stack((even_mul, odd_mul), dim=-1).flatten()
+    # This proprocess_diag is before the permutation.
     # To move it after the permutation, we have to permute the diagonal
-    b = diagonal_butterfly(b_fft, preprocess_diag[br], diag_first=True)
-    postprocess_diag = 2j * torch.exp(-1j * math.pi * torch.arange(1, n + 1, dtype=torch.float)
-                                      / (2 * n))
+    b = diagonal_butterfly(b_fft, preprocess_diag[perm.permutation], diag_first=True)
+    if type == 2:
+        postprocess_diag = 2j * torch.exp(-1j * math.pi * (torch.arange(0.0, n) + 1) / (2 * n))
+    elif type == 4:
+        postprocess_diag = 2j * torch.exp(-1j * math.pi * (torch.arange(0.0, n) + 0.5) / (2 * n))
     if normalized:
-        postprocess_diag[0] /= 2.0
-        postprocess_diag[1:] /= math.sqrt(2)
+        if type == 2:
+            postprocess_diag[0] /= 2.0
+            postprocess_diag[1:] /= math.sqrt(2)
+        elif type == 4:
+            postprocess_diag /= math.sqrt(2)
     b = diagonal_butterfly(b, postprocess_diag, diag_first=False)
     return nn.Sequential(Real2Complex(), perm, b, Complex2Real())
 
