@@ -92,17 +92,27 @@ class Butterfly(nn.Module):
             bound = 1 / math.sqrt(self.in_size)
             nn.init.uniform_(self.bias, -bound, bound)
 
-    def forward(self, input, transpose=False, conjugate=False):
+    def forward(self, input, transpose=False, conjugate=False, subtwiddle=False):
         """
         Parameters:
             input: (batch, *, in_size)
             transpose: whether the butterfly matrix should be transposed.
             conjugate: whether the butterfly matrix should be conjugated.
+            subtwiddle: allow using only part of the parameters for smaller input.
+                Could be useful for weight sharing.
+                out_size is set to self.nstack * self.in_size_extended in this case
         Return:
             output: (batch, *, out_size)
         """
-        output = self.pre_process(input)
         twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
+        if not subtwiddle:
+            output = self.pre_process(input)
+        else:
+            log_n = int(math.ceil(math.log2(input.size(-1))))
+            n = 1 << log_n
+            output = self.pre_process(input, padded_size=n)
+            twiddle = (twiddle[:, :, :log_n, :n // 2] if self.increasing_stride
+                       else twiddle[:, :, -log_n:, :n // 2])
         if conjugate and self.complex:
             twiddle = twiddle.conj()
         if not transpose:
@@ -111,27 +121,35 @@ class Butterfly(nn.Module):
             twiddle = twiddle.transpose(-1, -2).flip([1, 2])
             last_increasing_stride = self.increasing_stride != ((self.nblocks - 1) % 2 == 1)
             output = butterfly_multiply(twiddle, output, not last_increasing_stride)
-        return self.post_process(input, output)
+        if not subtwiddle:
+            return self.post_process(input, output)
+        else:
+            return self.post_process(input, output, out_size=output.size(-1))
 
-    def pre_process(self, input):
+    def pre_process(self, input, padded_size=None):
+        if padded_size is None:
+            padded_size = self.in_size_extended
         # Reshape to (N, in_size)
-        output = input.reshape(-1, input.size(-1))
+        input_size = input.size(-1)
+        output = input.reshape(-1, input_size)
         batch = output.shape[0]
-        if self.in_size != self.in_size_extended:  # Zero-pad
-            output = F.pad(output, (0, self.in_size_extended - self.in_size))
-        output = output.unsqueeze(1).expand(batch, self.nstacks, self.in_size_extended)
+        if input_size != padded_size:  # Zero-pad
+            output = F.pad(output, (0, padded_size - input_size))
+        output = output.unsqueeze(1).expand(batch, self.nstacks, padded_size)
         return output
 
-    def post_process(self, input, output):
+    def post_process(self, input, output, out_size=None):
+        if out_size is None:
+            out_size = self.out_size
         batch = output.shape[0]
-        output = output.view(batch, self.nstacks * self.in_size_extended)
-        out_size_extended = 1 << (int(math.ceil(math.log2(self.out_size))))
-        if self.out_size != out_size_extended:  # Take top rows
-            output = output[:, :self.out_size]
+        output = output.view(batch, self.nstacks * output.size(-1))
+        out_size_extended = 1 << (int(math.ceil(math.log2(out_size))))
+        if out_size != out_size_extended:  # Take top rows
+            output = output[:, :out_size]
         if self.bias is not None:
             bias = self.bias if not self.complex else view_as_complex(self.bias)
-            output = output + bias
-        return output.view(*input.size()[:-1], self.out_size)
+            output = output + bias[:out_size]
+        return output.view(*input.size()[:-1], out_size)
 
     def extra_repr(self):
         s = 'in_size={}, out_size={}, bias={}, complex={}, increasing_stride={}, init={}, nblocks={}'.format(

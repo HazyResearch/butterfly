@@ -126,12 +126,29 @@ class ButterflyTest(unittest.TestCase):
                     matrix_t = b.forward(input, transpose=True).t()
                     matrix_conj = b.forward(input, conjugate=True).t()
                     matrix_t_conj = b.forward(input, transpose=True, conjugate=True).t()
-                    self.assertTrue(torch.allclose(matrix.t(), matrix_t),
+                    self.assertTrue(torch.allclose(matrix.t(), matrix_t, self.rtol, self.atol),
                                     (complex, increasing_stride, nblocks))
-                    self.assertTrue(torch.allclose(matrix.conj(), matrix_conj),
+                    self.assertTrue(torch.allclose(matrix.conj(), matrix_conj,
+                                                   self.rtol, self.atol),
                                     (complex, increasing_stride, nblocks))
-                    self.assertTrue(torch.allclose(matrix.t().conj(), matrix_t_conj),
+                    self.assertTrue(torch.allclose(matrix.t().conj(), matrix_t_conj,
+                                                   self.rtol, self.atol),
                                     (complex, increasing_stride, nblocks))
+
+    def test_subtwiddle(self):
+        batch_size = 10
+        n = 16
+        input_size = 8
+        for complex in [False, True]:
+            for increasing_stride in [True, False]:
+                for nblocks in [1, 2, 3]:
+                    b = torch_butterfly.Butterfly(n, n, True, complex,
+                                                  increasing_stride, nblocks=nblocks)
+                    dtype = torch.float32 if not complex else torch.complex64
+                    input = torch.randn(batch_size, input_size, dtype=dtype)
+                    output = b(input, subtwiddle=True)
+                    self.assertTrue(output.shape == (batch_size, input_size),
+                                    (output.shape, n, input_size, complex, nblocks))
 
 
 if __name__ == "__main__":
