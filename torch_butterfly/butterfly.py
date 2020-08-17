@@ -92,16 +92,25 @@ class Butterfly(nn.Module):
             bound = 1 / math.sqrt(self.in_size)
             nn.init.uniform_(self.bias, -bound, bound)
 
-    def forward(self, input):
+    def forward(self, input, transpose=False, conjugate=False):
         """
         Parameters:
             input: (batch, *, in_size)
+            transpose: whether the butterfly matrix should be transposed.
+            conjugate: whether the butterfly matrix should be conjugated.
         Return:
             output: (batch, *, out_size)
         """
         output = self.pre_process(input)
         twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
-        output = butterfly_multiply(twiddle, output, self.increasing_stride)
+        if conjugate and self.complex:
+            twiddle = twiddle.conj()
+        if not transpose:
+            output = butterfly_multiply(twiddle, output, self.increasing_stride)
+        else:
+            twiddle = twiddle.transpose(-1, -2).flip([1, 2])
+            last_increasing_stride = self.increasing_stride != ((self.nblocks - 1) % 2 == 1)
+            output = butterfly_multiply(twiddle, output, not last_increasing_stride)
         return self.post_process(input, output)
 
     def pre_process(self, input):

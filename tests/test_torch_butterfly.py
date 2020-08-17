@@ -113,6 +113,26 @@ class ButterflyTest(unittest.TestCase):
             # print(inital_loss, loss)
             self.assertTrue(loss.item() < inital_loss.item())
 
+    def test_transpose_conjugate_multiply(self):
+        n = 16
+        for complex in [False, True]:
+            for increasing_stride in [True, False]:
+                for nblocks in [1, 2, 3]:
+                    b = torch_butterfly.Butterfly(n, n, False, complex,
+                                                  increasing_stride, nblocks=nblocks)
+                    dtype = torch.float32 if not complex else torch.complex64
+                    input = torch.eye(n, dtype=dtype)
+                    matrix = b(input).t()
+                    matrix_t = b.forward(input, transpose=True).t()
+                    matrix_conj = b.forward(input, conjugate=True).t()
+                    matrix_t_conj = b.forward(input, transpose=True, conjugate=True).t()
+                    self.assertTrue(torch.allclose(matrix.t(), matrix_t),
+                                    (complex, increasing_stride, nblocks))
+                    self.assertTrue(torch.allclose(matrix.conj(), matrix_conj),
+                                    (complex, increasing_stride, nblocks))
+                    self.assertTrue(torch.allclose(matrix.t().conj(), matrix_t_conj),
+                                    (complex, increasing_stride, nblocks))
+
 
 if __name__ == "__main__":
     unittest.main()
