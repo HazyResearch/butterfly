@@ -95,7 +95,7 @@ class Butterfly(nn.Module):
                     # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
                     phi = torch.asin(torch.sqrt(torch.rand(twiddle_core_shape)))
                     c, s = torch.cos(phi), torch.sin(phi)
-                    alpha, psi, chi = torch.randn((3, ) + twiddle_core_shape) * math.pi * 2
+                    alpha, psi, chi = torch.rand((3, ) + twiddle_core_shape) * math.pi * 2
                     A = torch.stack((c * torch.cos(alpha + psi), c * torch.sin(alpha + psi)), dim=-1)
                     B = torch.stack((s * torch.cos(alpha + chi), s * torch.sin(alpha + chi)), dim=-1)
                     C = torch.stack((-s * torch.cos(alpha - chi), -s * torch.sin(alpha - chi)), dim=-1)

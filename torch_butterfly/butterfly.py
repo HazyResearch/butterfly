@@ -59,7 +59,7 @@ class Butterfly(nn.Module):
                 # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
                 phi = torch.asin(torch.sqrt(torch.rand(twiddle_core_shape)))
                 c, s = torch.cos(phi), torch.sin(phi)
-                alpha, psi, chi = torch.randn((3, ) + twiddle_core_shape) * math.pi * 2
+                alpha, psi, chi = torch.rand((3, ) + twiddle_core_shape) * math.pi * 2
                 A = torch.exp(1j * (alpha + psi)) * c
                 B = torch.exp(1j * (alpha + chi)) * s
                 C = -torch.exp(1j * (alpha - chi)) * s
@@ -69,7 +69,7 @@ class Butterfly(nn.Module):
         elif self.init == 'identity':
             twiddle_shape = twiddle_core_shape + (2, 2)
             twiddle = torch.eye(2, dtype=dtype).reshape(1, 1, 1, 1, 2, 2)
-            twiddle = twiddle.expand(*twiddle_shape)
+            twiddle = twiddle.expand(*twiddle_shape).contiguous()
             self.twiddle = nn.Parameter(twiddle)
         self.twiddle._is_structured = True  # Flag to avoid weight decay
         if bias:
