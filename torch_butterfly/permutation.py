@@ -6,6 +6,7 @@ import torch
 from torch import nn
 
 from torch_butterfly import Butterfly
+from torch_butterfly.complex_utils import index_last_dim
 
 
 def bitreversal_permutation(n, pytorch_format=False):
@@ -66,7 +67,10 @@ class FixedPermutation(nn.Module):
         Return:
             output: (batch, *, size)
         """
-        return input[..., self.permutation]
+        # return input[..., self.permutation]
+        # Pytorch 1.6.0 doesn't have indexing_backward for complex on GPU.
+        # So we use our own backward
+        return index_last_dim(input, self.permutation)
 
 
 def Identity(n, increasing_stride=True):

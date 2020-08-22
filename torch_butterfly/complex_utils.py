@@ -81,3 +81,23 @@ class Real2Complex(nn.Module):
 class Complex2Real(nn.Module):
     def forward(self, input):
         return complex2real(input)
+
+
+# Pytorch 1.6.0 doesn't have indexing_backward for complex on GPU so we have to write the backward
+# pass explicitly
+class IndexLastDim(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, X, permutation):
+        ctx.save_for_backward(permutation)
+        return X[..., permutation]
+
+    @staticmethod
+    def backward(ctx, grad):
+        permutation, = ctx.saved_tensors
+        output = torch.empty_like(grad)
+        output[..., permutation] = grad
+        return output, None
+
+
+index_last_dim = IndexLastDim.apply
