@@ -34,6 +34,18 @@ class ButterflySpecialTest(unittest.TestCase):
                 out = b(input)
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
+    def test_fft_unitary(self):
+        batch_size = 10
+        n = 16
+        input = torch.randn(batch_size, n, dtype=torch.complex64)
+        normalized = True
+        out_torch = view_as_complex(torch.fft(view_as_real(input),
+                                              signal_ndim=1, normalized=normalized))
+        for br_first in [True, False]:
+            b = torch_butterfly.special.fft_unitary(n, br_first=br_first)
+            out = b(input)
+            self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
     def test_ifft(self):
         batch_size = 10
         n = 16
@@ -45,6 +57,18 @@ class ButterflySpecialTest(unittest.TestCase):
                 b = torch_butterfly.special.ifft(n, normalized=normalized, br_first=br_first)
                 out = b(input)
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
+    def test_ifft_unitary(self):
+        batch_size = 10
+        n = 16
+        input = torch.randn(batch_size, n, dtype=torch.complex64)
+        normalized = True
+        out_torch = view_as_complex(torch.ifft(view_as_real(input),
+                                               signal_ndim=1, normalized=normalized))
+        for br_first in [True, False]:
+            b = torch_butterfly.special.ifft_unitary(n, br_first=br_first)
+            out = b(input)
+            self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_dct(self):
         batch_size = 10
@@ -209,6 +233,19 @@ class ButterflySpecialTest(unittest.TestCase):
                     out = b(input)
                     self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
+    def test_fft2d_unitary(self):
+        batch_size = 10
+        n1 = 16
+        n2 = 32
+        input = torch.randn(batch_size, n2, n1, dtype=torch.complex64)
+        normalized = True
+        out_torch = view_as_complex(torch.fft(view_as_real(input),
+                                              signal_ndim=2, normalized=normalized))
+        for br_first in [True, False]:
+            b = torch_butterfly.special.fft2d_unitary(n1, n2, br_first=br_first)
+            out = b(input)
+            self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
     def test_ifft2d(self):
         batch_size = 10
         n1 = 32
@@ -230,6 +267,19 @@ class ButterflySpecialTest(unittest.TestCase):
                                                        br_first=br_first, flatten=flatten)
                     out = b(input)
                     self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
+    def test_ifft2d_unitary(self):
+        batch_size = 10
+        n1 = 16
+        n2 = 32
+        input = torch.randn(batch_size, n2, n1, dtype=torch.complex64)
+        normalized = True
+        out_torch = view_as_complex(torch.ifft(view_as_real(input),
+                                               signal_ndim=2, normalized=normalized))
+        for br_first in [True, False]:
+            b = torch_butterfly.special.ifft2d_unitary(n1, n2, br_first=br_first)
+            out = b(input)
+            self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_conv2d_circular_multichannel(self):
         batch_size = 10

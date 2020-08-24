@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from torch_butterfly.butterfly import Butterfly
+from torch_butterfly.butterfly import Butterfly, ButterflyUnitary
 from torch_butterfly.permutation import FixedPermutation, bitreversal_permutation
 from torch_butterfly.permutation import wavelet_permutation
 from torch_butterfly.diagonal import Diagonal
@@ -51,6 +51,44 @@ def fft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
         return b
 
 
+def fft_unitary(n, br_first=True, with_br_perm=True) -> nn.Module:
+    """ Construct an nn.Module based on ButterflyUnitary that exactly performs the FFT.
+    Since it's unitary, it corresponds to normalized=True.
+    Parameters:
+        n: size of the FFT. Must be a power of 2.
+        br_first: which decomposition of FFT. br_first=True corresponds to decimation-in-time.
+                  br_first=False corresponds to decimation-in-frequency.
+        with_br_perm: whether to return both the butterfly and the bit reversal permutation.
+    """
+    log_n = int(math.ceil(math.log2(n)))
+    assert n == 1 << log_n, 'n must be a power of 2'
+    factors = []
+    for log_size in range(1, log_n + 1):
+        size = 1 << log_size
+        angle = -2 * math.pi * torch.arange(0.0, size // 2) / size
+        phi = torch.ones_like(angle) * math.pi / 4
+        alpha = angle / 2 + math.pi / 2
+        psi = -angle / 2 - math.pi / 2
+        if br_first:
+            chi = angle / 2 - math.pi / 2
+        else:
+            # Take conjugate transpose of the BP decomposition of ifft, which works out to this,
+            # plus the flip later.
+            chi = -angle / 2 - math.pi / 2
+        twiddle_factor = torch.stack([phi, alpha, psi, chi], dim=-1)
+        factors.append(twiddle_factor.repeat(n // size, 1))
+    twiddle = torch.stack(factors, dim=0).unsqueeze(0).unsqueeze(0)
+    if not br_first:
+        twiddle = twiddle.flip([2])
+    b = ButterflyUnitary(n, n, bias=False, increasing_stride=br_first)
+    with torch.no_grad():
+        b.twiddle.copy_(twiddle)
+    if with_br_perm:
+        br_perm = FixedPermutation(bitreversal_permutation(n, pytorch_format=True))
+        return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
+    else:
+        return b
+
 def ifft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs the inverse FFT.
     Parameters:
@@ -81,6 +119,45 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
     b = Butterfly(n, n, bias=False, complex=True, increasing_stride=br_first)
     with torch.no_grad():
         view_as_complex(b.twiddle).copy_(twiddle)
+    if with_br_perm:
+        br_perm = FixedPermutation(bitreversal_permutation(n, pytorch_format=True))
+        return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
+    else:
+        return b
+
+
+def ifft_unitary(n, br_first=True, with_br_perm=True) -> nn.Module:
+    """ Construct an nn.Module based on ButterflyUnitary that exactly performs the iFFT.
+    Since it's unitary, it corresponds to normalized=True.
+    Parameters:
+        n: size of the iFFT. Must be a power of 2.
+        br_first: which decomposition of iFFT. br_first=True corresponds to decimation-in-time.
+                  br_first=False corresponds to decimation-in-frequency.
+        with_br_perm: whether to return both the butterfly and the bit reversal permutation.
+    """
+    log_n = int(math.ceil(math.log2(n)))
+    assert n == 1 << log_n, 'n must be a power of 2'
+    factors = []
+    for log_size in range(1, log_n + 1):
+        size = 1 << log_size
+        angle = 2 * math.pi * torch.arange(0.0, size // 2) / size
+        phi = torch.ones_like(angle) * math.pi / 4
+        alpha = angle / 2 + math.pi / 2
+        psi = -angle / 2 - math.pi / 2
+        if br_first:
+            chi = angle / 2 - math.pi / 2
+        else:
+            # Take conjugate transpose of the BP decomposition of fft, which works out to this,
+            # plus the flip later.
+            chi = -angle / 2 - math.pi / 2
+        twiddle_factor = torch.stack([phi, alpha, psi, chi], dim=-1)
+        factors.append(twiddle_factor.repeat(n // size, 1))
+    twiddle = torch.stack(factors, dim=0).unsqueeze(0).unsqueeze(0)
+    if not br_first:
+        twiddle = twiddle.flip([2])
+    b = ButterflyUnitary(n, n, bias=False, increasing_stride=br_first)
+    with torch.no_grad():
+        b.twiddle.copy_(twiddle)
     if with_br_perm:
         br_perm = FixedPermutation(bitreversal_permutation(n, pytorch_format=True))
         return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
@@ -384,6 +461,30 @@ def fft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
         return b if not flatten else nn.Sequential(nn.Flatten(start_dim=-2), b, Unflatten2D(n1))
 
 
+def fft2d_unitary(n1: int, n2: int, br_first: bool = True,
+                  with_br_perm: bool = True) -> nn.Module:
+    """ Construct an nn.Module based on ButterflyUnitary that exactly performs the 2D FFT.
+    Corresponds to normalized=True.
+    Does not support flatten for now.
+    Parameters:
+        n1: size of the FFT on the last input dimension. Must be a power of 2.
+        n2: size of the FFT on the second to last input dimension. Must be a power of 2.
+        br_first: which decomposition of FFT. br_first=True corresponds to decimation-in-time.
+                  br_first=False corresponds to decimation-in-frequency.
+        with_br_perm: whether to return both the butterfly and the bit reversal permutation.
+    """
+    b_fft1 = fft_unitary(n1, br_first=br_first, with_br_perm=False)
+    b_fft2 = fft_unitary(n2, br_first=br_first, with_br_perm=False)
+    b = TensorProduct(b_fft1, b_fft2)
+    if with_br_perm:
+        br_perm1 = FixedPermutation(bitreversal_permutation(n1, pytorch_format=True))
+        br_perm2 = FixedPermutation(bitreversal_permutation(n2, pytorch_format=True))
+        br_perm = TensorProduct(br_perm1, br_perm2)
+        return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
+    else:
+        return b
+
+
 def ifft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
            with_br_perm: bool = True, flatten=False) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs the 2D iFFT.
@@ -412,6 +513,30 @@ def ifft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
                     else nn.Sequential(nn.Flatten(start_dim=-2), b, br_perm, Unflatten2D(n1)))
     else:
         return b if not flatten else nn.Sequential(nn.Flatten(start_dim=-2), b, Unflatten2D(n1))
+
+
+def ifft2d_unitary(n1: int, n2: int, br_first: bool = True,
+                   with_br_perm: bool = True) -> nn.Module:
+    """ Construct an nn.Module based on ButterflyUnitary that exactly performs the 2D iFFT.
+    Corresponds to normalized=True.
+    Does not support flatten for now.
+    Parameters:
+        n1: size of the iFFT on the last input dimension. Must be a power of 2.
+        n2: size of the iFFT on the second to last input dimension. Must be a power of 2.
+        br_first: which decomposition of iFFT. True corresponds to decimation-in-frequency.
+                  False corresponds to decimation-in-time.
+        with_br_perm: whether to return both the butterfly and the bit reversal permutation.
+    """
+    b_ifft1 = ifft_unitary(n1, br_first=br_first, with_br_perm=False)
+    b_ifft2 = ifft_unitary(n2, br_first=br_first, with_br_perm=False)
+    b = TensorProduct(b_ifft1, b_ifft2)
+    if with_br_perm:
+        br_perm1 = FixedPermutation(bitreversal_permutation(n1, pytorch_format=True))
+        br_perm2 = FixedPermutation(bitreversal_permutation(n2, pytorch_format=True))
+        br_perm = TensorProduct(br_perm1, br_perm2)
+        return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
+    else:
+        return b
 
 
 def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
