@@ -150,6 +150,31 @@ class ButterflyTest(unittest.TestCase):
                     self.assertTrue(output.shape == (batch_size, input_size),
                                     (output.shape, n, input_size, complex, nblocks))
 
+    def test_butterfly_unitary(self):
+        # Test shape
+        batch_size = 10
+        for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+            for in_size, out_size in [(7, 15), (15, 7)]:
+                    for increasing_stride in [True, False]:
+                        for nblocks in [1, 2, 3]:
+                            b = torch_butterfly.ButterflyUnitary(in_size, out_size, True,
+                                                                 increasing_stride, nblocks=nblocks).to(device)
+                            dtype = torch.complex64
+                            input = torch.randn(batch_size, in_size, dtype=dtype, device=device)
+                            output = b(input)
+                            self.assertTrue(output.shape == (batch_size, out_size),
+                                            (output.shape, device, (in_size, out_size), nblocks))
+        # Test that it's actually unitary
+        size = 32
+        for increasing_stride in [True, False]:
+            for nblocks in [1, 2, 3]:
+                b = torch_butterfly.ButterflyUnitary(size, size, False,
+                                                     increasing_stride, nblocks=nblocks)
+                eye = torch.eye(size, dtype=torch.complex64)
+                twiddle_matrix_np = b(eye).t().detach().numpy()
+                self.assertTrue(np.allclose(twiddle_matrix_np @ twiddle_matrix_np.T.conj(),
+                                            np.eye(size), self.rtol, self.atol))
+
 
 if __name__ == "__main__":
     unittest.main()

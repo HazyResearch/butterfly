@@ -155,3 +155,106 @@ class Butterfly(nn.Module):
         s = 'in_size={}, out_size={}, bias={}, complex={}, increasing_stride={}, init={}, nblocks={}'.format(
             self.in_size, self.out_size, self.bias is not None, self.complex, self.increasing_stride, self.init, self.nblocks,)
         return s
+
+
+class ButterflyUnitary(Butterfly):
+    """Same as Butterfly, but constrained to be unitary
+    Compatible with torch.nn.Linear.
+
+    Parameters:
+        in_size: size of input
+        out_size: size of output
+        bias: If set to False, the layer will not learn an additive bias.
+                Default: ``True``
+        increasing_stride: whether the first butterfly block will multiply with increasing stride
+            (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
+        nblocks: number of B or B^T blocks. The B and B^T will alternate.
+    """
+
+    def __init__(self, in_size, out_size, bias=True, increasing_stride=True, nblocks=1):
+        nn.Module.__init__(self)
+        self.in_size = in_size
+        log_n = int(math.ceil(math.log2(in_size)))
+        self.log_n = log_n
+        size = self.in_size_extended = 1 << log_n  # Will zero-pad input if in_size is not a power of 2
+        self.out_size = out_size
+        self.nstacks = int(math.ceil(out_size / self.in_size_extended))
+        self.complex = True
+        self.increasing_stride = increasing_stride
+        assert nblocks >= 1
+        self.nblocks = nblocks
+        dtype = real_dtype_to_complex[torch.get_default_dtype()]
+        twiddle_core_shape = (self.nstacks, nblocks, log_n, size // 2)
+        self.init = 'ortho'
+        # Sampling from the Haar measure on U(2) is a bit subtle.
+        # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
+        self.twiddle = nn.Parameter(torch.randn(twiddle_core_shape + (4,)) * 2 * math.pi)
+        phi = torch.asin(torch.sqrt(torch.rand(twiddle_core_shape)))
+        alpha, psi, chi = torch.rand((3, ) + twiddle_core_shape) * math.pi * 2
+        self.twiddle = nn.Parameter(torch.stack([phi, alpha, psi, chi], dim=-1))
+        self.twiddle._is_structured = True  # Flag to avoid weight decay
+        if bias:
+            self.bias = nn.Parameter(torch.empty(out_size, dtype=dtype))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+        # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
+        # This is used in optimizers such as SGD.
+        # So we have to store the parameters as real.
+        if self.bias is not None:
+            self.bias = nn.Parameter(view_as_real(self.bias))
+
+    def reset_parameters(self):
+        """Initialize bias the same way as torch.nn.Linear."""
+        # TODO: init the twiddle here, with copy_
+        if self.bias is not None:
+            bound = 1 / math.sqrt(self.in_size)
+            nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, input, transpose=False, conjugate=False, subtwiddle=False):
+        """
+        Parameters:
+            input: (batch, *, in_size)
+            transpose: whether the butterfly matrix should be transposed.
+            conjugate: whether the butterfly matrix should be conjugated.
+            subtwiddle: allow using only part of the parameters for smaller input.
+                Could be useful for weight sharing.
+                out_size is set to self.nstack * self.in_size_extended in this case
+        Return:
+            output: (batch, *, out_size)
+        """
+        phi, alpha, psi, chi = torch.unbind(self.twiddle, -1)
+        c, s = torch.cos(phi), torch.sin(phi)
+        # Pytorch 1.6.0 doesn't support complex exp on GPU so we have to use cos/sin
+        A = torch.stack((c * torch.cos(alpha + psi), c * torch.sin(alpha + psi)), dim=-1)
+        B = torch.stack((s * torch.cos(alpha + chi), s * torch.sin(alpha + chi)), dim=-1)
+        C = torch.stack((-s * torch.cos(alpha - chi), -s * torch.sin(alpha - chi)), dim=-1)
+        D = torch.stack((c * torch.cos(alpha - psi), c * torch.sin(alpha - psi)), dim=-1)
+        twiddle = torch.stack([torch.stack([A, B], dim=-2),
+                               torch.stack([C, D], dim=-2)], dim=-3)
+        twiddle = view_as_complex(twiddle)
+        if not subtwiddle:
+            output = self.pre_process(input)
+        else:
+            log_n = int(math.ceil(math.log2(input.size(-1))))
+            n = 1 << log_n
+            output = self.pre_process(input, padded_size=n)
+            twiddle = (twiddle[:, :, :log_n, :n // 2] if self.increasing_stride
+                       else twiddle[:, :, -log_n:, :n // 2])
+        if conjugate and self.complex:
+            twiddle = twiddle.conj()
+        if not transpose:
+            output = butterfly_multiply(twiddle, output, self.increasing_stride)
+        else:
+            twiddle = twiddle.transpose(-1, -2).flip([1, 2])
+            last_increasing_stride = self.increasing_stride != ((self.nblocks - 1) % 2 == 1)
+            output = butterfly_multiply(twiddle, output, not last_increasing_stride)
+        if not subtwiddle:
+            return self.post_process(input, output)
+        else:
+            return self.post_process(input, output, out_size=output.size(-1))
+
+    def extra_repr(self):
+        s = 'in_size={}, out_size={}, bias={}, increasing_stride={}, nblocks={}'.format(
+            self.in_size, self.out_size, self.bias is not None, self.increasing_stride, self.nblocks,)
+        return s
