@@ -1,6 +1,8 @@
 import math
+from typing import List, Tuple, Union
 
 import numpy as np
+import scipy.linalg
 
 import torch
 from torch import nn
@@ -73,54 +75,12 @@ class FixedPermutation(nn.Module):
         return index_last_dim(input, self.permutation)
 
 
-def Identity(n, increasing_stride=True):
-    b = Butterfly(n, n, bias=False, increasing_stride=increasing_stride)
-    bd = b.twiddle.data
-    bd.zero_()
-    for block in bd.view(-1, 2, 2):
-        block[0, 0] = block[1, 1] = 1
-        block[0, 1] = block[1, 0] = 0
-    return b
-
-def perm_vec_to_mat(p, left=False):
-    # Convert a permutation vector to a permutation matrix.
-    # Mostly for debugging purposes.
-    m = np.zeros((len(p), len(p)))
-    for i in range(len(p)):
-        m[p[i], i] = 1
-    if left:
-        # Left-multiplication by the resulting matrix
-        # will result in the desired permutation.
-        m = m.T
-    return m
-
-def perm_mat_to_vec(m, left=False):
-    # Convert a permutation matrix to a permutation vector.
-    # Mostly for debugging purposes.
-    inp = np.arange(m.shape[0])
-    if left:
-        return m @ inp
-    else:
-        return m.T @ inp
-
-def permute(v, perm):
-    # Permute an input vector according to the desired permutation vector.
-    # The i'th element of the output is simply v[perm[i]]. Equivalent to
-    # multiplying by the corresponding permutation matrix.
-    to_list = type(v) == list
-    v = np.array(v)
-    perm = list(np.array(perm, dtype=np.int32))
-    if len(v.shape) == 1:
-        v = v[perm]
-    else:
-        v = v[perm, :]
-    if to_list:
-        v = list(v)
-    return v
-
-def invert(perm):
-    # Get the inverse of a given permutation vector.
-    # Works with both numpy array and Pytorch Tensor
+def invert(perm: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+    """Get the inverse of a given permutation vector.
+    Equivalent to converting a permutation vector from left-multiplication format to right
+    multiplication format.
+    Work with both numpy array and Pytorch Tensor.
+    """
     assert isinstance(perm, (np.ndarray, torch.Tensor))
     n = perm.shape[-1]
     if isinstance(perm, np.ndarray):
@@ -131,79 +91,110 @@ def invert(perm):
         result[perm] = torch.arange(n, dtype=int)
     return result
 
-def block_diag(mat):
-    # Check that each of the 4 blocks of a matrix is diagonal
-    # (in other words, that the matrix is a butterfly factor).
-    # Assumes that the matrix is square with even dimension.
+
+def perm_vec_to_mat(p: np.ndarray, left: bool = False) -> np.ndarray:
+    """Convert a permutation vector to a permutation matrix.
+    Parameters:
+        p: a vector storing the permutation.
+        left: whether it's in left- or right-multiplication format.
+    """
+    n = len(p)
+    matrix = np.zeros((n, n), dtype=int)
+    matrix[p, np.arange(n, dtype=int)] = 1
+    # Left-multiplication by the resulting matrix will result in the desired permutation.
+    return matrix if not left else matrix.T
+
+
+def perm_mat_to_vec(m, left=False):
+    """Convert a permutation matrix to a permutation vector.
+    Parameters:
+        p: a matrix storing the permutation.
+        left: whether it's in left- or right-multiplication format.
+    """
+    input = np.arange(m.shape[0])
+    return m @ input if left else m.T @ input
+
+
+def is_2x2_block_diag(mat: np.ndarray) -> bool:
+    """Check that each of the 4 blocks of a matrix is diagonal
+    (in other words, that the matrix is a butterfly factor).
+    Assumes that the matrix is square with even dimension.
+    """
     nh = mat.shape[0] // 2
-    for i, j in np.ndindex((2, 2)):
-        block = mat[i*nh:(i+1)*nh,j*nh:(j+1)*nh]
+    for block in [mat[:nh, :nh], mat[:nh, nh:], mat[nh:, :nh], mat[nh:, nh:]]:
         if np.count_nonzero(block - np.diag(np.diagonal(block))):
             return False  # there's a nonzero off-diagonal entry
     return True
 
-def is_butterfly(mat, k):
-    # Checks whether "mat" is in B_k.
-    assert (k > 1 and int(np.round(2**(np.log2(k)))) == k)
+
+def is_butterfly_factor(mat: np.ndarray, k: int) -> bool:
+    """Checks whether "mat" is in B_k.
+    """
+    assert k > 1 and k == 1 << int(math.log2(k))
     n = mat.shape[0]
-    assert (n >= k and int(np.round(2**(np.log2(n)))) == n)
+    assert n >= k and n == 1 << int(math.log2(n))
     z = np.zeros(mat.shape)
     for i in range(n//k):
         # Iterate through each diagonal block of the matrix,
         # and check that it is a butterfly factor.
-        block = mat[i*k:(i+1)*k,i*k:(i+1)*k]
-        if not block_diag(block):
+        block = mat[i * k:(i + 1) * k, i * k:(i + 1) * k]
+        if not is_2x2_block_diag(block):
             return False
-        z[i*k:(i+1)*k,i*k:(i+1)*k] = block
+        z[i * k:(i + 1) * k, i * k:(i + 1) * k] = block
     # Check whether there are any nonzeros in off-diagonal blocks.
     return np.count_nonzero(mat - z) == 0
 
-def to_butterfly(mat, k=None, logk=None, pytorch=False, check=False):
-    # Converts a matrix to a butterfly factor B_k.
-    # Assumes that it indeed has the correct sparsity pattern.
-    assert ((k is not None) != (logk is not None))
-    if logk is not None:
-        k = 2**logk
-    if check:
-        assert (is_butterfly(mat, k))
+
+def matrix_to_butterfly_factor(mat, log_k, pytorch_format=False, check_input=False):
+    """Converts a matrix to a butterfly factor B_k.
+    Assumes that it indeed has the correct sparsity pattern.
+    """
+    k = 1 << log_k
+    if check_input:
+        assert is_butterfly_factor(mat, k)
     n = mat.shape[0]
-    out = np.zeros((n//2, 2, 2))
-    for block in range(n//2):
-        base = (2*block//k) * k + (block % (k//2))
+    out = np.zeros((n // 2, 2, 2))
+    for block in range(n // 2):
+        base = (2 * block // k) * k + (block % (k // 2))
         for i, j in np.ndindex((2, 2)):
-            out[block, i, j] = mat[base + j*k//2, base + i*k//2]
-    if check:
-        b = Identity(n)
-        b.twiddle.data[0, 0, int(round(np.log2(k)))-1].copy_(torch.tensor(out))
-        result = b(torch.eye(n))
-        assert (torch.norm(result - torch.tensor(mat).float()).item() < 1e-6)
-    if pytorch:
-        out = torch.tensor(out).float()
+            out[block, i, j] = mat[base + i * k // 2, base + j * k//2]
+    if pytorch_format:
+        out = torch.tensor(out, dtype=torch.float32)
     return out
+
 
 class Node:
     def __init__(self, value):
         self.value = value
         self.in_edges = []
         self.out_edges = []
-        self.locations = []
 
-def half_balance(v):
-    # Return the permutation vector that makes the permutation vector v
-    # n//2-balanced. Directly follows the proof of Lemma D.2.
-    assert (len(v) % 2 == 0)
-    vh = len(v) // 2
-    perm = list(range(len(v)))
-    nodes = [Node(i) for i in range(vh)]
+
+def half_balance(
+    v: np.ndarray, return_butterfly_factor: bool = False
+) -> Union[np.ndarray, torch.Tensor]:
+    """Return the permutation vector that makes the permutation vector v
+    n//2-balanced. Directly follows the proof of Lemma G.2.
+    Parameters:
+        v: the permutation as a vector, stored in right-multiplication format.
+    """
+    n = len(v)
+    assert n % 2 == 0
+    nh = n // 2
+    nodes = [Node(i) for i in range(nh)]
     # Build the graph
-    for i in range(vh):
+    for i in range(nh):
         # There is an edge from s to t
-        s, t = nodes[v[i] % vh], nodes[v[i+vh] % vh]
+        s, t = nodes[v[i] % nh], nodes[v[i + nh] % nh]
         s.out_edges.append((t, i))
-        t.in_edges.append((s, i+vh))
+        t.in_edges.append((s, i + nh))
+    # Each node has undirected degree exactly 2
+    assert all(len(node.in_edges) + len(node.out_edges) == 2 for node in nodes)
+    swapped_low_locs = []
+    swapped_high_locs = []
     while len(nodes):
         # Pick a random node.
-        start_node, start_loc = nodes[-1], len(v) - 1
+        start_node, start_loc = nodes[-1], n - 1
         next_node = None
         # Follow undirected edges until rereaching start_node.
         # As every node has undirected degree 2, this will find
@@ -213,120 +204,133 @@ def half_balance(v):
             if next_node is None:
                 next_node, next_loc = start_node, start_loc
             old_node, old_loc = next_node, next_loc
-            if len(old_node.out_edges):
+            if old_node.out_edges:
                 # If there's an out-edge from old_node, follow it.
                 next_node, old_loc = old_node.out_edges.pop()
-                next_loc = old_loc + vh
+                next_loc = old_loc + nh
                 next_node.in_edges.remove((old_node, next_loc))
             else:
                 # If there's no out-edge, there must be an in-edge.
                 next_node, old_loc = old_node.in_edges.pop()
-                next_loc = old_loc - vh
+                next_loc = old_loc - nh
                 next_node.out_edges.remove((old_node, next_loc))
-                perm[old_loc], perm[next_loc] = perm[next_loc], perm[old_loc]
+                swapped_low_locs.append(next_loc)
+                swapped_high_locs.append(old_loc)
             nodes.remove(old_node)
-    return perm
+    if not return_butterfly_factor:
+        perm = np.arange(n, dtype=int)
+        perm[swapped_low_locs], perm[swapped_high_locs] = swapped_high_locs, swapped_low_locs
+        return perm
+    else:
+        twiddle = torch.eye(2).expand(n // 2, 2, 2).contiguous()
+        swap_matrix = torch.tensor([[0, 1], [1, 0]], dtype=torch.float)
+        twiddle[swapped_low_locs] = swap_matrix.unsqueeze(0)
+        return twiddle
 
-def modular_balance(v):
-    # v is a permutation vector corresponding to a permutation matrix P.
-    # Returns the sequence of permutations to transform v
-    # into a modular-balanced matrix, as well as the resultant
-    # modular-banced permutation vector. Directly follows the proof of
-    # Lemma D.3.
-    v = np.array(v, copy=True)
+
+def modular_balance(v: np.ndarray) -> Tuple[List[np.ndarray], np.ndarray]:
+    """
+    Returns the sequence of permutations to transform permutation vector v
+    into a modular-balanced matrix, as well as the resultant
+    modular-balanced permutation vector. Directly follows the proof of
+    Lemma G.3.
+    Parameters:
+        v: a permutation vector corresponding to a permutation matrix P, stored in
+            right-multiplication format.
+    """
     t = n = len(v)
     perms = []
     while t >= 2:
-        perm = np.arange(n)
-        for c in range(n // t):
-            # Balance each chunk of the vector (independently).
-            chunk = v[c*t:(c+1)*t]
-            chunk_p = half_balance(chunk)
-            perm[c*t:(c+1)*t] = permute(perm[c*t:(c+1)*t], chunk_p)
-            v[c*t:(c+1)*t] = permute(v[c*t:(c+1)*t], chunk_p)
-        perms.append(perm)
+        # Balance each chunk of the vector independently.
+        chunks = np.split(v, n // t)
+        # Adjust indices of the permutation
+        swap_perm = np.hstack([half_balance(chunk) + chunk_idx * t
+                               for chunk_idx, chunk in enumerate(chunks)])
+        v = v[swap_perm]
+        perms.append(swap_perm)
         t //= 2
     return perms, v
 
-def check_balanced(perm):
+
+def is_modular_balanced(perm):
+    """Corresponds to Definition G.1 in the paper.
+    perm is stored in right-multiplication format, either as a vector or a matrix.
+    """
     if isinstance(perm, np.ndarray) and len(perm.shape) > 1:
         perm = perm_mat_to_vec(perm)
     n = len(perm)
-    j = 2
-    while j <= n:
-        for chunk in range(n//j):
-            mod_vals = set()
-            for i in range(chunk*j, (chunk+1)*j):
-                mod_vals.add(perm[i] % j)
+    log_n = int(math.log2(n))
+    assert n == 1 << log_n
+    for j in (1 << k for k in range(1, log_n + 1)):
+        for chunk in range(n // j):
+            mod_vals = set(perm[i] % j for i in range(chunk * j, (chunk + 1) * j))
             if len(mod_vals) != j:
                 return False
-        j *= 2
     return True
 
-def to_butterflies(L):
-    # Returns a sequence of butterflies that, when multiplied together,
-    # create L. Assumptions: L is a modular-balanced permutation matrix.
-    # Directly follows the proof of Lemma D.1. Optimized for readability,
-    # not efficiency.
+
+def modular_balanced_to_butterfly_factor(L: np.ndarray) -> List[np.ndarray]:
+    """Returns a sequence of butterfly factors that, when multiplied together, create L.
+    Assumptions: L is a modular-balanced permutation matrix.
+    Directly follows the proof of Lemma G.1.
+    Optimized for readability, not efficiency.
+    Parameters:
+        L: a modular-balanced permutation matrix, stored in the right-multiplication format.
+            (i.e. applying L to a vector x is equivalent to x @ L).
+            Can also be stored as a vector (again in right-multiplication format).
+    Return:
+        butterflies: a list of butterfly factors, stored as matrices (not in twiddle format).
+            The matrices are permutation matrices stored in right-multiplication format.
+    """
     if isinstance(L, list) or len(L.shape) == 1:
         L = perm_vec_to_mat(L)
     n = L.shape[0]
     if n == 2:
-        return [L.copy()]  # L is its own inverse.
+        return [L.copy()]  # L is its own inverse, and is already a butterfly.
     nh = n//2
+    L1 = L[:nh, :nh] + L[nh:, :nh]
+    L2 = L[:nh, nh:] + L[nh:, nh:]
     perms = []
-    L1, L2 = np.zeros((nh, nh)), np.zeros((nh, nh))
-    for i, j in np.ndindex((nh, nh)):
-        L1[i, j] = L[i, j] + L[i+nh, j]
-        L2[i, j] = L[i, j+nh] + L[i+nh, j+nh]
-    Lp = np.zeros((n, n))
-    Lp[:nh, :nh] = L1
-    Lp[nh:, nh:] = L2
+    Lp = scipy.linalg.block_diag(L1, L2)
     # By construction, Bn @ Lp = L.
     Bn = L @ Lp.T
-    perms1 = to_butterflies(L1)
-    perms2 = to_butterflies(L2)
-    for p1, p2 in zip(perms1, perms2):
-        # Combine the individual permutation matrices of size n/2
-        # into a block-diagonal permutation matrix of size n.
-        P = np.zeros((n, n))
-        P[:nh,:nh] = p1
-        P[nh:,nh:] = p2
-        perms.append(P)
-    perms.insert(0, Bn)
-    return perms
+    perms1 = modular_balanced_to_butterfly_factor(L1)
+    perms2 = modular_balanced_to_butterfly_factor(L2)
+    # Combine the individual permutation matrices of size n/2
+    # into a block-diagonal permutation matrix of size n.
+    return [Bn] + [scipy.linalg.block_diag(p1, p2) for p1, p2 in zip(perms1, perms2)]
 
-def perm_to_butterfly_module(v, check=False):
+
+def perm2butterfly(v: Union[np.ndarray, torch.Tensor],
+                   increasing_stride: bool = False) -> Butterfly:
+    """
+    Parameter:
+        v: a permutation, stored as a vector, in left-multiplication format.
+            (i.e., applying v to a vector x is equivalent to x[p])
+        increasing_stride: whether the returned Butterfly should have increasing_stride=False or
+            True. False corresponds to Lemma G.3 and True corresponds to Lemma G.6.
+    Return:
+        b: a Butterfly that performs the same permutation as v.
+    """
+    assert increasing_stride == False, 'Only support increasing_stride==False for now'
+    if isinstance(v, torch.Tensor):
+        v = v.detach().cpu().numpy()
     n = len(v)
-    v = invert(v)
-    Rinv_perms, L_vec = modular_balance(v)
-    if check:
-        assert (check_balanced(L_vec))
-        v2 = np.copy(v)
-        for p in Rinv_perms:
-            v2 = permute(v2, p)
-        assert (list(v2) == list(L_vec))
-        lv2 = np.copy(L_vec)
-        for p in reversed(Rinv_perms):
-            lv2 = permute(lv2, invert(p))
-        assert (list(lv2) == list(v))
-    # Put in increasing_stride order
-    R_perms = [perm_vec_to_mat(p).T for p in reversed(Rinv_perms)]
-    # R_perms = [perm_vec_to_mat(p).T for p in Rinv_perms]
-    if check:
-        mat = perm_vec_to_mat(v, left=False)
-        for p in reversed(R_perms):
-            mat = mat @ p.T
-        assert (np.linalg.norm(mat - perm_vec_to_mat(L_vec, left=False)) < 1e-6)
-    L_perms = list(reversed(to_butterflies(L_vec)))
-    L_module = Butterfly(n, n, bias=False, increasing_stride=True)
-    R_module = Butterfly(n, n, bias=False, increasing_stride=False)
-    for i, r in enumerate(R_perms):
-        R_module.twiddle.data[0, 0, len(R_perms) - 1 - i].copy_(to_butterfly(r, logk=i+1, pytorch=True, check=check))
-    for i, l in enumerate(L_perms):
-        L_module.twiddle.data[0, 0, i].copy_(to_butterfly(l, logk=i+1, pytorch=True, check=check))
-    module = torch.nn.Sequential(R_module, L_module)
-    if check:
-        result = module(torch.eye(n))
-        assert (torch.norm(result - torch.tensor(perm_vec_to_mat(invert(v))).float()).item() < 1e-6)
-    return module
+    log_n = int(math.ceil(math.log2(n)))
+    if n < 1 << log_n:  # Pad permutation to the next power-of-2 size
+        v = np.concatenate([v, np.arange(n, 1 << log_n)])
+    # modular_balance expects right-multiplication format so we convert the format of v.
+    Rinv_perms, L_vec = modular_balance(invert(v))
+    L_perms = list(reversed(modular_balanced_to_butterfly_factor(L_vec)))
+    R_perms = [perm_vec_to_mat(invert(p), left=True) for p in reversed(Rinv_perms)]
+    # Stored in increasing_stride=True twiddle format.
+    # Need to take transpose because the matrices are in right-multiplication format.
+    L_twiddle = torch.stack([matrix_to_butterfly_factor(l.T, log_k=i+1, pytorch_format=True)
+                             for i, l in enumerate(L_perms)])
+    # Stored in increasing_stride=False twiddle format so we need to flip the order
+    R_twiddle = torch.stack([matrix_to_butterfly_factor(r, log_k=i+1, pytorch_format=True)
+                             for i, r in enumerate(R_perms)]).flip([0])
+    b = Butterfly(n, n, bias=False, increasing_stride=False, nblocks=2)
+    with torch.no_grad():
+        b.twiddle.copy_(torch.stack([R_twiddle, L_twiddle]).unsqueeze(0))
+    return b
