@@ -5,7 +5,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from torch_butterfly import Butterfly
-from torch_butterfly.permutation import FixedPermutation
+from torch_butterfly.permutation import FixedPermutation, bitreversal_permutation
 from torch_butterfly.complex_utils import view_as_real, view_as_complex
 
 
@@ -162,3 +162,21 @@ def permutation_kronecker(perm1: FixedPermutation, perm2: FixedPermutation) -> F
     x = torch.arange(n2 * n1, device=perm1.permutation.device).reshape(n2, n1)
     perm = perm2(perm1(x).t()).t().reshape(-1)
     return FixedPermutation(perm)
+
+
+def flip_increasing_stride(butterfly: Butterfly) -> nn.Module:
+    """Convert a Butterfly with increasing_stride=True/False to a Butterfly with
+    increasing_stride=False/True, along with 2 bit-reversal permutations.
+    Follows the proof of Lemma G.4.
+    """
+    assert butterfly.bias is None
+    assert butterfly.in_size == 1 << butterfly.log_n
+    assert butterfly.out_size == 1 << butterfly.log_n
+    n = butterfly.in_size
+    new_butterfly = copy.deepcopy(butterfly)
+    new_butterfly.increasing_stride = not butterfly.increasing_stride
+    br = bitreversal_permutation( n, pytorch_format=True)
+    br_half = bitreversal_permutation(n // 2, pytorch_format=True)
+    with torch.no_grad():
+        new_butterfly.twiddle.copy_(new_butterfly.twiddle[:, :, :, br_half])
+    return nn.Sequential(FixedPermutation(br), new_butterfly, FixedPermutation(br))

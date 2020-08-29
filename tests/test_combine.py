@@ -77,6 +77,22 @@ class ButterflyCombineTest(unittest.TestCase):
                 out = b(input.reshape(batch_size, n2 * n1)).reshape(batch_size, n2, n1)
                 self.assertTrue(torch.allclose(out, out_tp, self.rtol, self.atol))
 
+    def test_flip_increasing_stride(self):
+        batch_size = 10
+        for n in [16, 64]:
+            for nblocks in [1, 2, 3]:
+                for complex in [False, True]:
+                    for increasing_stride in [True, False]:
+                        dtype = torch.float32 if not complex else torch.complex64
+                        input = torch.randn(batch_size, n, dtype=dtype)
+                        b = torch_butterfly.Butterfly(n, n, bias=False, complex=complex,
+                                                      increasing_stride=increasing_stride,
+                                                      nblocks=nblocks)
+                        b_new = torch_butterfly.combine.flip_increasing_stride(b)
+                        self.assertTrue(b_new[1].increasing_stride == (not b.increasing_stride))
+                        self.assertTrue(torch.allclose(b_new(input), b(input),
+                                                       self.rtol, self.atol))
+
 
 if __name__ == "__main__":
     unittest.main()
