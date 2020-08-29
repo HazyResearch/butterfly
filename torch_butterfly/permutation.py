@@ -312,13 +312,21 @@ def perm2butterfly(v: Union[np.ndarray, torch.Tensor],
     Return:
         b: a Butterfly that performs the same permutation as v.
     """
-    assert increasing_stride == False, 'Only support increasing_stride==False for now'
     if isinstance(v, torch.Tensor):
         v = v.detach().cpu().numpy()
     n = len(v)
     log_n = int(math.ceil(math.log2(n)))
     if n < 1 << log_n:  # Pad permutation to the next power-of-2 size
         v = np.concatenate([v, np.arange(n, 1 << log_n)])
+    if increasing_stride:  # Follow proof of Lemma G.6
+        br = bitreversal_permutation(1 << log_n)
+        b = perm2butterfly(br[v[br]], increasing_stride=False)
+        b.increasing_stride=True
+        br_half = bitreversal_permutation((1 << log_n) // 2, pytorch_format=True)
+        with torch.no_grad():
+            b.twiddle.copy_(b.twiddle[:, :, :, br_half])
+        b.in_size = b.out_size = n
+        return b
     # modular_balance expects right-multiplication format so we convert the format of v.
     Rinv_perms, L_vec = modular_balance(invert(v))
     L_perms = list(reversed(modular_balanced_to_butterfly_factor(L_vec)))

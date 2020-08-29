@@ -55,11 +55,12 @@ class ButterflyPermutationTest(unittest.TestCase):
     def test_perm2butterfly(self):
         num_repeats = 100
         for n in [2, 13, 38]:
-            for _ in range(num_repeats):
-                v = torch.randperm(n)
-                b = torch_butterfly.permutation.perm2butterfly(v)
-                input = torch.arange(n, dtype=torch.float32)
-                self.assertTrue(torch.allclose(input[v], b(input)))
+            for increasing_stride in [False, True]:
+                for _ in range(num_repeats):
+                    v = torch.randperm(n)
+                    b = torch_butterfly.permutation.perm2butterfly(v, increasing_stride)
+                    input = torch.arange(n, dtype=torch.float32)
+                    self.assertTrue(torch.allclose(input[v], b(input)))
 
 
 if __name__ == "__main__":
