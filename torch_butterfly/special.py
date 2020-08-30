@@ -169,32 +169,46 @@ def dct(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs the DCT.
     Parameters:
         n: size of the DCT. Must be a power of 2.
-        type: either 2 or 4. These are the only types supported. See scipy.fft.dct's notes.
-        normalized: if True, corresponds to the orthogonal DCT-II (see scipy.fft.dct's notes)
+        type: either 2, 3, or  4. These are the only types supported. See scipy.fft.dct's notes.
+        normalized: if True, corresponds to the orthogonal DCT (see scipy.fft.dct's notes)
     """
-    assert type in [2, 4]
-    b_fft = fft(n, normalized=normalized, br_first=True, with_br_perm=False)
+    assert type in [2, 3, 4]
     # Construct the permutation before the FFT: separate the even and odd and then reverse the odd
     # e.g., [0, 1, 2, 3] -> [0, 2, 3, 1].
     perm = torch.arange(n)
     perm = torch.cat((perm[::2], perm[1::2].flip([0])))
     br = bitreversal_permutation(n, pytorch_format=True)
-    if type == 4:
-        even_mul = torch.exp(-1j * math.pi / (2 * n) * (torch.arange(0.0, n, 2) + 0.5))
-        odd_mul = torch.exp(1j * math.pi / (2 * n) * (torch.arange(1.0, n, 2) + 0.5))
-        preprocess_diag = torch.stack((even_mul, odd_mul), dim=-1).flatten()
-        # This proprocess_diag is before the permutation.
-        # To move it after the permutation, we have to permute the diagonal
-        b_fft = diagonal_butterfly(b_fft, preprocess_diag[perm[br]], diag_first=True)
     postprocess_diag = 2 * torch.exp(-1j * math.pi * torch.arange(0.0, n) / (2 * n))
-    if normalized:
-        if type == 2:
-            postprocess_diag[0] /= 2.0
+    if type in [2, 4]:
+        b = fft(n, normalized=normalized, br_first=True, with_br_perm=False)
+        if type == 4:
+            even_mul = torch.exp(-1j * math.pi / (2 * n) * (torch.arange(0.0, n, 2) + 0.5))
+            odd_mul = torch.exp(1j * math.pi / (2 * n) * (torch.arange(1.0, n, 2) + 0.5))
+            preprocess_diag = torch.stack((even_mul, odd_mul), dim=-1).flatten()
+            # This proprocess_diag is before the permutation.
+            # To move it after the permutation, we have to permute the diagonal
+            b = diagonal_butterfly(b, preprocess_diag[perm[br]], diag_first=True)
+        if normalized:
+            if type in [2, 3]:
+                postprocess_diag[0] /= 2.0
+                postprocess_diag[1:] /= math.sqrt(2)
+            elif type == 4:
+                postprocess_diag /= math.sqrt(2)
+        b = diagonal_butterfly(b, postprocess_diag, diag_first=False)
+        return nn.Sequential(FixedPermutation(perm[br]), Real2Complex(), b, Complex2Real())
+    else:
+        assert type == 3
+        b = ifft(n, normalized=normalized, br_first=False, with_br_perm=False)
+        postprocess_diag[0] /= 2.0
+        if normalized:
             postprocess_diag[1:] /= math.sqrt(2)
-        elif type == 4:
-            postprocess_diag /= math.sqrt(2)
-    b = diagonal_butterfly(b_fft, postprocess_diag, diag_first=False)
-    return nn.Sequential(FixedPermutation(perm[br]), Real2Complex(), b, Complex2Real())
+        else:
+            # We want iFFT with the scaling of 1.0 instead of 1 / n
+            with torch.no_grad():
+                b.twiddle *= 2
+        b = diagonal_butterfly(b, postprocess_diag.conj(), diag_first=True)
+        perm_inverse = invert(perm)
+        return nn.Sequential(Real2Complex(), b, Complex2Real(), FixedPermutation(br[perm_inverse]))
 
 
 def dst(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
@@ -202,10 +216,10 @@ def dst(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     Parameters:
         n: size of the DST. Must be a power of 2.
         type: either 2 or 4. These are the only types supported. See scipy.fft.dst's notes.
-        normalized: if True, corresponds to the orthogonal DST-II (see scipy.fft.dst's notes)
+        normalized: if True, corresponds to the orthogonal DST (see scipy.fft.dst's notes)
     """
     assert type in [2, 4]
-    b_fft = fft(n, normalized=normalized, br_first=True, with_br_perm=False)
+    b = fft(n, normalized=normalized, br_first=True, with_br_perm=False)
     # Construct the permutation before the FFT: separate the even and odd and then reverse the odd
     # e.g., [0, 1, 2, 3] -> [0, 2, 3, 1].
     perm = torch.arange(n)
@@ -220,7 +234,7 @@ def dst(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     preprocess_diag = torch.stack((even_mul, odd_mul), dim=-1).flatten()
     # This proprocess_diag is before the permutation.
     # To move it after the permutation, we have to permute the diagonal
-    b = diagonal_butterfly(b_fft, preprocess_diag[perm[br]], diag_first=True)
+    b = diagonal_butterfly(b, preprocess_diag[perm[br]], diag_first=True)
     if type == 2:
         postprocess_diag = 2j * torch.exp(-1j * math.pi * (torch.arange(0.0, n) + 1) / (2 * n))
     elif type == 4:

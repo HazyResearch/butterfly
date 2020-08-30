@@ -74,7 +74,7 @@ class ButterflySpecialTest(unittest.TestCase):
         batch_size = 10
         n = 16
         input = torch.randn(batch_size, n)
-        for type in [2, 4]:
+        for type in [2, 3, 4]:
             for normalized in [False, True]:
                 out_sp = torch.tensor(scipy.fft.dct(input.numpy(), type=type,
                                                     norm=None if not normalized else 'ortho'))
