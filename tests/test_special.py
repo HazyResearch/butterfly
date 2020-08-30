@@ -340,16 +340,19 @@ class ButterflySpecialTest(unittest.TestCase):
         n = 32
         input = torch.randn(batch_size, n)
         diag1, diag2 = torch.randn(2, n)
-        out_sp = torch.tensor(scipy.fft.dct(input.numpy(), norm='ortho')) * diag1
-        out_sp = torch.tensor(scipy.fft.idct(out_sp.numpy(), norm='ortho')) * diag2
-        b = torch_butterfly.special.acdc(diag1, diag2, True)
-        out = b(input)
-        self.assertTrue(torch.allclose(out, out_sp, self.rtol, self.atol))
-        out_sp = torch.tensor(scipy.fft.idct(input.numpy(), norm='ortho')) * diag1
-        out_sp = torch.tensor(scipy.fft.dct(out_sp.numpy(), norm='ortho')) * diag2
-        b = torch_butterfly.special.acdc(diag1, diag2, False)
-        out = b(input)
-        self.assertTrue(torch.allclose(out, out_sp, self.rtol, self.atol))
+        for separate_diagonal in [True, False]:
+            out_sp = torch.tensor(scipy.fft.dct(input.numpy(), norm='ortho')) * diag1
+            out_sp = torch.tensor(scipy.fft.idct(out_sp.numpy(), norm='ortho')) * diag2
+            b = torch_butterfly.special.acdc(diag1, diag2, dct_first=True,
+                                             separate_diagonal=separate_diagonal)
+            out = b(input)
+            self.assertTrue(torch.allclose(out, out_sp, self.rtol, self.atol))
+            out_sp = torch.tensor(scipy.fft.idct(input.numpy(), norm='ortho')) * diag1
+            out_sp = torch.tensor(scipy.fft.dct(out_sp.numpy(), norm='ortho')) * diag2
+            b = torch_butterfly.special.acdc(diag1, diag2, dct_first=False,
+                                             separate_diagonal=separate_diagonal)
+            out = b(input)
+            self.assertTrue(torch.allclose(out, out_sp, self.rtol, self.atol))
 
     def test_wavelet_haar(self):
         batch_size = 10

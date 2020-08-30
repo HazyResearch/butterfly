@@ -677,7 +677,8 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
                                  b_ifft, Unflatten2D(n1))
 
 
-def acdc(diag1: torch.Tensor, diag2: torch.Tensor, dct_first: bool=True) -> nn.Module:
+def acdc(diag1: torch.Tensor, diag2: torch.Tensor, dct_first: bool = True,
+         separate_diagonal: bool = True) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs either the multiplication:
         x -> diag2 @ iDCT @ diag1 @ DCT @ x
     or
@@ -690,7 +691,8 @@ def acdc(diag1: torch.Tensor, diag2: torch.Tensor, dct_first: bool=True) -> nn.M
     Parameters:
         diag1: (n,), where n is a power of 2.
         diag2: (n,), where n is a power of 2.
-        dct_first: if true, uses the first type above; otherwise use the second type.
+        dct_first: if True, uses the first type above; otherwise use the second type.
+        separate_diagonal: if False, the diagonal is combined into the Butterfly part.
     """
     n, = diag1.shape
     assert diag2.shape == (n,)
@@ -710,21 +712,37 @@ def acdc(diag1: torch.Tensor, diag2: torch.Tensor, dct_first: bool=True) -> nn.M
     if dct_first:
         b_fft = fft(n, normalized=True, br_first=False, with_br_perm=False)
         b_ifft = ifft(n, normalized=True, br_first=True, with_br_perm=False)
-        b1 = diagonal_butterfly(b_fft, (postprocess_diag * diag1)[br], diag_first=False)
+        b1 = diagonal_butterfly(b_fft, postprocess_diag[br], diag_first=False)
         b2 = diagonal_butterfly(b_ifft, postprocess_diag.conj()[br], diag_first=True)
-        b2 = diagonal_butterfly(b2, diag2[perm], diag_first=False)
-        return nn.Sequential(FixedPermutation(perm),
-                             Real2Complex(), b1, Complex2Real(),
-                             Real2Complex(), b2, Complex2Real(),
-                             FixedPermutation(perm_inverse))
+        if not separate_diagonal:
+            b1 = diagonal_butterfly(b_fft, diag1[br], diag_first=False)
+            b2 = diagonal_butterfly(b2, diag2[perm], diag_first=False)
+            return nn.Sequential(FixedPermutation(perm),
+                                 Real2Complex(), b1, Complex2Real(),
+                                 Real2Complex(), b2, Complex2Real(),
+                                 FixedPermutation(perm_inverse))
+        else:
+            return nn.Sequential(FixedPermutation(perm),
+                                 Real2Complex(), b1, Complex2Real(),
+                                 Diagonal(diagonal_init=diag1[br]),
+                                 Real2Complex(), b2, Complex2Real(),
+                                 Diagonal(diagonal_init=diag2[perm]),
+                                 FixedPermutation(perm_inverse))
     else:
         b_fft = fft(n, normalized=True, br_first=True, with_br_perm=False)
         b_ifft = ifft(n, normalized=True, br_first=False, with_br_perm=False)
         b1 = diagonal_butterfly(b_ifft, postprocess_diag.conj(), diag_first=True)
-        b1 = diagonal_butterfly(b1, diag1[perm][br], diag_first=False)
-        b2 = diagonal_butterfly(b_fft, postprocess_diag * diag2, diag_first=False)
-        return nn.Sequential(Real2Complex(), b1, Complex2Real(),
-                             Real2Complex(), b2, Complex2Real())
+        b2 = diagonal_butterfly(b_fft, postprocess_diag, diag_first=False)
+        if not separate_diagonal:
+            b1 = diagonal_butterfly(b1, diag1[perm][br], diag_first=False)
+            b2 = diagonal_butterfly(b_fft, diag2, diag_first=False)
+            return nn.Sequential(Real2Complex(), b1, Complex2Real(),
+                                 Real2Complex(), b2, Complex2Real())
+        else:
+            return nn.Sequential(Real2Complex(), b1, Complex2Real(),
+                                 Diagonal(diagonal_init=diag1[perm][br]),
+                                 Real2Complex(), b2, Complex2Real(),
+                                 Diagonal(diagonal_init=diag2))
 
 
 def wavelet_haar(n, with_perm=True) -> nn.Module:
