@@ -366,8 +366,8 @@ def hadamard(n, normalized=False, increasing_stride=True) -> Butterfly:
     return b
 
 
-def hadamard_diagonal(diagonals: torch.Tensor, normalized=False,
-                      increasing_stride=True) -> Butterfly:
+def hadamard_diagonal(diagonals: torch.Tensor, normalized: bool = False,
+                      increasing_stride: bool = True, separate_diagonal: bool = True) -> Butterfly:
     """ Construct an nn.Module based on Butterfly that performs multiplication by H D H D ... H D,
     where H is the Hadamard matrix and D is a diagonal matrix
     Parameters:
@@ -376,14 +376,24 @@ def hadamard_diagonal(diagonals: torch.Tensor, normalized=False,
         normalized: if True, corresponds to the orthogonal Hadamard transform
                     (i.e. multiplied by 1/sqrt(n))
         increasing_stride: whether the returned Butterfly has increasing stride.
+        separate_diagonal: if False, the diagonal is combined into the Butterfly part.
     """
     k, n = diagonals.shape
-    butterflies = []
-    for i, diagonal in enumerate(diagonals.unbind()):
-        cur_increasing_stride = increasing_stride != (i % 2 == 1)
-        h = hadamard(n, normalized, cur_increasing_stride)
-        butterflies.append(diagonal_butterfly(h, diagonal, diag_first=True))
-    return reduce(butterfly_product, butterflies)
+    if not separate_diagonal:
+        butterflies = []
+        for i, diagonal in enumerate(diagonals.unbind()):
+            cur_increasing_stride = increasing_stride != (i % 2 == 1)
+            h = hadamard(n, normalized, cur_increasing_stride)
+            butterflies.append(diagonal_butterfly(h, diagonal, diag_first=True))
+        return reduce(butterfly_product, butterflies)
+    else:
+        modules = []
+        for i, diagonal in enumerate(diagonals.unbind()):
+            modules.append(Diagonal(diagonal_init=diagonal))
+            cur_increasing_stride = increasing_stride != (i % 2 == 1)
+            h = hadamard(n, normalized, cur_increasing_stride)
+            modules.append(h)
+        return nn.Sequential(*modules)
 
 
 def conv1d_circular_singlechannel(n, weight, separate_diagonal=True) -> nn.Module:
