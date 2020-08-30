@@ -338,6 +338,25 @@ class ButterflySpecialTest(unittest.TestCase):
                             out = b(input)
                             self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
+    def test_fastfood(self):
+        batch_size = 10
+        n = 32
+        H = torch.tensor(la.hadamard(n), dtype=torch.float32) / math.sqrt(n)
+        diag1 = torch.randint(0, 2, (n,)) * 2 - 1.0
+        diag2, diag3 = torch.randn(2, n)
+        permutation = torch.randperm(n)
+        input = torch.randn(batch_size, n)
+        out_torch = F.linear(input * diag1, H)[:, permutation]
+        out_torch = F.linear(out_torch * diag2, H) * diag3
+        for increasing_stride in [True, False]:
+            for separate_diagonal in [True, False]:
+                b = torch_butterfly.special.fastfood(
+                    diag1, diag2, diag3, permutation, normalized=True,
+                    increasing_stride=increasing_stride, separate_diagonal=separate_diagonal
+                )
+                out = b(input)
+                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
     def test_acdc(self):
         batch_size = 10
         n = 32

@@ -367,7 +367,7 @@ def hadamard(n, normalized=False, increasing_stride=True) -> Butterfly:
 
 
 def hadamard_diagonal(diagonals: torch.Tensor, normalized: bool = False,
-                      increasing_stride: bool = True, separate_diagonal: bool = True) -> Butterfly:
+                      increasing_stride: bool = True, separate_diagonal: bool = True) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that performs multiplication by H D H D ... H D,
     where H is the Hadamard matrix and D is a diagonal matrix
     Parameters:
@@ -685,6 +685,36 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
         else:
             return nn.Sequential(nn.Flatten(start_dim=-2), b_fft, DiagonalMultiplySum(col_f),
                                  b_ifft, Unflatten2D(n1))
+
+
+def fastfood(diag1: torch.Tensor, diag2: torch.Tensor, diag3: torch.Tensor,
+             permutation: torch.Tensor, normalized: bool = False,
+             increasing_stride: bool = True, separate_diagonal: bool = True) -> nn.Module:
+    """ Construct an nn.Module based on Butterfly that performs Fastfood multiplication:
+    x -> Diag3 @ H @ Diag2 @ P @ H @ Diag1,
+    where H is the Hadamard matrix and P is a permutation matrix.
+    Parameters:
+        diag1: (n,), where n is a power of 2.
+        diag2: (n,)
+        diag3: (n,)
+        permutation: (n,)
+        normalized: if True, corresponds to the orthogonal Hadamard transform
+                    (i.e. multiplied by 1/sqrt(n))
+        increasing_stride: whether the first Butterfly in the sequence has increasing stride.
+        separate_diagonal: if False, the diagonal is combined into the Butterfly part.
+    """
+    n, = diag1.shape
+    assert diag2.shape == diag3.shape == permutation.shape == (n,)
+    h1 = hadamard(n, normalized, increasing_stride)
+    h2 = hadamard(n, normalized, not increasing_stride)
+    if not separate_diagonal:
+        h1 = diagonal_butterfly(h1, diag1, diag_first=True)
+        h2 = diagonal_butterfly(h2, diag2, diag_first=True)
+        h2 = diagonal_butterfly(h2, diag3, diag_first=False)
+        return nn.Sequential(h1, FixedPermutation(permutation), h2)
+    else:
+        return nn.Sequential(Diagonal(diagonal_init=diag1), h1, FixedPermutation(permutation),
+                             Diagonal(diagonal_init=diag2), h2, Diagonal(diagonal_init=diag3))
 
 
 def acdc(diag1: torch.Tensor, diag2: torch.Tensor, dct_first: bool = True,
