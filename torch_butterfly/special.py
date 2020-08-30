@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from torch_butterfly.butterfly import Butterfly, ButterflyUnitary
-from torch_butterfly.permutation import FixedPermutation, bitreversal_permutation
+from torch_butterfly.permutation import FixedPermutation, bitreversal_permutation, invert
 from torch_butterfly.permutation import wavelet_permutation
 from torch_butterfly.diagonal import Diagonal
 from torch_butterfly.complex_utils import view_as_real, view_as_complex
@@ -179,15 +179,13 @@ def dct(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     perm = torch.arange(n)
     perm = torch.cat((perm[::2], perm[1::2].flip([0])))
     br = bitreversal_permutation(n, pytorch_format=True)
-    perm = perm[br]
-    perm = FixedPermutation(perm)
     if type == 4:
         even_mul = torch.exp(-1j * math.pi / (2 * n) * (torch.arange(0.0, n, 2) + 0.5))
         odd_mul = torch.exp(1j * math.pi / (2 * n) * (torch.arange(1.0, n, 2) + 0.5))
         preprocess_diag = torch.stack((even_mul, odd_mul), dim=-1).flatten()
         # This proprocess_diag is before the permutation.
         # To move it after the permutation, we have to permute the diagonal
-        b_fft = diagonal_butterfly(b_fft, preprocess_diag[perm.permutation], diag_first=True)
+        b_fft = diagonal_butterfly(b_fft, preprocess_diag[perm[br]], diag_first=True)
     postprocess_diag = 2 * torch.exp(-1j * math.pi * torch.arange(0.0, n) / (2 * n))
     if normalized:
         if type == 2:
@@ -196,14 +194,14 @@ def dct(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
         elif type == 4:
             postprocess_diag /= math.sqrt(2)
     b = diagonal_butterfly(b_fft, postprocess_diag, diag_first=False)
-    return nn.Sequential(Real2Complex(), perm, b, Complex2Real())
+    return nn.Sequential(FixedPermutation(perm[br]), Real2Complex(), b, Complex2Real())
 
 
 def dst(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     """ Construct an nn.Module based on Butterfly that exactly performs the DST.
     Parameters:
         n: size of the DST. Must be a power of 2.
-        type: either 2 or 4. These are the only types supported. See scipy.fft.dct's notes.
+        type: either 2 or 4. These are the only types supported. See scipy.fft.dst's notes.
         normalized: if True, corresponds to the orthogonal DST-II (see scipy.fft.dst's notes)
     """
     assert type in [2, 4]
@@ -213,8 +211,6 @@ def dst(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     perm = torch.arange(n)
     perm = torch.cat((perm[::2], perm[1::2].flip([0])))
     br = bitreversal_permutation(n, pytorch_format=True)
-    perm = perm[br]
-    perm = FixedPermutation(perm)
     if type == 2:
         even_mul = torch.exp(-1j * math.pi * torch.arange(0.0, n, 2) / n)
         odd_mul = -torch.exp(1j * math.pi * (torch.arange(1.0, n, 2) + 1) / n)
@@ -224,7 +220,7 @@ def dst(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
     preprocess_diag = torch.stack((even_mul, odd_mul), dim=-1).flatten()
     # This proprocess_diag is before the permutation.
     # To move it after the permutation, we have to permute the diagonal
-    b = diagonal_butterfly(b_fft, preprocess_diag[perm.permutation], diag_first=True)
+    b = diagonal_butterfly(b_fft, preprocess_diag[perm[br]], diag_first=True)
     if type == 2:
         postprocess_diag = 2j * torch.exp(-1j * math.pi * (torch.arange(0.0, n) + 1) / (2 * n))
     elif type == 4:
@@ -236,7 +232,7 @@ def dst(n: int, type: int = 2, normalized: bool = False) -> nn.Module:
         elif type == 4:
             postprocess_diag /= math.sqrt(2)
     b = diagonal_butterfly(b, postprocess_diag, diag_first=False)
-    return nn.Sequential(Real2Complex(), perm, b, Complex2Real())
+    return nn.Sequential(FixedPermutation(perm[br]), Real2Complex(), b, Complex2Real())
 
 
 def circulant(col, transposed=False, separate_diagonal=True) -> nn.Module:
@@ -624,6 +620,56 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
         else:
             return nn.Sequential(nn.Flatten(start_dim=-2), b_fft, DiagonalMultiplySum(col_f),
                                  b_ifft, Unflatten2D(n1))
+
+
+def acdc(diag1: torch.Tensor, diag2: torch.Tensor, dct_first: bool=True) -> nn.Module:
+    """ Construct an nn.Module based on Butterfly that exactly performs either the multiplication:
+        x -> diag2 @ iDCT @ diag1 @ DCT @ x
+    or
+        x -> diag2 @ DCT @ diag1 @ iDCT @ x.
+    In the paper [1], the math describes the 2nd type while the implementation uses the 1st type.
+    Note that the DCT and iDCT are normalized.
+    [1] Marcin Moczulski, Misha Denil, Jeremy Appleyard, Nando de Freitas.
+    ACDC: A Structured Efficient Linear Layer.
+    http://arxiv.org/abs/1511.05946
+    Parameters:
+        diag1: (n,), where n is a power of 2.
+        diag2: (n,), where n is a power of 2.
+        dct_first: if true, uses the first type above; otherwise use the second type.
+    """
+    n, = diag1.shape
+    assert diag2.shape == (n,)
+    assert n == 1 << int(math.ceil(math.log2(n))), 'n must be a power of 2'
+    # Construct the permutation before the FFT: separate the even and odd and then reverse the odd
+    # e.g., [0, 1, 2, 3] -> [0, 2, 3, 1].
+    # This permutation is actually in B (not just B^T B or B B^T). This can be checked with
+    # perm2butterfly.
+    perm = torch.arange(n)
+    perm = torch.cat((perm[::2], perm[1::2].flip([0])))
+    perm_inverse = invert(perm)
+    br = bitreversal_permutation(n, pytorch_format=True)
+    postprocess_diag = 2 * torch.exp(-1j * math.pi * torch.arange(0.0, n) / (2 * n))
+    # Normalize
+    postprocess_diag[0] /= 2.0
+    postprocess_diag[1:] /= math.sqrt(2)
+    if dct_first:
+        b_fft = fft(n, normalized=True, br_first=False, with_br_perm=False)
+        b_ifft = ifft(n, normalized=True, br_first=True, with_br_perm=False)
+        b1 = diagonal_butterfly(b_fft, (postprocess_diag * diag1)[br], diag_first=False)
+        b2 = diagonal_butterfly(b_ifft, postprocess_diag.conj()[br], diag_first=True)
+        b2 = diagonal_butterfly(b2, diag2[perm], diag_first=False)
+        return nn.Sequential(FixedPermutation(perm),
+                             Real2Complex(), b1, Complex2Real(),
+                             Real2Complex(), b2, Complex2Real(),
+                             FixedPermutation(perm_inverse))
+    else:
+        b_fft = fft(n, normalized=True, br_first=True, with_br_perm=False)
+        b_ifft = ifft(n, normalized=True, br_first=False, with_br_perm=False)
+        b1 = diagonal_butterfly(b_ifft, postprocess_diag.conj(), diag_first=True)
+        b1 = diagonal_butterfly(b1, diag1[perm][br], diag_first=False)
+        b2 = diagonal_butterfly(b_fft, postprocess_diag * diag2, diag_first=False)
+        return nn.Sequential(Real2Complex(), b1, Complex2Real(),
+                             Real2Complex(), b2, Complex2Real())
 
 
 def wavelet_haar(n, with_perm=True) -> nn.Module:
