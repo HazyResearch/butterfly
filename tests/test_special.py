@@ -137,6 +137,22 @@ class ButterflySpecialTest(unittest.TestCase):
                 out = b(input)
                 self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
+    def test_toeplitz(self):
+        batch_size = 10
+        for n, m in [(13, 38), (27, 11)]:
+            for complex in [False, True]:
+                dtype = torch.float32 if not complex else torch.complex64
+                col = torch.randn(n, dtype=dtype)
+                row = torch.randn(m, dtype=dtype)
+                T = la.toeplitz(col.numpy(), row.numpy())
+                input = torch.randn(batch_size, m, dtype=dtype)
+                out_torch = torch.tensor(input.detach().numpy() @ T.T)
+                for separate_diagonal in [True, False]:
+                    b = torch_butterfly.special.toeplitz(col, row,
+                                                        separate_diagonal=separate_diagonal)
+                    out = b(input)
+                    self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
     def test_hadamard(self):
         batch_size = 10
         n = 16
@@ -154,7 +170,7 @@ class ButterflySpecialTest(unittest.TestCase):
         n = 16
         H = torch.tensor(la.hadamard(n), dtype=torch.float32) / math.sqrt(n)
         for k in [1, 2, 3]:
-            diagonals = torch.randn(k, n)
+            diagonals = torch.randint(0, 2, (k, n)) * 2 - 1.0
             input = torch.randn(batch_size, n)
             out_torch = input
             for diagonal in diagonals.unbind():

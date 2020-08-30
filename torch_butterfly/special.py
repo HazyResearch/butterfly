@@ -304,6 +304,47 @@ def circulant(col, transposed=False, separate_diagonal=True) -> nn.Module:
         return b if complex else nn.Sequential(Real2Complex(), b, Complex2Real())
 
 
+def toeplitz(col, row=None, separate_diagonal=True) -> nn.Module:
+    """ Construct an nn.Module based on Butterfly that exactly performs Toeplitz matrix
+    multiplication.
+    Parameters:
+        col: torch.Tensor of size (n, ). The first column of the Toeplitz matrix.
+        row: torch.Tensor of size (n, ). The first row of the Toeplitz matrix. If None, assume
+            row == col.conj(). The first element of row will be ignored.
+        separate_diagonal: if True, the returned nn.Module is Butterfly, Diagonal, Butterfly.
+                           if False, the diagonal is combined into the Butterfly part.
+    """
+    if row is None:
+        row = col.conj()
+    assert col.dim() == 1, 'Vector col must have dimension 1'
+    complex = col.is_complex()
+    n, = col.shape
+    m, = row.shape
+    log_n_m = int(math.ceil(math.log2(n + m - 1)))
+    n_extended = 1 << log_n_m
+    # Extend to a circulant matrix
+    if n + m - 1 < n_extended:
+        col = F.pad(col, (0, n_extended - (n + m - 1)))
+    col = torch.cat([col, row[1:].flip([0])])
+    b = circulant(col, separate_diagonal=separate_diagonal)
+    # Adjust in_size = m and out_size = n
+    if separate_diagonal:
+        if not complex:
+            b[1].in_size = m
+            b[3].out_size = n
+        else:
+            b[0].in_size = m
+            b[2].out_size = n
+    else:
+        if not complex:
+            b[1].in_size = m
+            b[1].out_size = n
+        else:
+            b.in_size = m
+            b.out_size = n
+    return b
+
+
 def hadamard(n, normalized=False, increasing_stride=True) -> Butterfly:
     """ Construct an nn.Module based on Butterfly that exactly performs the Hadamard transform.
     Parameters:
