@@ -8,7 +8,7 @@ import torch
 from torch import nn
 
 from torch_butterfly import Butterfly
-from torch_butterfly.complex_utils import index_last_dim
+from torch_butterfly.complex_utils import index_last_dim, view_as_complex, real2complex
 
 
 def bitreversal_permutation(n, pytorch_format=False):
@@ -74,8 +74,8 @@ class FixedPermutation(nn.Module):
         # So we use our own backward
         return index_last_dim(input, self.permutation)
 
-    def to_butterfly(self, increasing_stride=False):
-        return perm2butterfly_slow(self.permutation, increasing_stride)
+    def to_butterfly(self, complex=False, increasing_stride=False):
+        return perm2butterfly(self.permutation, complex, increasing_stride)
 
 
 def invert(perm: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
@@ -302,6 +302,7 @@ def modular_balanced_to_butterfly_factor(L: np.ndarray) -> List[np.ndarray]:
 
 
 def perm2butterfly_slow(v: Union[np.ndarray, torch.Tensor],
+                        complex: bool = False,
                         increasing_stride: bool = False) -> Butterfly:
     """
     Convert a permutation to a Butterfly that performs the same permutation.
@@ -309,6 +310,7 @@ def perm2butterfly_slow(v: Union[np.ndarray, torch.Tensor],
     Parameter:
         v: a permutation, stored as a vector, in left-multiplication format.
             (i.e., applying v to a vector x is equivalent to x[p])
+        complex: whether the Butterfly is complex or real.
         increasing_stride: whether the returned Butterfly should have increasing_stride=False or
             True. False corresponds to Lemma G.3 and True corresponds to Lemma G.6.
     Return:
@@ -322,7 +324,7 @@ def perm2butterfly_slow(v: Union[np.ndarray, torch.Tensor],
         v = np.concatenate([v, np.arange(n, 1 << log_n)])
     if increasing_stride:  # Follow proof of Lemma G.6
         br = bitreversal_permutation(1 << log_n)
-        b = perm2butterfly_slow(br[v[br]], increasing_stride=False)
+        b = perm2butterfly_slow(br[v[br]], complex=complex, increasing_stride=False)
         b.increasing_stride=True
         br_half = bitreversal_permutation((1 << log_n) // 2, pytorch_format=True)
         with torch.no_grad():
@@ -340,9 +342,11 @@ def perm2butterfly_slow(v: Union[np.ndarray, torch.Tensor],
     # Stored in increasing_stride=False twiddle format so we need to flip the order
     R_twiddle = torch.stack([matrix_to_butterfly_factor(r, log_k=i+1, pytorch_format=True)
                              for i, r in enumerate(R_perms)]).flip([0])
-    b = Butterfly(n, n, bias=False, increasing_stride=False, nblocks=2)
+    b = Butterfly(n, n, bias=False, complex=complex, increasing_stride=False, nblocks=2)
     with torch.no_grad():
-        b.twiddle.copy_(torch.stack([R_twiddle, L_twiddle]).unsqueeze(0))
+        b_twiddle = b.twiddle if not complex else view_as_complex(b.twiddle)
+        twiddle = torch.stack([R_twiddle, L_twiddle]).unsqueeze(0)
+        b_twiddle.copy_(twiddle if not complex else real2complex(twiddle))
     return b
 
 
@@ -391,11 +395,13 @@ def outer_twiddle_factors(v: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor, np
 
 
 def perm2butterfly(v: Union[np.ndarray, torch.Tensor],
+                   complex: bool = False,
                    increasing_stride: bool = False) -> Butterfly:
     """
     Parameter:
         v: a permutation, stored as a vector, in left-multiplication format.
             (i.e., applying v to a vector x is equivalent to x[p])
+        complex: whether the Butterfly is complex or real.
         increasing_stride: whether the returned Butterfly should have increasing_stride=False or
             True. False corresponds to Lemma G.3 and True corresponds to Lemma G.6.
     Return:
@@ -409,7 +415,7 @@ def perm2butterfly(v: Union[np.ndarray, torch.Tensor],
         v = np.concatenate([v, np.arange(n, 1 << log_n)])
     if increasing_stride:  # Follow proof of Lemma G.6
         br = bitreversal_permutation(1 << log_n)
-        b = perm2butterfly(br[v[br]], increasing_stride=False)
+        b = perm2butterfly(br[v[br]], complex=complex, increasing_stride=False)
         b.increasing_stride=True
         br_half = bitreversal_permutation((1 << log_n) // 2, pytorch_format=True)
         with torch.no_grad():
@@ -422,8 +428,10 @@ def perm2butterfly(v: Union[np.ndarray, torch.Tensor],
         right_factor, left_factor, v = outer_twiddle_factors(v)
         twiddle_right_factors.append(right_factor)
         twiddle_left_factors.append(left_factor)
-    b = Butterfly(n, n, bias=False, increasing_stride=False, nblocks=2)
+    b = Butterfly(n, n, bias=False, complex=complex, increasing_stride=False, nblocks=2)
     with torch.no_grad():
-        b.twiddle.copy_(torch.stack([torch.stack(twiddle_right_factors),
-                                     torch.stack(twiddle_left_factors).flip([0])]).unsqueeze(0))
+        b_twiddle = b.twiddle if not complex else view_as_complex(b.twiddle)
+        twiddle = torch.stack([torch.stack(twiddle_right_factors),
+                               torch.stack(twiddle_left_factors).flip([0])]).unsqueeze(0)
+        b_twiddle.copy_(twiddle if not complex else real2complex(twiddle))
     return b

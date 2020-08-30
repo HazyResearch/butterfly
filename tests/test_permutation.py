@@ -32,7 +32,7 @@ class ButterflyPermutationTest(unittest.TestCase):
                     self.assertTrue(torch.allclose(factor_out, factor))
 
     def test_modular_balance(self):
-        num_repeats = 100
+        num_repeats = 50
         for n in [2, 16, 64]:
             for _ in range(num_repeats):
                 v = np.random.permutation(n)
@@ -53,24 +53,32 @@ class ButterflyPermutationTest(unittest.TestCase):
                 self.assertTrue(np.allclose(mat, perm_vec_to_mat(L_vec)))
 
     def test_perm2butterfly_slow(self):
-        num_repeats = 100
+        num_repeats = 50
         for n in [2, 13, 38]:
             for increasing_stride in [False, True]:
-                for _ in range(num_repeats):
-                    v = torch.randperm(n)
-                    b = torch_butterfly.permutation.perm2butterfly_slow(v, increasing_stride)
-                    input = torch.arange(n, dtype=torch.float32)
-                    self.assertTrue(torch.allclose(input[v], b(input)))
+                for complex in [False, True]:
+                    for _ in range(num_repeats):
+                        v = torch.randperm(n)
+                        b = torch_butterfly.permutation.perm2butterfly_slow(v, complex,
+                                                                            increasing_stride)
+                        input = torch.arange(n, dtype=torch.float32)
+                        if complex:
+                            input = input.to(torch.complex64)
+                        self.assertTrue(torch.allclose(input[v], b(input)))
 
     def test_perm2butterfly(self):
-        num_repeats = 100
+        num_repeats = 50
         for n in [2, 13, 38]:
             for increasing_stride in [False, True]:
-                for _ in range(num_repeats):
-                    v = torch.randperm(n)
-                    b = torch_butterfly.permutation.perm2butterfly(v, increasing_stride)
-                    input = torch.arange(n, dtype=torch.float32)
-                    self.assertTrue(torch.allclose(input[v], b(input)))
+                for complex in [False, True]:
+                    for _ in range(num_repeats):
+                        v = torch.randperm(n)
+                        b = torch_butterfly.permutation.perm2butterfly(v, complex,
+                                                                       increasing_stride)
+                        input = torch.arange(n, dtype=torch.float32)
+                        if complex:
+                            input = input.to(torch.complex64)
+                        self.assertTrue(torch.allclose(input[v], b(input)))
 
 
 if __name__ == "__main__":
