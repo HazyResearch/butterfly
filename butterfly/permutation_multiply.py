@@ -34,24 +34,32 @@ def permutation_mult_torch(prob, input, increasing_stride=False, return_intermed
     assert n == 1 << m, "size must be a power of 2"
     nsteps = prob.shape[0]
     assert prob.shape == (nsteps, 3)
+    # prob_m_1 = 1.0 - prob
     output = input.contiguous()
     intermediates = [output]
     if input.dim() == 2:  # real
         for log_stride in range(1, nsteps + 1) if increasing_stride else range(1, nsteps + 1)[::-1]:
             stride = 1 << log_stride
             # First step: weighted mean of identity permutation and permutation that yields [even, odd]
-            output = ((1 - prob[log_stride - 1, 0]) * output.view(-1, 2, stride) + prob[log_stride - 1, 0] * output.view(-1, stride, 2).transpose(-1, -2))
+            # output = ((prob_m_1[log_stride - 1, 0]) * output.view(-1, 2, stride) + prob[log_stride - 1, 0] * output.view(-1, stride, 2).transpose(-1, -2))
+            # output = output.view(-1, 2, stride)
+            # output = output - prob[log_stride - 1, 0] * (output - output.view(-1, stride, 2).transpose(-1, -2))
+            output = torch.lerp(output.view(-1, 2, stride), output.view(-1, stride, 2).transpose(-1, -2), prob[log_stride - 1, 0])
             # Second step: weighted mean of identity permutation and permutation that reverses the first and the second half
-            output = (((1 - prob[log_stride - 1, 1:]).unsqueeze(-1) * output + prob[log_stride - 1, 1:].unsqueeze(-1) * output.flip(-1)))
+            # output = (((prob_m_1[log_stride - 1, 1:]).unsqueeze(-1) * output + prob[log_stride - 1, 1:].unsqueeze(-1) * output.flip(-1)))
+            # output = output - prob[log_stride - 1, 1:].unsqueeze(-1) * (output - output.flip(-1))
+            output = torch.lerp(output, output.flip(-1), prob[log_stride - 1, 1:].unsqueeze(-1))
             intermediates.append(output)
         return output.view(batch_size, n) if not return_intermediates else torch.stack([intermediate.view(batch_size, n) for intermediate in intermediates])
     else:  # complex
         for log_stride in range(1, nsteps + 1) if increasing_stride else range(1, nsteps + 1)[::-1]:
             stride = 1 << log_stride
             # First step: weighted mean of identity permutation and permutation that yields [even, odd]
-            output = ((1 - prob[log_stride - 1, 0]) * output.view(-1, 2, stride, 2) + prob[log_stride - 1, 0] * output.view(-1, stride, 2, 2).transpose(-2, -3))
+            # output = ((1 - prob[log_stride - 1, 0]) * output.view(-1, 2, stride, 2) + prob[log_stride - 1, 0] * output.view(-1, stride, 2, 2).transpose(-2, -3))
+            output = torch.lerp(output.view(-1, 2, stride, 2), output.view(-1, stride, 2, 2).transpose(-2, -3), prob[log_stride - 1, 0])
             # Second step: weighted mean of identity permutation and permutation that reverses the first and the second half
-            output = (((1 - prob[log_stride - 1, 1:]).unsqueeze(-1).unsqueeze(-1) * output + prob[log_stride - 1, 1:].unsqueeze(-1).unsqueeze(-1) * output.flip(-2)))
+            # output = (((1 - prob[log_stride - 1, 1:]).unsqueeze(-1).unsqueeze(-1) * output + prob[log_stride - 1, 1:].unsqueeze(-1).unsqueeze(-1) * output.flip(-2)))
+            output = torch.lerp(output, output.flip(-2), prob[log_stride - 1, 1:].unsqueeze(-1).unsqueeze(-1))
             intermediates.append(output)
         return output.view(batch_size, n, 2) if not return_intermediates else torch.stack([intermediate.view(batch_size, n, 2) for intermediate in intermediates])
 
