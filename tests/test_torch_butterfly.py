@@ -203,6 +203,47 @@ class ButterflyTest(unittest.TestCase):
                             self.assertTrue(torch.allclose(output, output_loop),
                                             ((output - output_loop).abs().max().item(), output.shape, device, (in_size, out_size), complex))
 
+    def test_butterfly_bmm_tensorproduct(self):
+        # Just to show how to do TensorProduct (e.g., Conv2d) with ButterflyBmm
+        batch_size = 10
+        in_channels = 3
+        out_channels = 6
+        n1, n2 = 32, 16
+        dtype = torch.complex64
+        input = torch.randn(batch_size, in_channels, n2, n1, dtype=dtype)
+        # Generate out_channels x in_channels butterfly matrices and loop over them
+        b1s = [torch_butterfly.Butterfly(n1, n1, bias=False, complex=True)
+               for _ in range(out_channels * in_channels)]
+        b2s = [torch_butterfly.Butterfly(n2, n2, bias=False, complex=True)
+               for _ in range(out_channels * in_channels)]
+        b_tp = [torch_butterfly.combine.TensorProduct(b1, b2) for b1, b2 in zip(b1s, b2s)]
+        outputs = []
+        for o in range(out_channels):
+            output = []
+            for i in range(in_channels):
+                index = o * in_channels + i
+                output.append(b_tp[index](input[:, i]))
+            outputs.append(torch.stack(output, dim=1))
+        out = torch.stack(outputs, dim=1)
+        assert out.shape == (batch_size, out_channels, in_channels, n2, n1)
+        # Use ButterflyBmm instead
+        b1_bmm = torch_butterfly.ButterflyBmm(n1, n1, matrix_batch=out_channels * in_channels,
+                                              bias=False, complex=True)
+        with torch.no_grad():
+            b1_bmm.twiddle.copy_(torch.cat([b1.twiddle for b1 in b1s]))
+        b2_bmm = torch_butterfly.ButterflyBmm(n2, n2, matrix_batch=out_channels * in_channels,
+                                              bias=False, complex=True)
+        with torch.no_grad():
+            b2_bmm.twiddle.copy_(torch.cat([b2.twiddle for b2 in b2s]))
+        input_reshaped = input.transpose(1, 2).reshape(batch_size, n2, 1, in_channels, n1)
+        input_expanded = input_reshaped.expand(batch_size, n2, out_channels, in_channels, n1)
+        out_bmm = b1_bmm(input_expanded.reshape(batch_size, n2, out_channels * in_channels, n1))
+        out_bmm = out_bmm.transpose(1, 3)  # (batch_size, n1, out_channels * in_channels, n2)
+        out_bmm = b2_bmm(out_bmm)  # (batch_size, n1, out_channels * in_channels, n2)
+        out_bmm = out_bmm.permute(0, 2, 3, 1)  # (batch_size, out_channels * in_channels, n2, n1)
+        out_bmm = out_bmm.reshape(batch_size, out_channels, in_channels, n2, n1)
+        self.assertTrue(torch.allclose(out_bmm, out))
+
 
 if __name__ == "__main__":
     unittest.main()
