@@ -38,22 +38,42 @@ class Butterfly(nn.Module):
         self.increasing_stride = increasing_stride
         assert nblocks >= 1
         self.nblocks = nblocks
-        dtype = torch.get_default_dtype() if not complex else real_dtype_to_complex[torch.get_default_dtype()]
-        twiddle_core_shape = (self.nstacks, nblocks, log_n, size // 2)
+        dtype = torch.get_default_dtype() if not self.complex else real_dtype_to_complex[torch.get_default_dtype()]
+        twiddle_shape = (self.nstacks, nblocks, log_n, size // 2, 2, 2)
         assert init in ['randn', 'ortho', 'identity']
         self.init = init
+        self.twiddle = nn.Parameter(torch.empty(twiddle_shape, dtype=dtype))
+        if bias:
+            self.bias = nn.Parameter(torch.empty(out_size, dtype=dtype))
+        else:
+            self.register_parameter('bias', None)
+        self.twiddle._is_structured = True  # Flag to avoid weight decay
+        # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
+        # This is used in optimizers such as SGD.
+        # So we have to store the parameters as real.
+        if self.complex:
+            self.twiddle = nn.Parameter(view_as_real(self.twiddle))
+            if self.bias is not None:
+                self.bias = nn.Parameter(view_as_real(self.bias))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        """Initialize bias the same way as torch.nn.Linear."""
+        twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
         if self.init == 'randn':
-            twiddle_shape = twiddle_core_shape + (2, 2)
             # complex randn already has the correct scaling of stddev=1.0
             scaling = 1.0 / math.sqrt(2)
-            self.twiddle = nn.Parameter(torch.randn(twiddle_shape, dtype=dtype) * scaling)
+            with torch.no_grad():
+                twiddle.copy_(torch.randn(twiddle.shape, dtype=twiddle.dtype) * scaling)
         elif self.init == 'ortho':
-            if not complex:
+            twiddle_core_shape = twiddle.shape[:-2]
+            if not self.complex:
                 theta = torch.rand(twiddle_core_shape) * math.pi * 2
                 c, s = torch.cos(theta), torch.sin(theta)
                 det = torch.randint(0, 2, twiddle_core_shape, dtype=c.dtype) * 2 - 1  # Rotation (+1) or reflection (-1)
-                self.twiddle = nn.Parameter(torch.stack((torch.stack((det * c, -det * s), dim=-1),
-                                                         torch.stack((s, c), dim=-1)), dim=-2))
+                with torch.no_grad():
+                    twiddle.copy_(torch.stack((torch.stack((det * c, -det * s), dim=-1),
+                                               torch.stack((s, c), dim=-1)), dim=-2))
             else:
                 # Sampling from the Haar measure on U(2) is a bit subtle.
                 # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
@@ -64,30 +84,14 @@ class Butterfly(nn.Module):
                 B = torch.exp(1j * (alpha + chi)) * s
                 C = -torch.exp(1j * (alpha - chi)) * s
                 D = torch.exp(1j * (alpha - psi)) * c
-                self.twiddle = nn.Parameter(torch.stack((torch.stack((A, B), dim=-1),
-                                                         torch.stack((C, D), dim=-1)), dim=-2))
+                with torch.no_grad():
+                    twiddle.copy_(torch.stack((torch.stack((A, B), dim=-1),
+                                               torch.stack((C, D), dim=-1)), dim=-2))
         elif self.init == 'identity':
-            twiddle_shape = twiddle_core_shape + (2, 2)
-            twiddle = torch.eye(2, dtype=dtype).reshape(1, 1, 1, 1, 2, 2)
-            twiddle = twiddle.expand(*twiddle_shape).contiguous()
-            self.twiddle = nn.Parameter(twiddle)
-        self.twiddle._is_structured = True  # Flag to avoid weight decay
-        if bias:
-            self.bias = nn.Parameter(torch.empty(out_size, dtype=dtype))
-        else:
-            self.register_parameter('bias', None)
-        self.reset_parameters()
-        # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
-        # This is used in optimizers such as SGD.
-        # So we have to store the parameters as real.
-        if complex:
-            self.twiddle = nn.Parameter(view_as_real(self.twiddle))
-            if self.bias is not None:
-                self.bias = nn.Parameter(view_as_real(self.bias))
-
-    def reset_parameters(self):
-        """Initialize bias the same way as torch.nn.Linear."""
-        # TODO: init the twiddle here, with copy_
+            twiddle_new = torch.eye(2, dtype=twiddle.dtype).reshape(1, 1, 1, 1, 2, 2)
+            twiddle_new = twiddle_new.expand(*twiddle.shape).contiguous()
+            with torch.no_grad():
+                twiddle.copy_(twiddle_new)
         if self.bias is not None:
             bound = 1 / math.sqrt(self.in_size)
             nn.init.uniform_(self.bias, -bound, bound)
@@ -100,7 +104,7 @@ class Butterfly(nn.Module):
             conjugate: whether the butterfly matrix should be conjugated.
             subtwiddle: allow using only part of the parameters for smaller input.
                 Could be useful for weight sharing.
-                out_size is set to self.nstack * self.in_size_extended in this case
+                out_size is set to self.nstacks * self.in_size_extended in this case
         Return:
             output: (batch, *, out_size)
         """
@@ -183,30 +187,31 @@ class ButterflyUnitary(Butterfly):
         self.increasing_stride = increasing_stride
         assert nblocks >= 1
         self.nblocks = nblocks
-        dtype = real_dtype_to_complex[torch.get_default_dtype()]
-        twiddle_core_shape = (self.nstacks, nblocks, log_n, size // 2)
+        complex_dtype = real_dtype_to_complex[torch.get_default_dtype()]
+        twiddle_shape = (self.nstacks, nblocks, log_n, size // 2, 4)
         self.init = 'ortho'
-        # Sampling from the Haar measure on U(2) is a bit subtle.
-        # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
-        self.twiddle = nn.Parameter(torch.randn(twiddle_core_shape + (4,)) * 2 * math.pi)
-        phi = torch.asin(torch.sqrt(torch.rand(twiddle_core_shape)))
-        alpha, psi, chi = torch.rand((3, ) + twiddle_core_shape) * math.pi * 2
-        self.twiddle = nn.Parameter(torch.stack([phi, alpha, psi, chi], dim=-1))
-        self.twiddle._is_structured = True  # Flag to avoid weight decay
+        self.twiddle = nn.Parameter(torch.empty(twiddle_shape))
         if bias:
-            self.bias = nn.Parameter(torch.empty(out_size, dtype=dtype))
+            self.bias = nn.Parameter(torch.empty(out_size, dtype=complex_dtype))
         else:
             self.register_parameter('bias', None)
-        self.reset_parameters()
+        self.twiddle._is_structured = True  # Flag to avoid weight decay
         # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
         # This is used in optimizers such as SGD.
         # So we have to store the parameters as real.
         if self.bias is not None:
             self.bias = nn.Parameter(view_as_real(self.bias))
+        self.reset_parameters()
 
     def reset_parameters(self):
         """Initialize bias the same way as torch.nn.Linear."""
-        # TODO: init the twiddle here, with copy_
+        # Sampling from the Haar measure on U(2) is a bit subtle.
+        # Using the parameterization here: http://home.lu.lv/~sd20008/papers/essays/Random%20unitary%20[paper].pdf
+        twiddle_core_shape = self.twiddle.shape[:-1]
+        phi = torch.asin(torch.sqrt(torch.rand(twiddle_core_shape)))
+        alpha, psi, chi = torch.rand((3, ) + twiddle_core_shape) * math.pi * 2
+        with torch.no_grad():
+            self.twiddle.copy_(torch.stack([phi, alpha, psi, chi], dim=-1))
         if self.bias is not None:
             bound = 1 / math.sqrt(self.in_size)
             nn.init.uniform_(self.bias, -bound, bound)
@@ -219,7 +224,7 @@ class ButterflyUnitary(Butterfly):
             conjugate: whether the butterfly matrix should be conjugated.
             subtwiddle: allow using only part of the parameters for smaller input.
                 Could be useful for weight sharing.
-                out_size is set to self.nstack * self.in_size_extended in this case
+                out_size is set to self.nstacks * self.in_size_extended in this case
         Return:
             output: (batch, *, out_size)
         """
