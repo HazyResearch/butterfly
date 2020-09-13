@@ -31,7 +31,7 @@ def check_cuda_version():
                 f'matches your PyTorch install.')
 
 check_cuda_version()
-from .butterfly import Butterfly, ButterflyUnitary  # noqa
+from .butterfly import Butterfly, ButterflyUnitary, ButterflyBmm  # noqa
 from .multiply import butterfly_multiply  # noqa
 from . import complex_utils
 from . import diagonal
@@ -41,6 +41,7 @@ from . import special
 __all__ = [
     'Butterfly',
     'ButterflyUnitary',
+    'ButterflyBmm',
     'butterfly_multiply',
     '__version__',
 ]

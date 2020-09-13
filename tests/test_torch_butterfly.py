@@ -45,7 +45,7 @@ class ButterflyTest(unittest.TestCase):
         # for batch_size, n in [(10, 64)]:
         # for batch_size, n in [(1, 2)]:
             log_n = int(math.log2(n))
-            nstack = 2
+            nstacks = 2
             nblocks = 3
             for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
             # for device in ['cuda']:
@@ -58,8 +58,8 @@ class ButterflyTest(unittest.TestCase):
                         dtype = torch.float32 if not complex else torch.complex64
                         # complex randn already has the correct scaling of stddev=1.0
                         scaling = 1 / math.sqrt(2)
-                        twiddle = torch.randn((nstack, nblocks, log_n, n // 2, 2, 2), dtype=dtype, requires_grad=True, device=device) * scaling
-                        input = torch.randn((batch_size, nstack, n), dtype=dtype, requires_grad=True, device=twiddle.device)
+                        twiddle = torch.randn((nstacks, nblocks, log_n, n // 2, 2, 2), dtype=dtype, requires_grad=True, device=device) * scaling
+                        input = torch.randn((batch_size, nstacks, n), dtype=dtype, requires_grad=True, device=twiddle.device)
                         output = torch_butterfly.butterfly_multiply(twiddle, input, increasing_stride)
                         output_torch = torch_butterfly.multiply.butterfly_multiply_torch(twiddle, input, increasing_stride)
                         self.assertTrue(torch.allclose(output, output_torch, rtol=self.rtol, atol=self.atol),
@@ -155,15 +155,15 @@ class ButterflyTest(unittest.TestCase):
         batch_size = 10
         for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
             for in_size, out_size in [(7, 15), (15, 7)]:
-                    for increasing_stride in [True, False]:
-                        for nblocks in [1, 2, 3]:
-                            b = torch_butterfly.ButterflyUnitary(in_size, out_size, True,
-                                                                 increasing_stride, nblocks=nblocks).to(device)
-                            dtype = torch.complex64
-                            input = torch.randn(batch_size, in_size, dtype=dtype, device=device)
-                            output = b(input)
-                            self.assertTrue(output.shape == (batch_size, out_size),
-                                            (output.shape, device, (in_size, out_size), nblocks))
+                for increasing_stride in [True, False]:
+                    for nblocks in [1, 2, 3]:
+                        b = torch_butterfly.ButterflyUnitary(in_size, out_size, True,
+                                                                increasing_stride, nblocks=nblocks).to(device)
+                        dtype = torch.complex64
+                        input = torch.randn(batch_size, in_size, dtype=dtype, device=device)
+                        output = b(input)
+                        self.assertTrue(output.shape == (batch_size, out_size),
+                                        (output.shape, device, (in_size, out_size), nblocks))
         # Test that it's actually unitary
         size = 32
         for increasing_stride in [True, False]:
@@ -174,6 +174,34 @@ class ButterflyTest(unittest.TestCase):
                 twiddle_matrix_np = b(eye).t().detach().numpy()
                 self.assertTrue(np.allclose(twiddle_matrix_np @ twiddle_matrix_np.T.conj(),
                                             np.eye(size), self.rtol, self.atol))
+
+    def test_butterfly_bmm(self):
+        batch_size = 10
+        matrix_batch = 3
+        for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+            for in_size, out_size in [(7, 15), (15, 7)]:
+                for complex in [False, True]:
+                    for increasing_stride in [True, False]:
+                        for nblocks in [1, 2, 3]:
+                            # Test shape
+                            b_bmm = torch_butterfly.ButterflyBmm(in_size, out_size, matrix_batch, True,
+                                                             complex, increasing_stride, nblocks=nblocks).to(device)
+                            dtype = torch.float32 if not complex else torch.complex64
+                            input = torch.randn(batch_size, matrix_batch, in_size, dtype=dtype, device=device)
+                            output = b_bmm(input)
+                            self.assertTrue(output.shape == (batch_size, matrix_batch, out_size),
+                                            (output.shape, device, (in_size, out_size), nblocks))
+                            # Check that the result is the same as looping over butterflies
+                            output_loop = []
+                            for i in range(matrix_batch):
+                                b = torch_butterfly.Butterfly(in_size, out_size, True, complex, increasing_stride, nblocks=nblocks).to(device)
+                                with torch.no_grad():
+                                    b.twiddle.copy_(b_bmm.twiddle[i * b_bmm.nstacks:(i + 1) * b_bmm.nstacks])
+                                    b.bias.copy_(b_bmm.bias[i])
+                                output_loop.append(b(input[:, i]))
+                            output_loop = torch.stack(output_loop, dim=1)
+                            self.assertTrue(torch.allclose(output, output_loop),
+                                            ((output - output_loop).abs().max().item(), output.shape, device, (in_size, out_size), complex))
 
 
 if __name__ == "__main__":

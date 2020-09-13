@@ -263,3 +263,98 @@ class ButterflyUnitary(Butterfly):
         s = 'in_size={}, out_size={}, bias={}, increasing_stride={}, nblocks={}'.format(
             self.in_size, self.out_size, self.bias is not None, self.increasing_stride, self.nblocks,)
         return s
+
+
+class ButterflyBmm(Butterfly):
+    """Same as Butterfly, but performs batched matrix multiply.
+    Compatible with torch.nn.Linear.
+
+    Parameters:
+        in_size: size of input
+        out_size: size of output
+        matrix_batch: how many butterfly matrices
+        bias: If set to False, the layer will not learn an additive bias.
+                Default: ``True``
+        complex: whether complex or real
+        increasing_stride: whether the first butterfly block will multiply with increasing stride
+            (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
+        init: 'randn', 'ortho', or 'identity'. Whether the weight matrix should be initialized to
+            from randn twiddle, or to be randomly orthogonal/unitary, or to be the identity matrix.
+        nblocks: number of B or B^T blocks. The B and B^T will alternate.
+    """
+
+    def __init__(self, in_size, out_size, matrix_batch=1, bias=True, complex=False,
+                 increasing_stride=True, init='randn', nblocks=1):
+        nn.Module.__init__(self)
+        self.in_size = in_size
+        log_n = int(math.ceil(math.log2(in_size)))
+        self.log_n = log_n
+        size = self.in_size_extended = 1 << log_n  # Will zero-pad input if in_size is not a power of 2
+        self.out_size = out_size
+        self.matrix_batch = matrix_batch
+        self.nstacks = int(math.ceil(out_size / self.in_size_extended))
+        self.complex = complex
+        self.increasing_stride = increasing_stride
+        assert nblocks >= 1
+        self.nblocks = nblocks
+        dtype = torch.get_default_dtype() if not self.complex else real_dtype_to_complex[torch.get_default_dtype()]
+        twiddle_shape = (self.matrix_batch * self.nstacks, nblocks, log_n, size // 2, 2, 2)
+        assert init in ['randn', 'ortho', 'identity']
+        self.init = init
+        self.twiddle = nn.Parameter(torch.empty(twiddle_shape, dtype=dtype))
+        if bias:
+            self.bias = nn.Parameter(torch.empty(self.matrix_batch, out_size, dtype=dtype))
+        else:
+            self.register_parameter('bias', None)
+        self.twiddle._is_structured = True  # Flag to avoid weight decay
+        # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
+        # This is used in optimizers such as SGD.
+        # So we have to store the parameters as real.
+        if self.complex:
+            self.twiddle = nn.Parameter(view_as_real(self.twiddle))
+            if self.bias is not None:
+                self.bias = nn.Parameter(view_as_real(self.bias))
+        self.reset_parameters()
+
+    def forward(self, input, transpose=False, conjugate=False):
+        """
+        Parameters:
+            input: (batch, *, matrix_batch, in_size)
+            transpose: whether the butterfly matrix should be transposed.
+            conjugate: whether the butterfly matrix should be conjugated.
+        Return:
+            output: (batch, *, matrix_batch, out_size)
+        """
+        return super().forward(input, transpose, conjugate, subtwiddle=False)
+
+    def pre_process(self, input, padded_size=None):
+        if padded_size is None:
+            padded_size = self.in_size_extended
+        # Reshape to (N, matrix_batch, in_size)
+        input_size = input.size(-1)
+        assert input.size(-2) == self.matrix_batch
+        output = input.reshape(-1, self.matrix_batch, input_size)
+        batch = output.shape[0]
+        if input_size != padded_size:  # Zero-pad
+            output = F.pad(output, (0, padded_size - input_size))
+        output = output.unsqueeze(2).expand(batch, self.matrix_batch, self.nstacks, padded_size)
+        output = output.reshape(batch, self.matrix_batch * self.nstacks, padded_size)
+        return output
+
+    def post_process(self, input, output, out_size=None):
+        if out_size is None:
+            out_size = self.out_size
+        batch = output.shape[0]
+        output = output.view(batch, self.matrix_batch, self.nstacks * output.size(-1))
+        out_size_extended = 1 << (int(math.ceil(math.log2(out_size))))
+        if out_size != out_size_extended:  # Take top rows
+            output = output[:, :, :out_size]
+        if self.bias is not None:
+            bias = self.bias if not self.complex else view_as_complex(self.bias)
+            output = output + bias[:, :out_size]
+        return output.view(*input.size()[:-2], self.matrix_batch, self.out_size)
+
+    def extra_repr(self):
+        s = 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, increasing_stride={}, init={}, nblocks={}'.format(
+            self.in_size, self.out_size, self.matrix_batch, self.bias is not None, self.complex, self.increasing_stride, self.init, self.nblocks,)
+        return s
