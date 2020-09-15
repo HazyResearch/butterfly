@@ -40,7 +40,7 @@ torch::Tensor butterfly_multiply_fw(const torch::Tensor twiddle,
 #ifdef WITH_CUDA
     return butterfly_multiply_fw_cuda(twiddle, input, increasing_stride);
 #else
-    TORCH_ERROR("Not compiled with CUDA support");
+    AT_ERROR("Not compiled with CUDA support");
 #endif
   } else {
     return butterfly_multiply_fw_cpu(twiddle, input, increasing_stride);
@@ -78,7 +78,7 @@ std::tuple<torch::Tensor, torch::Tensor>
 #ifdef WITH_CUDA
     return butterfly_multiply_bw_cuda(twiddle, input, grad, increasing_stride);
 #else
-    TORCH_ERROR("Not compiled with CUDA support");
+    AT_ERROR("Not compiled with CUDA support");
 #endif
   } else {
     return butterfly_multiply_bw_cpu(twiddle, input, grad, increasing_stride);
