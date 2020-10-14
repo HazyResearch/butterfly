@@ -1,0 +1,15 @@
+# @package _global_
+dataset:
+  _target_: datamodules.CIFAR100
+  data_dir: ${env:DATA_DIR,data}/cifar100
+  seed: 2357  # Required, otherwise train and val sets may overlap
+  split_size: 1
+  split_seed: 2357
+train:
+  task:
+    _target_: tasks.MulticlassClassification
+  epochs: 200
+  lr_scheduler:
+    _target_: torch.optim.lr_scheduler.MultiStepLR
+    milestones: [60, 120, 160]
+    gamma: 0.2

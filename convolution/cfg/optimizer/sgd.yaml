@@ -1,0 +1,4 @@
+# @package train.optimizer
+_target_: torch.optim.SGD
+lr: 1e-1
+momentum: 0.9

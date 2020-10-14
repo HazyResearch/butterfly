@@ -1,0 +1,40 @@
+#!/usr/bin/env python
+from pathlib import Path
+project_root = Path(__file__).parent.absolute()
+
+import os, sys
+import subprocess
+
+import torch
+
+import ray
+
+
+@ray.remote(num_gpus=1)
+def execute(cmd):
+    # Need to copy this process's environments and working directory
+    subprocess.run([sys.executable] + cmd, env=os.environ, cwd=project_root)
+
+
+def main():
+    try:
+        ray.init(address='auto')
+    except:
+        try:
+            with open(project_root / 'ray_config/redis_address', 'r') as f:
+                address = f.read().strip()
+            with open(project_root / 'ray_config/redis_password', 'r') as f:
+                password = f.read().strip()
+                ray.init(address=address, redis_password=password)
+        except:
+            ray.init(num_gpus=torch.cuda.device_count())
+            import warnings
+            warnings.warn("Running Ray with just one node")
+
+    cmd = sys.argv[1:]
+    print(' '.join(cmd))
+    ray.get(execute.remote(cmd))
+
+
+if __name__ == '__main__':
+    main()

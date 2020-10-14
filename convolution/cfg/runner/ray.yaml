@@ -1,0 +1,9 @@
+# @package _group_
+name: ray
+ntrials: 1
+gpu_per_trial: 1.0
+hyperband: False
+grace_period: 15
+result_dir: ./results
+local: False
+nfs: True  # Whether the workers already write to network disk

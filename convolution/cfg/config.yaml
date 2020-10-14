@@ -1,0 +1,25 @@
+# @package _global_
+defaults:
+  - model: resnet18
+  - optimizer: sgd
+  - lr_scheduler: multi_step
+  - runner: ray
+  - dataset: cifar10
+train:
+  batch_size: 128
+  epochs: 100
+  optimizer:
+    weight_decay: 5e-4
+  pltrainer:
+    gradient_clip_val: 0.0
+    limit_train_batches: 1.0  # train on full dataset, can be used to toggle quick run
+  run_test: False  # Whether to evaluate on test set after training
+  verbose: True  # Whether to print out train/val results after each epoch
+dataset:
+  num_workers: 3
+wandb:
+  project: butterflynas
+  group: ''
+  job_type: training
+smoke_test: False
+seed: [_sample_uniform, 0, 65536]

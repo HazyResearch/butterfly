@@ -1,0 +1,4 @@
+# @package train.lr_scheduler
+_target_: torch.optim.lr_scheduler.MultiStepLR
+milestones: [40, 60, 80]
+gamma: 0.2
