@@ -5,7 +5,7 @@ import unittest
 import torch
 
 import torch_butterfly
-from torch_butterfly.complex_utils import index_last_dim
+from torch_butterfly.complex_utils import complex_mul, complex_matmul, index_last_dim
 
 
 class ButterflyComplexUtilsTest(unittest.TestCase):
@@ -13,6 +13,22 @@ class ButterflyComplexUtilsTest(unittest.TestCase):
     def setUp(self):
         self.rtol = 1e-3
         self.atol = 1e-5
+
+    def test_complex_matmul(self):
+        """Check that our index_last_dim backward is also correct for real input
+        """
+        bs = (3, 5)
+        for device in ['cpu', 'cuda']:
+            X = torch.randn(*bs, 128, 16, dtype=torch.complex64, device=device, requires_grad=True)
+            Y = torch.randn(*bs, 16, 32, dtype=torch.complex64, device=device, requires_grad=True)
+            prod = complex_matmul(X, Y)
+            prod_sum = complex_mul(X.unsqueeze(-1), Y.unsqueeze(-3)).sum(dim=-2)
+            self.assertTrue(torch.allclose(prod, prod_sum, self.rtol, self.atol))
+            g = torch.randn_like(prod)
+            grad_X, grad_Y = torch.autograd.grad(prod, (X, Y), g)
+            grad_X_sum, grad_Y_sum = torch.autograd.grad(prod_sum, (X, Y), g)
+            self.assertTrue(torch.allclose(grad_X, grad_X_sum, self.rtol, self.atol))
+            self.assertTrue(torch.allclose(grad_Y, grad_Y_sum, self.rtol, self.atol))
 
     def test_index_last_dim(self):
         """Check that our index_last_dim backward is also correct for real input

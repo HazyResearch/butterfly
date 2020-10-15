@@ -28,6 +28,38 @@ class ComplexMul(torch.autograd.Function):
 complex_mul = ComplexMul.apply
 
 
+class ComplexMatmul(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, X, Y):
+        ctx.save_for_backward(X, Y)
+        return view_as_complex(torch.stack([X.real @ Y.real - X.imag @ Y.imag,
+                                            X.real @ Y.imag + X.imag @ Y.real], dim=-1))
+
+    @staticmethod
+    def backward(ctx, grad):
+        X, Y = ctx.saved_tensors
+        grad_X, grad_Y = None, None
+        if ctx.needs_input_grad[0]:
+            Y_t = Y.transpose(-1, -2)
+            # grad_X = (grad @ Y_t.conj()).sum_to_size(*X.shape)
+            grad_X = view_as_complex(
+                torch.stack([grad.real @ Y_t.real + grad.imag @ Y_t.imag,
+                             -grad.real @ Y_t.imag + grad.imag @ Y_t.real], dim=-1)
+            ).sum_to_size(*X.shape)
+        if ctx.needs_input_grad[1]:
+            X_t = X.transpose(-1, -2)
+            # grad_Y = (X_t.conj() @ grad).sum_to_size(*Y.shape)
+            grad_Y = view_as_complex(
+                torch.stack([X_t.real @ grad.real + X_t.imag @ grad.imag,
+                             X_t.real @ grad.imag - X_t.imag @ grad.real], dim=-1)
+            ).sum_to_size(*Y.shape)
+        return grad_X, grad_Y
+
+
+complex_matmul = ComplexMatmul.apply
+
+
 # In Pytorch 1.6, torch.view_as_real and torch.view_as_complex conjugate their gradients.
 # This follows Jax's convention. However, we currently follow Tensorflow's convention, where
 # the gradient should be as if everything is done with real numbers.
