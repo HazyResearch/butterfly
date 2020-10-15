@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch_butterfly
 from torch_butterfly import Butterfly
 from torch_butterfly.complex_utils import real2complex, complex2real
-from torch_butterfly.complex_utils import complex_mul
+from torch_butterfly.complex_utils import complex_mul, complex_matmul
 from torch_butterfly.combine import TensorProduct
 
 
@@ -53,6 +53,7 @@ class KOP2d(nn.Module):
         x_f = self.K1(real2complex(x))
         # (out_ch, in_ch, h, w)
         w_f = self.Kd(real2complex(self.weight)) * math.sqrt(self.in_size[0] * self.in_size[1])
-        prod = complex_mul(x_f.unsqueeze(1), w_f).sum(dim=2)
+        # prod = complex_mul(x_f.unsqueeze(1), w_f).sum(dim=2)
+        prod = complex_matmul(x_f.permute(2, 3, 0, 1), w_f.permute(2, 3, 1, 0)).permute(2, 3, 0, 1)
         out = complex2real(self.K2(prod))
         return out
