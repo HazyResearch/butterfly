@@ -15,13 +15,13 @@ class LeNet(nn.Module):
         self.fc3   = nn.Linear(84, num_classes)
 
     def forward(self, x):
-        out = F.relu(self.conv1(x))
+        out = F.relu(self.conv1(x), inplace=True)
         out = F.max_pool2d(out, 2)
-        out = F.relu(self.conv2(out))
+        out = F.relu(self.conv2(out), inplace=True)
         out = F.max_pool2d(out, 2)
         out = out.view(out.size(0), -1)
-        out = F.relu(self.fc1(out))
-        out = F.relu(self.fc2(out))
+        out = F.relu(self.fc1(out), inplace=True)
+        out = F.relu(self.fc2(out), inplace=True)
         out = self.fc3(out)
         return out
 
@@ -40,12 +40,12 @@ class LeNetPadded(nn.Module):
         self.pool2d = F.avg_pool2d if pooling_mode == 'avg' else F.max_pool2d
 
     def forward(self, x):
-        out = F.relu(self.conv1(x))
+        out = F.relu(self.conv1(x), inplace=True)
         out = self.pool2d(out, 2)
-        out = F.relu(self.conv2(out))
+        out = F.relu(self.conv2(out), inplace=True)
         out = self.pool2d(out, 2)
         out = out.view(out.size(0), -1)
-        out = F.relu(self.fc1(out))
-        out = F.relu(self.fc2(out))
+        out = F.relu(self.fc1(out), inplace=True)
+        out = F.relu(self.fc2(out), inplace=True)
         out = self.fc3(out)
         return out
