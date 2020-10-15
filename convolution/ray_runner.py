@@ -22,7 +22,7 @@ from ray.tune.schedulers import AsyncHyperBandScheduler
 from ray.tune.integration.wandb import WandbLogger
 
 from pl_runner import pl_train
-from utils import dictconfig_to_munch, munch_to_dictconfig
+from utils import remove_postfix, dictconfig_to_munch, munch_to_dictconfig
 
 
 HYDRA_TUNE_KEYS = ['_grid', '_sample', '_sample_uniform', '_sample_log_uniform']
@@ -83,9 +83,8 @@ def munchconfig_to_tune_munchconfig(cfg):
 class TuneReportCheckpointCallback(Callback):
     # We group train and val reporting into one, otherwise tune thinks there're 2 different epochs.
     def on_epoch_end(self, trainer, pl_module):
-        results = {k: v.item() for k, v in trainer.callback_metrics.items()
-                   if ((k.startswith('train_') or k.startswith('val_'))
-                       and not (k.endswith('_step') or k.endswith('_epoch')))}
+        results = {remove_postfix(k, '_epoch'): v for k, v in trainer.logged_metrics.items()
+                   if (k.startswith('train_') or k.startswith('val_')) and not k.endswith('_step')}
         results['mean_loss'] = results.get('val_loss', results['train_loss'])
         if 'val_accuracy' in results:
             results['mean_accuracy'] = results['val_accuracy']
@@ -97,8 +96,8 @@ class TuneReportCheckpointCallback(Callback):
         tune.report(**results)
 
     def on_test_epoch_end(self, trainer, pl_module):
-        results = {k: v.item() for k, v in trainer.callback_metrics.items()
-                   if k.startswith('test_') and not (k.endswith('_step') or k.endswith('_epoch'))}
+        results = {remove_postfix(k, '_epoch'): v for k, v in trainer.logged_metrics.items()
+                   if k.startswith('test_') and not k.endswith('_step')}
         tune.report(**results)
 
 
