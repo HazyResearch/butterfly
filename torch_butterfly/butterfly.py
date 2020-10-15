@@ -47,7 +47,6 @@ class Butterfly(nn.Module):
             self.bias = nn.Parameter(torch.empty(out_size, dtype=dtype))
         else:
             self.register_parameter('bias', None)
-        self.twiddle._is_structured = True  # Flag to avoid weight decay
         # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
         # This is used in optimizers such as SGD.
         # So we have to store the parameters as real.
@@ -55,6 +54,7 @@ class Butterfly(nn.Module):
             self.twiddle = nn.Parameter(view_as_real(self.twiddle))
             if self.bias is not None:
                 self.bias = nn.Parameter(view_as_real(self.bias))
+        self.twiddle._is_structured = True  # Flag to avoid weight decay
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -195,12 +195,12 @@ class ButterflyUnitary(Butterfly):
             self.bias = nn.Parameter(torch.empty(out_size, dtype=complex_dtype))
         else:
             self.register_parameter('bias', None)
-        self.twiddle._is_structured = True  # Flag to avoid weight decay
         # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
         # This is used in optimizers such as SGD.
         # So we have to store the parameters as real.
         if self.bias is not None:
             self.bias = nn.Parameter(view_as_real(self.bias))
+        self.twiddle._is_structured = True  # Flag to avoid weight decay
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -306,7 +306,6 @@ class ButterflyBmm(Butterfly):
             self.bias = nn.Parameter(torch.empty(self.matrix_batch, out_size, dtype=dtype))
         else:
             self.register_parameter('bias', None)
-        self.twiddle._is_structured = True  # Flag to avoid weight decay
         # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
         # This is used in optimizers such as SGD.
         # So we have to store the parameters as real.
@@ -314,6 +313,7 @@ class ButterflyBmm(Butterfly):
             self.twiddle = nn.Parameter(view_as_real(self.twiddle))
             if self.bias is not None:
                 self.bias = nn.Parameter(view_as_real(self.bias))
+        self.twiddle._is_structured = True  # Flag to avoid weight decay
         self.reset_parameters()
 
     def forward(self, input, transpose=False, conjugate=False):

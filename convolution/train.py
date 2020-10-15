@@ -50,7 +50,14 @@ class LightningModel(pl.LightningModule):
         return self.training_step(batch, batch_idx, prefix='test')
 
     def configure_optimizers(self):
-        optimizer = hydra.utils.instantiate(self.train_cfg.optimizer, self.model.parameters())
+        # Very important that the twiddle factors shouldn't have weight decay
+        structured_params = filter(lambda p: getattr(p, '_is_structured', False),
+                                   self.model.parameters())
+        unstructured_params = filter(lambda p: not getattr(p, '_is_structured', False),
+                                     self.model.parameters())
+        params_dict = [{'params': structured_params, 'weight_decay': 0.0},
+                       {'params': unstructured_params}]
+        optimizer = hydra.utils.instantiate(self.train_cfg.optimizer, params_dict)
         if 'lr_scheduler' not in self.train_cfg:
             return optimizer
         else:
