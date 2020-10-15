@@ -13,7 +13,6 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
 
 from munch import Munch
-from omegaconf.listconfig import ListConfig
 
 import ray
 from ray import tune
@@ -45,9 +44,7 @@ def munchconfig_to_tune_munchconfig(cfg):
     """
     def convert_value(v):
         # The type is omegaconf.listconfig.ListConfig and not list, so we test if it's a Sequence
-        # In hydra 0.11, more precisely omegaconf 1.4.1, ListConfig isn't an instance of Sequence.
-        # So we have to test it directly.
-        if not (isinstance(v, (Sequence, ListConfig)) and len(v) > 0 and v[0] in HYDRA_TUNE_KEYS):
+        if not (isinstance(v, Sequence) and len(v) > 0 and v[0] in HYDRA_TUNE_KEYS):
             return v
         else:
             if v[0] == '_grid':
