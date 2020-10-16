@@ -11,8 +11,8 @@ if torch.cuda.is_available():
         import cupy as cp
     except:
         use_cupy = False
-        import warnings
-        warnings.warn("Cupy isn't installed or isn't working properly. Will use Pytorch's complex matmul, which is slower.")
+        # import warnings
+        # warnings.warn("Cupy isn't installed or isn't working properly. Will use Pytorch's complex matmul, which is slower.")
 else:
     use_cupy = False
 
@@ -44,8 +44,10 @@ complex_mul = ComplexMul.apply
 
 
 complex_torch_dtype_to_np = {torch.complex64: np.complex64, torch.complex128: np.complex128}
-complex_np_dtype_to_real = {np.complex64: np.float32, np.complex128: np.float64,
-                            cp.dtype('complex64'): np.float32, cp.dtype('complex128'): np.float64}
+if use_cupy:
+    complex_np_dtype_to_real = {np.complex64: np.float32, np.complex128: np.float64,
+                                cp.dtype('complex64'): np.float32,
+                                cp.dtype('complex128'): np.float64}
 
 def torch2np(X):
     """Convert a torch tensor to a numpy array, sharing the same memory.
