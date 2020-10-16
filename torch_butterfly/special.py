@@ -14,7 +14,6 @@ from torch_butterfly.complex_utils import real2complex, Real2Complex, Complex2Re
 from torch_butterfly.complex_utils import index_last_dim
 from torch_butterfly.combine import diagonal_butterfly, TensorProduct, butterfly_product
 from torch_butterfly.combine import butterfly_kronecker, permutation_kronecker
-from torch_butterfly.combine import Unflatten2D
 
 
 def fft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
@@ -518,11 +517,12 @@ def fft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
         if not flatten:
             return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
         else:
-            return (nn.Sequential(nn.Flatten(start_dim=-2), br_perm, b, Unflatten2D(n1))
-                    if br_first
-                    else nn.Sequential(nn.Flatten(start_dim=-2), b, br_perm, Unflatten2D(n1)))
+            return (nn.Sequential(nn.Flatten(start_dim=-2), br_perm, b, nn.Unflatten(-1, (n2, n1)))
+                    if br_first else nn.Sequential(nn.Flatten(start_dim=-2), b, br_perm,
+                                                   nn.Unflatten(-1, (n2, n1))))
     else:
-        return b if not flatten else nn.Sequential(nn.Flatten(start_dim=-2), b, Unflatten2D(n1))
+        return b if not flatten else nn.Sequential(nn.Flatten(start_dim=-2), b,
+                                                   nn.Unflatten(-1, (n2, n1)))
 
 
 def fft2d_unitary(n1: int, n2: int, br_first: bool = True,
@@ -572,11 +572,12 @@ def ifft2d(n1: int, n2: int, normalized: bool = False, br_first: bool = True,
         if not flatten:
             return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
         else:
-            return (nn.Sequential(nn.Flatten(start_dim=-2), br_perm, b, Unflatten2D(n1))
-                    if br_first
-                    else nn.Sequential(nn.Flatten(start_dim=-2), b, br_perm, Unflatten2D(n1)))
+            return (nn.Sequential(nn.Flatten(start_dim=-2), br_perm, b, nn.Unflatten(-1, (n2, n1)))
+                    if br_first else nn.Sequential(nn.Flatten(start_dim=-2), b, br_perm,
+                                                   nn.Unflatten(-1, (n2, n1))))
     else:
-        return b if not flatten else nn.Sequential(nn.Flatten(start_dim=-2), b, Unflatten2D(n1))
+        return b if not flatten else nn.Sequential(nn.Flatten(start_dim=-2), b,
+                                                   nn.Unflatten(-1, (n2, n1)))
 
 
 def ifft2d_unitary(n1: int, n2: int, br_first: bool = True,
@@ -645,14 +646,14 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
         b_fft.map1.in_size = n1
         b_fft.map2.in_size = n2
     else:
-        b_fft = b_fft[1]  # Ignore the nn.Flatten and Unflatten2D
+        b_fft = b_fft[1]  # Ignore the nn.Flatten and nn.Unflatten
     b_ifft = ifft2d(n_extended1, n_extended2, normalized=True, br_first=True,
                     with_br_perm=False, flatten=flatten).to(col.device)
     if not flatten:
         b_ifft.map1.out_size = n1
         b_ifft.map2.out_size = n2
     else:
-        b_ifft = b_ifft[1]  # Ignore the nn.Flatten and Unflatten2D
+        b_ifft = b_ifft[1]  # Ignore the nn.Flatten and nn.Unflatten
     if n1 < n_extended1:
         col_0 = F.pad(col, (0, 2 * ((1 << log_n1) - n1)))
         col = torch.cat((col_0, col), dim=-1)
@@ -681,14 +682,14 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
                                 Complex2Real())
         else:
             return nn.Sequential(Real2Complex(), nn.Flatten(start_dim=-2), b_fft,
-                                 DiagonalMultiplySum(col_f), b_ifft, Unflatten2D(n1),
+                                 DiagonalMultiplySum(col_f), b_ifft, nn.Unflatten(-1, (n2, n1)),
                                  Complex2Real())
     else:
         if not flatten:
             return nn.Sequential(b_fft, DiagonalMultiplySum(col_f), b_ifft)
         else:
             return nn.Sequential(nn.Flatten(start_dim=-2), b_fft, DiagonalMultiplySum(col_f),
-                                 b_ifft, Unflatten2D(n1))
+                                 b_ifft, nn.Unflatten(-1, (n2, n1)))
 
 
 def fastfood(diag1: torch.Tensor, diag2: torch.Tensor, diag3: torch.Tensor,

@@ -102,24 +102,6 @@ class TensorProduct(nn.Module):
         return self.map2(out.transpose(-1, -2)).transpose(-1, -2)
 
 
-# TODO: replace with nn.Unflatten when Pytorch 1.7 is released
-class Unflatten2D(nn.Module):
-    """Reshape the last dimension of the input into 2 dimensions. """
-
-    def __init__(self, last_dim: int) -> None:
-        super().__init__()
-        self.last_dim = last_dim
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        """
-        Parameter:
-            input: (*, n2 * n1)
-        Return:
-            output: (*, n2, n1)
-        """
-        return input.reshape(*input.shape[:-1], -1, self.last_dim)
-
-
 def butterfly_kronecker(butterfly1: Butterfly, butterfly2: Butterfly) -> Butterfly:
     """Combine two butterflies of size n1 and n2 into their Kronecker product of size n1 * n2.
     They must both have increasing_stride=True or increasing_stride=False.
@@ -141,8 +123,8 @@ def butterfly_kronecker(butterfly1: Butterfly, butterfly2: Butterfly) -> Butterf
     n = 1 << log_n
     twiddle1 = butterfly1.twiddle if not complex else view_as_complex(butterfly1.twiddle)
     twiddle2 = butterfly2.twiddle if not complex else view_as_complex(butterfly2.twiddle)
-    twiddle1 = twiddle1.repeat(1, 1, 1, 1 << log_n2, 1, 1)
-    twiddle2 = twiddle2.repeat_interleave(1 << log_n1, dim=3)
+    twiddle1 = twiddle1.detach().repeat(1, 1, 1, 1 << log_n2, 1, 1)
+    twiddle2 = twiddle2.detach().repeat_interleave(1 << log_n1, dim=3)
     twiddle = (torch.cat((twiddle1, twiddle2), dim=2) if increasing_stride else
                torch.cat((twiddle2, twiddle1), dim=2))
     b = Butterfly(n, n, bias=False, complex=complex,
