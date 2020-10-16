@@ -21,28 +21,6 @@ real_dtype_to_complex = {torch.float32: torch.complex64, torch.float64: torch.co
 complex_dtype_to_real = {torch.complex64: torch.float32, torch.complex128: torch.float64}
 
 
-# Autograd for complex isn't implemented yet so we have to manually write the backward
-class ComplexMul(torch.autograd.Function):
-
-    @staticmethod
-    def forward(ctx, X, Y):
-        ctx.save_for_backward(X, Y)
-        return X * Y
-
-    @staticmethod
-    def backward(ctx, grad):
-        X, Y = ctx.saved_tensors
-        grad_X, grad_Y = None, None
-        if ctx.needs_input_grad[0]:
-            grad_X = (grad * Y.conj()).sum_to_size(*X.shape)
-        if ctx.needs_input_grad[1]:
-            grad_Y = (grad * X.conj()).sum_to_size(*Y.shape)
-        return grad_X, grad_Y
-
-
-complex_mul = ComplexMul.apply
-
-
 complex_torch_dtype_to_np = {torch.complex64: np.complex64, torch.complex128: np.complex128}
 if use_cupy:
     complex_np_dtype_to_real = {np.complex64: np.float32, np.complex128: np.float64,

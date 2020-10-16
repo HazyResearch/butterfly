@@ -12,7 +12,7 @@ from torch.nn import functional as F
 import pywt  # To test wavelet
 
 import torch_butterfly
-from torch_butterfly.complex_utils import view_as_real, view_as_complex, complex_mul
+from torch_butterfly.complex_utils import view_as_real, view_as_complex
 from torch_butterfly.complex_utils import real2complex, complex2real
 
 
@@ -110,7 +110,7 @@ class ButterflySpecialTest(unittest.TestCase):
             if complex:
                 input_f = view_as_complex(torch.fft(view_as_real(input), signal_ndim=1))
                 col_f = view_as_complex(torch.fft(view_as_real(col), signal_ndim=1))
-                prod_f = complex_mul(input_f, col_f)
+                prod_f = input_f * col_f
                 out_fft = view_as_complex(torch.ifft(view_as_real(prod_f), signal_ndim=1))
                 self.assertTrue(torch.allclose(out_torch, out_fft, self.rtol, self.atol))
             for separate_diagonal in [True, False]:
@@ -198,7 +198,7 @@ class ButterflySpecialTest(unittest.TestCase):
                 input_f = view_as_complex(torch.rfft(input, signal_ndim=1))
                 col = F.pad(weight.flip(dims=(-1,)), (0, n - kernel_size)).roll(-padding, dims=-1)
                 col_f = view_as_complex(torch.rfft(col, signal_ndim=1))
-                prod_f = complex_mul(input_f, col_f)
+                prod_f = input_f * col_f
                 out_fft = torch.irfft(view_as_real(prod_f), signal_ndim=1, signal_sizes=(n,))
                 self.assertTrue(torch.allclose(out_torch, out_fft, self.rtol, self.atol))
                 for separate_diagonal in [True, False]:
@@ -223,7 +223,7 @@ class ButterflySpecialTest(unittest.TestCase):
                 input_f = view_as_complex(torch.rfft(input, signal_ndim=1))
                 col = F.pad(weight.flip(dims=(-1,)), (0, n - kernel_size)).roll(-padding, dims=-1)
                 col_f = view_as_complex(torch.rfft(col, signal_ndim=1))
-                prod_f = complex_mul(input_f.unsqueeze(1), col_f).sum(dim=2)
+                prod_f = (input_f.unsqueeze(1) * col_f).sum(dim=2)
                 out_fft = torch.irfft(view_as_real(prod_f), signal_ndim=1, signal_sizes=(n,))
                 self.assertTrue(torch.allclose(out_torch, out_fft, self.rtol, self.atol))
                 b = torch_butterfly.special.conv1d_circular_multichannel(n, weight)
@@ -328,7 +328,7 @@ class ButterflySpecialTest(unittest.TestCase):
                         col = F.pad(col.flip(dims=(-2,)), (0, 0, 0, n2 - kernel_size2)).roll(
                             -padding2, dims=-2)
                         col_f = view_as_complex(torch.rfft(col, signal_ndim=2))
-                        prod_f = complex_mul(input_f.unsqueeze(1), col_f).sum(dim=2)
+                        prod_f = (input_f.unsqueeze(1) * col_f).sum(dim=2)
                         out_fft = torch.irfft(view_as_real(prod_f), signal_ndim=2,
                                               signal_sizes=(n2, n1))
                         self.assertTrue(torch.allclose(out_torch, out_fft, self.rtol, self.atol))

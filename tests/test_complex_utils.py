@@ -5,7 +5,7 @@ import unittest
 import torch
 
 import torch_butterfly
-from torch_butterfly.complex_utils import complex_mul, complex_matmul, index_last_dim
+from torch_butterfly.complex_utils import complex_matmul, index_last_dim
 
 
 class ButterflyComplexUtilsTest(unittest.TestCase):
@@ -22,7 +22,7 @@ class ButterflyComplexUtilsTest(unittest.TestCase):
             X = torch.randn(*bs, 128, 16, dtype=torch.complex64, device=device, requires_grad=True)
             Y = torch.randn(*bs, 16, 32, dtype=torch.complex64, device=device, requires_grad=True)
             prod = complex_matmul(X, Y)
-            prod_sum = complex_mul(X.unsqueeze(-1), Y.unsqueeze(-3)).sum(dim=-2)
+            prod_sum = (X.unsqueeze(-1) * Y.unsqueeze(-3)).sum(dim=-2)
             self.assertTrue(torch.allclose(prod, prod_sum, self.rtol, self.atol))
             g = torch.randn_like(prod)
             grad_X, grad_Y = torch.autograd.grad(prod, (X, Y), g)
@@ -33,7 +33,7 @@ class ButterflyComplexUtilsTest(unittest.TestCase):
             X = torch.randn(5, 3, 32, 32, dtype=torch.complex64, device=device, requires_grad=True)
             Y = torch.randn(6, 3, 32, 32, dtype=torch.complex64, device=device, requires_grad=True)
             prod = complex_matmul(X.permute(2, 3, 0, 1), Y.permute(2, 3, 1, 0)).permute(2, 3, 0, 1)
-            prod_sum = complex_mul(X.unsqueeze(1), Y).sum(dim=2)
+            prod_sum = (X.unsqueeze(1) * Y).sum(dim=2)
             self.assertTrue(torch.allclose(prod, prod_sum, self.rtol, self.atol))
             g = torch.randn_like(prod)
             grad_X, grad_Y = torch.autograd.grad(prod, (X, Y), g)

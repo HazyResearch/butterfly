@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from torch_butterfly.complex_utils import view_as_real, view_as_complex
-from torch_butterfly.complex_utils import complex_mul, real_dtype_to_complex
+from torch_butterfly.complex_utils import real_dtype_to_complex
 
 
 class Diagonal(nn.Module):
@@ -39,4 +39,4 @@ class Diagonal(nn.Module):
             output: (batch, *, size)
         """
         diagonal = self.diagonal if not self.complex else view_as_complex(self.diagonal)
-        return complex_mul(input, diagonal)
+        return input * diagonal

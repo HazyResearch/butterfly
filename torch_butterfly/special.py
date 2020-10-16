@@ -10,7 +10,7 @@ from torch_butterfly.permutation import FixedPermutation, bitreversal_permutatio
 from torch_butterfly.permutation import wavelet_permutation
 from torch_butterfly.diagonal import Diagonal
 from torch_butterfly.complex_utils import view_as_real, view_as_complex
-from torch_butterfly.complex_utils import complex_mul, real2complex, Real2Complex, Complex2Real
+from torch_butterfly.complex_utils import real2complex, Real2Complex, Complex2Real
 from torch_butterfly.combine import diagonal_butterfly, TensorProduct, butterfly_product
 from torch_butterfly.combine import butterfly_kronecker, permutation_kronecker
 from torch_butterfly.combine import Unflatten2D
@@ -439,7 +439,7 @@ class DiagonalMultiplySum(nn.Module):
             output: (batch, out_channels, size)
         """
         diagonal = self.diagonal if not self.complex else view_as_complex(self.diagonal)
-        return complex_mul(input.unsqueeze(1), diagonal).sum(dim=2)
+        return (input.unsqueeze(1) * diagonal).sum(dim=2)
 
 
 def conv1d_circular_multichannel(n, weight) -> nn.Module:
