@@ -18,8 +18,6 @@ else:
 
 
 real_dtype_to_complex = {torch.float32: torch.complex64, torch.float64: torch.complex128}
-complex_dtype_to_real = {torch.complex64: torch.float32, torch.complex128: torch.float64}
-
 
 complex_torch_dtype_to_np = {torch.complex64: np.complex64, torch.complex128: np.complex128}
 if use_cupy:
@@ -145,10 +143,6 @@ def real2complex(X):
     return X.to(real_dtype_to_complex[X.dtype])
 
 
-def complex2real(X):
-    return X.to(complex_dtype_to_real[X.dtype])
-
-
 # nn.Module form just to support convenient use of nn.Sequential
 class Real2Complex(nn.Module):
     def forward(self, input):
@@ -157,7 +151,7 @@ class Real2Complex(nn.Module):
 
 class Complex2Real(nn.Module):
     def forward(self, input):
-        return complex2real(input)
+        return input.real
 
 
 # Pytorch 1.7.0 doesn't have indexing_backward for complex so we have to write the backward
