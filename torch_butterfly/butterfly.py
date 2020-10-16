@@ -153,7 +153,10 @@ class Butterfly(nn.Module):
     def pre_process(self, input):
         # Reshape to (N, in_size)
         input_size = input.size(-1)
-        output = input.reshape(-1, input_size)
+        # Pytorch 1.7 doesn't support reshape backward for complex
+        # output = input.reshape(-1, input_size)
+        output = (input.reshape(-1, input_size) if not input.is_complex()
+                  else torch.view_as_complex(torch.view_as_real(input).reshape(-1, input_size, 2)))
         batch = output.shape[0]
         output = output.unsqueeze(1).expand(batch, self.nstacks, input_size)
         return output
@@ -370,7 +373,10 @@ class ButterflyBmm(Butterfly):
         # Reshape to (N, matrix_batch, in_size)
         input_size = input.size(-1)
         assert input.size(-2) == self.matrix_batch
-        output = input.reshape(-1, self.matrix_batch, input_size)
+        # Pytorch 1.7 doesn't support reshape backward for complex
+        # output = input.reshape(-1, self.matrix_batch, input_size)
+        output = (input.reshape(-1, self.matrix_batch, input_size) if not input.is_complex()
+                  else torch.view_as_complex(torch.view_as_real(input).reshape(-1, self.matrix_batch, input_size, 2)))
         batch = output.shape[0]
         output = output.unsqueeze(2).expand(batch, self.matrix_batch, self.nstacks, input_size)
         output = output.reshape(batch, self.matrix_batch * self.nstacks, input_size)

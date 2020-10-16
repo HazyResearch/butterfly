@@ -259,7 +259,8 @@ class ButterflyTest(unittest.TestCase):
                                     b.twiddle.copy_(b_bmm.twiddle[i * b_bmm.nstacks:(i + 1) * b_bmm.nstacks])
                                     b.bias.copy_(b_bmm.bias[i])
                                 output_loop.append(b(input[:, i]))
-                            output_loop = torch.stack(output_loop, dim=1)
+                            with torch.no_grad():
+                                output_loop = torch.stack(output_loop, dim=1)
                             self.assertTrue(torch.allclose(output, output_loop),
                                             ((output - output_loop).abs().max().item(), output.shape, device, (in_size, out_size), complex))
 
@@ -277,14 +278,15 @@ class ButterflyTest(unittest.TestCase):
         b2s = [Butterfly(n2, n2, bias=False, complex=True)
                for _ in range(out_channels * in_channels)]
         b_tp = [torch_butterfly.combine.TensorProduct(b1, b2) for b1, b2 in zip(b1s, b2s)]
-        outputs = []
-        for o in range(out_channels):
-            output = []
-            for i in range(in_channels):
-                index = o * in_channels + i
-                output.append(b_tp[index](input[:, i]))
-            outputs.append(torch.stack(output, dim=1))
-        out = torch.stack(outputs, dim=1)
+        with torch.no_grad():
+            outputs = []
+            for o in range(out_channels):
+                output = []
+                for i in range(in_channels):
+                    index = o * in_channels + i
+                    output.append(b_tp[index](input[:, i]))
+                outputs.append(torch.stack(output, dim=1))
+            out = torch.stack(outputs, dim=1)
         assert out.shape == (batch_size, out_channels, in_channels, n2, n1)
         # Use ButterflyBmm instead
         b1_bmm = torch_butterfly.ButterflyBmm(n1, n1, matrix_batch=out_channels * in_channels,
