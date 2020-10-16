@@ -30,6 +30,17 @@ class ButterflyComplexUtilsTest(unittest.TestCase):
             self.assertTrue(torch.allclose(grad_X, grad_X_sum, self.rtol, self.atol))
             self.assertTrue(torch.allclose(grad_Y, grad_Y_sum, self.rtol, self.atol))
 
+            X = torch.randn(5, 3, 32, 32, dtype=torch.complex64, device=device, requires_grad=True)
+            Y = torch.randn(6, 3, 32, 32, dtype=torch.complex64, device=device, requires_grad=True)
+            prod = complex_matmul(X.permute(2, 3, 0, 1), Y.permute(2, 3, 1, 0)).permute(2, 3, 0, 1)
+            prod_sum = complex_mul(X.unsqueeze(1), Y).sum(dim=2)
+            self.assertTrue(torch.allclose(prod, prod_sum, self.rtol, self.atol))
+            g = torch.randn_like(prod)
+            grad_X, grad_Y = torch.autograd.grad(prod, (X, Y), g)
+            grad_X_sum, grad_Y_sum = torch.autograd.grad(prod_sum, (X, Y), g)
+            self.assertTrue(torch.allclose(grad_X, grad_X_sum, self.rtol, self.atol))
+            self.assertTrue(torch.allclose(grad_Y, grad_Y_sum, self.rtol, self.atol))
+
     def test_index_last_dim(self):
         """Check that our index_last_dim backward is also correct for real input
         """

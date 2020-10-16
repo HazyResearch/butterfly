@@ -64,7 +64,7 @@ def torch2cp(tensor):
 
 
 def cp2torch(tensor):
-    return torch.view_as_complex(from_dlpack(tensor[..., None].view(
+    return torch.view_as_complex(from_dlpack(cp.ascontiguousarray(tensor)[..., None].view(
         complex_np_dtype_to_real[tensor.dtype]).toDlpack()))
 
 
