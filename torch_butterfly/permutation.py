@@ -70,7 +70,7 @@ class FixedPermutation(nn.Module):
             output: (batch, *, size)
         """
         # return input[..., self.permutation]
-        # Pytorch 1.6.0 doesn't have indexing_backward for complex on GPU.
+        # Pytorch 1.7.0 doesn't have indexing_backward for complex.
         # So we use our own backward
         return index_last_dim(input, self.permutation)
 

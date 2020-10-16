@@ -11,6 +11,7 @@ from torch_butterfly.permutation import wavelet_permutation
 from torch_butterfly.diagonal import Diagonal
 from torch_butterfly.complex_utils import view_as_real, view_as_complex
 from torch_butterfly.complex_utils import real2complex, Real2Complex, Complex2Real
+from torch_butterfly.complex_utils import index_last_dim
 from torch_butterfly.combine import diagonal_butterfly, TensorProduct, butterfly_product
 from torch_butterfly.combine import butterfly_kronecker, permutation_kronecker
 from torch_butterfly.combine import Unflatten2D
@@ -286,7 +287,8 @@ def circulant(col, transposed=False, separate_diagonal=True) -> nn.Module:
         # https://en.wikipedia.org/wiki/Discrete_Fourier_transform#Time_and_frequency_reversal
         col_f = torch.cat((col_f[:1], col_f[1:].flip([0])))
     br_perm = bitreversal_permutation(n_extended, pytorch_format=True).to(col.device)
-    diag = col_f[..., br_perm]
+    # diag = col_f[..., br_perm]
+    diag = index_last_dim(col_f, br_perm)
     if separate_diagonal:
         if not complex:
             return nn.Sequential(Real2Complex(), b_fft, Diagonal(diagonal_init=diag), b_ifft,
@@ -480,7 +482,8 @@ def conv1d_circular_multichannel(n, weight) -> nn.Module:
     # circulant matrix.
     col_f = view_as_complex(torch.fft(view_as_real(col), signal_ndim=1, normalized=False))
     br_perm = bitreversal_permutation(n_extended, pytorch_format=True).to(col.device)
-    col_f = col_f[..., br_perm]
+    # col_f = col_f[..., br_perm]
+    col_f = index_last_dim(col_f, br_perm)
     # We just want (input_f.unsqueeze(1) * col_f).sum(dim=2).
     # This can be written as matrix multiply but Pytorch 1.6 doesn't yet support complex matrix
     # multiply.
@@ -665,7 +668,8 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
     br_perm2 = bitreversal_permutation(n_extended2, pytorch_format=True).to(col.device)
     # col_f[..., br_perm2, br_perm1] would error "shape mismatch: indexing tensors could not be
     # broadcast together"
-    col_f = col_f[..., br_perm2, :][..., br_perm1]
+    # col_f = col_f[..., br_perm2, :][..., br_perm1]
+    col_f = torch.view_as_complex(torch.view_as_real(col_f)[..., br_perm2, :, :][..., br_perm1, :])
     if flatten:
         col_f = col_f.reshape(*col_f.shape[:-2], col_f.shape[-2] * col_f.shape[-1])
     # We just want (input_f.unsqueeze(1) * col_f).sum(dim=2).

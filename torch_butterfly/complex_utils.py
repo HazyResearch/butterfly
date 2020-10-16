@@ -160,7 +160,7 @@ class Complex2Real(nn.Module):
         return complex2real(input)
 
 
-# Pytorch 1.6.0 doesn't have indexing_backward for complex on GPU so we have to write the backward
+# Pytorch 1.7.0 doesn't have indexing_backward for complex so we have to write the backward
 # pass explicitly
 class IndexLastDim(torch.autograd.Function):
 
