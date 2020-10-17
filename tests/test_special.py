@@ -8,6 +8,7 @@ import scipy.fft
 import torch
 from torch import nn
 from torch.nn import functional as F
+import torch.fft
 
 import pywt  # To test wavelet
 
@@ -26,8 +27,7 @@ class ButterflySpecialTest(unittest.TestCase):
         n = 16
         input = torch.randn(batch_size, n, dtype=torch.complex64)
         for normalized in [False, True]:
-            out_torch = view_as_complex(torch.fft(view_as_real(input),
-                                                  signal_ndim=1, normalized=normalized))
+            out_torch = torch.fft.fft(input, norm=None if not normalized else 'ortho')
             for br_first in [True, False]:
                 b = torch_butterfly.special.fft(n, normalized=normalized, br_first=br_first)
                 out = b(input)
@@ -38,8 +38,7 @@ class ButterflySpecialTest(unittest.TestCase):
         n = 16
         input = torch.randn(batch_size, n, dtype=torch.complex64)
         normalized = True
-        out_torch = view_as_complex(torch.fft(view_as_real(input),
-                                              signal_ndim=1, normalized=normalized))
+        out_torch = torch.fft.fft(input, norm=None if not normalized else 'ortho')
         for br_first in [True, False]:
             b = torch_butterfly.special.fft_unitary(n, br_first=br_first)
             out = b(input)
@@ -50,8 +49,7 @@ class ButterflySpecialTest(unittest.TestCase):
         n = 16
         input = torch.randn(batch_size, n, dtype=torch.complex64)
         for normalized in [False, True]:
-            out_torch = view_as_complex(torch.ifft(view_as_real(input),
-                                                   signal_ndim=1, normalized=normalized))
+            out_torch = torch.fft.ifft(input, norm=None if not normalized else 'ortho')
             for br_first in [True, False]:
                 b = torch_butterfly.special.ifft(n, normalized=normalized, br_first=br_first)
                 out = b(input)
@@ -62,8 +60,7 @@ class ButterflySpecialTest(unittest.TestCase):
         n = 16
         input = torch.randn(batch_size, n, dtype=torch.complex64)
         normalized = True
-        out_torch = view_as_complex(torch.ifft(view_as_real(input),
-                                               signal_ndim=1, normalized=normalized))
+        out_torch = torch.fft.ifft(input, norm=None if not normalized else 'ortho')
         for br_first in [True, False]:
             b = torch_butterfly.special.ifft_unitary(n, br_first=br_first)
             out = b(input)
@@ -107,10 +104,10 @@ class ButterflySpecialTest(unittest.TestCase):
             self.assertTrue(torch.allclose(out_torch, out_np, self.rtol, self.atol))
             # Just to show how to implement circulant multiply with FFT
             if complex:
-                input_f = view_as_complex(torch.fft(view_as_real(input), signal_ndim=1))
-                col_f = view_as_complex(torch.fft(view_as_real(col), signal_ndim=1))
+                input_f = torch.fft.fft(input)
+                col_f = torch.fft.fft(col)
                 prod_f = input_f * col_f
-                out_fft = view_as_complex(torch.ifft(view_as_real(prod_f), signal_ndim=1))
+                out_fft = torch.fft.ifft(prod_f)
                 self.assertTrue(torch.allclose(out_torch, out_fft, self.rtol, self.atol))
             for separate_diagonal in [True, False]:
                 b = torch_butterfly.special.circulant(col, transposed=False,
@@ -194,11 +191,11 @@ class ButterflySpecialTest(unittest.TestCase):
                 input = torch.randn(batch_size, 1, n)
                 out_torch = conv(input)
                 # Just to show how to implement conv1d with FFT
-                input_f = view_as_complex(torch.rfft(input, signal_ndim=1))
+                input_f = torch.fft.rfft(input)
                 col = F.pad(weight.flip(dims=(-1,)), (0, n - kernel_size)).roll(-padding, dims=-1)
-                col_f = view_as_complex(torch.rfft(col, signal_ndim=1))
+                col_f = torch.fft.rfft(col)
                 prod_f = input_f * col_f
-                out_fft = torch.irfft(view_as_real(prod_f), signal_ndim=1, signal_sizes=(n,))
+                out_fft = torch.fft.irfft(prod_f, n=n)
                 self.assertTrue(torch.allclose(out_torch, out_fft, self.rtol, self.atol))
                 for separate_diagonal in [True, False]:
                     b = torch_butterfly.special.conv1d_circular_singlechannel(n, weight,
@@ -219,11 +216,11 @@ class ButterflySpecialTest(unittest.TestCase):
                 input = torch.randn(batch_size, in_channels, n)
                 out_torch = conv(input)
                 # Just to show how to implement conv1d with FFT
-                input_f = view_as_complex(torch.rfft(input, signal_ndim=1))
+                input_f = torch.fft.rfft(input)
                 col = F.pad(weight.flip(dims=(-1,)), (0, n - kernel_size)).roll(-padding, dims=-1)
-                col_f = view_as_complex(torch.rfft(col, signal_ndim=1))
+                col_f = torch.fft.rfft(col)
                 prod_f = (input_f.unsqueeze(1) * col_f).sum(dim=2)
-                out_fft = torch.irfft(view_as_real(prod_f), signal_ndim=1, signal_sizes=(n,))
+                out_fft = torch.fft.irfft(prod_f, n=n)
                 self.assertTrue(torch.allclose(out_torch, out_fft, self.rtol, self.atol))
                 b = torch_butterfly.special.conv1d_circular_multichannel(n, weight)
                 out = b(input)
@@ -235,14 +232,11 @@ class ButterflySpecialTest(unittest.TestCase):
         n2 = 32
         input = torch.randn(batch_size, n2, n1, dtype=torch.complex64)
         for normalized in [False, True]:
-            out_torch = view_as_complex(torch.fft(view_as_real(input),
-                                                  signal_ndim=2, normalized=normalized))
+            out_torch = torch.fft.fftn(input, dim=(-1, -2),
+                                       norm=None if not normalized else 'ortho')
             # Just to show how fft2d is exactly 2 ffts on each dimension
-            input_f = view_as_complex(torch.fft(view_as_real(input), signal_ndim=1,
-                                                normalized=normalized))
-            out_fft = view_as_complex(
-                torch.fft(view_as_real(input_f.transpose(-1, -2)),
-                          signal_ndim=1, normalized=normalized)).transpose(-1, -2)
+            input_f = torch.fft.fft(input, dim=-1, norm=None if not normalized else 'ortho')
+            out_fft = torch.fft.fft(input_f, dim=-2, norm=None if not normalized else 'ortho')
             self.assertTrue(torch.allclose(out_torch, out_fft, self.rtol, self.atol))
             for br_first in [True, False]:
                 for flatten in [False, True]:
@@ -257,8 +251,7 @@ class ButterflySpecialTest(unittest.TestCase):
         n2 = 32
         input = torch.randn(batch_size, n2, n1, dtype=torch.complex64)
         normalized = True
-        out_torch = view_as_complex(torch.fft(view_as_real(input),
-                                              signal_ndim=2, normalized=normalized))
+        out_torch = torch.fft.fftn(input, dim=(-1, -2), norm=None if not normalized else 'ortho')
         for br_first in [True, False]:
             b = torch_butterfly.special.fft2d_unitary(n1, n2, br_first=br_first)
             out = b(input)
@@ -270,14 +263,11 @@ class ButterflySpecialTest(unittest.TestCase):
         n2 = 16
         input = torch.randn(batch_size, n2, n1, dtype=torch.complex64)
         for normalized in [False, True]:
-            out_torch = view_as_complex(torch.ifft(view_as_real(input),
-                                                   signal_ndim=2, normalized=normalized))
+            out_torch = torch.fft.ifftn(input, dim=(-1, -2),
+                                        norm=None if not normalized else 'ortho')
             # Just to show how ifft2d is exactly 2 iffts on each dimension
-            input_f = view_as_complex(torch.ifft(view_as_real(input), signal_ndim=1,
-                                                 normalized=normalized))
-            out_fft = view_as_complex(
-                torch.ifft(view_as_real(input_f.transpose(-1, -2)),
-                           signal_ndim=1, normalized=normalized)).transpose(-1, -2)
+            input_f = torch.fft.ifft(input, dim=-1, norm=None if not normalized else 'ortho')
+            out_fft = torch.fft.ifft(input_f, dim=-2, norm=None if not normalized else 'ortho')
             self.assertTrue(torch.allclose(out_torch, out_fft, self.rtol, self.atol))
             for br_first in [True, False]:
                 for flatten in [False, True]:
@@ -292,8 +282,7 @@ class ButterflySpecialTest(unittest.TestCase):
         n2 = 32
         input = torch.randn(batch_size, n2, n1, dtype=torch.complex64)
         normalized = True
-        out_torch = view_as_complex(torch.ifft(view_as_real(input),
-                                               signal_ndim=2, normalized=normalized))
+        out_torch = torch.fft.ifftn(input, dim=(-1, -2), norm=None if not normalized else 'ortho')
         for br_first in [True, False]:
             b = torch_butterfly.special.ifft2d_unitary(n1, n2, br_first=br_first)
             out = b(input)
@@ -321,15 +310,14 @@ class ButterflySpecialTest(unittest.TestCase):
                         input = torch.randn(batch_size, in_channels, n2, n1)
                         out_torch = conv(input)
                         # Just to show how to implement conv2d with FFT
-                        input_f = view_as_complex(torch.rfft(input, signal_ndim=2))
+                        input_f = torch.fft.rfftn(input, dim=(-1, -2))
                         col = F.pad(weight.flip(dims=(-1,)), (0, n1 - kernel_size1)).roll(
                             -padding1, dims=-1)
                         col = F.pad(col.flip(dims=(-2,)), (0, 0, 0, n2 - kernel_size2)).roll(
                             -padding2, dims=-2)
-                        col_f = view_as_complex(torch.rfft(col, signal_ndim=2))
+                        col_f = torch.fft.rfftn(col, dim=(-1, -2))
                         prod_f = (input_f.unsqueeze(1) * col_f).sum(dim=2)
-                        out_fft = torch.irfft(view_as_real(prod_f), signal_ndim=2,
-                                              signal_sizes=(n2, n1))
+                        out_fft = torch.fft.irfftn(prod_f, dim=(-1, -2), s=(n1, n2))
                         self.assertTrue(torch.allclose(out_torch, out_fft, self.rtol, self.atol))
                         for flatten in flatten_cases:
                             b = torch_butterfly.special.conv2d_circular_multichannel(

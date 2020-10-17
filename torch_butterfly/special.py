@@ -4,6 +4,7 @@ from functools import reduce
 import torch
 from torch import nn
 from torch.nn import functional as F
+import torch.fft
 
 from torch_butterfly.butterfly import Butterfly, ButterflyUnitary
 from torch_butterfly.permutation import FixedPermutation, bitreversal_permutation, invert
@@ -278,7 +279,7 @@ def circulant(col, transposed=False, separate_diagonal=True) -> nn.Module:
         col = real2complex(col)
     # This fft must have normalized=False for the correct scaling. These are the eigenvalues of the
     # circulant matrix.
-    col_f = view_as_complex(torch.fft(view_as_real(col), signal_ndim=1, normalized=False))
+    col_f = torch.fft.fft(col, norm=None)
     if transposed:
         # We could have just transposed the iFFT * Diag * FFT to get FFT * Diag * iFFT.
         # Instead we use the fact that row is the reverse of col, but the 0-th element stays put.
@@ -479,7 +480,7 @@ def conv1d_circular_multichannel(n, weight) -> nn.Module:
         col = real2complex(col)
     # This fft must have normalized=False for the correct scaling. These are the eigenvalues of the
     # circulant matrix.
-    col_f = view_as_complex(torch.fft(view_as_real(col), signal_ndim=1, normalized=False))
+    col_f = torch.fft.fft(col, norm=None)
     br_perm = bitreversal_permutation(n_extended, pytorch_format=True).to(col.device)
     # col_f = col_f[..., br_perm]
     col_f = index_last_dim(col_f, br_perm)
@@ -664,7 +665,7 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
         col = real2complex(col)
     # This fft must have normalized=False for the correct scaling. These are the eigenvalues of the
     # circulant matrix.
-    col_f = view_as_complex(torch.fft(view_as_real(col), signal_ndim=2, normalized=False))
+    col_f = torch.fft.fftn(col, dim=(-1, -2), norm=None)
     br_perm1 = bitreversal_permutation(n_extended1, pytorch_format=True).to(col.device)
     br_perm2 = bitreversal_permutation(n_extended2, pytorch_format=True).to(col.device)
     # col_f[..., br_perm2, br_perm1] would error "shape mismatch: indexing tensors could not be
