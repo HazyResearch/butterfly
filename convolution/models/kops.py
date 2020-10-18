@@ -6,6 +6,7 @@ import torch.nn.functional as F
 
 import torch_butterfly
 from torch_butterfly import Butterfly
+from torch_butterfly.butterfly_base4 import ButterflyBase4
 from torch_butterfly.complex_utils import Real2Complex, Complex2Real
 from torch_butterfly.complex_utils import complex_mul, complex_matmul
 from torch_butterfly.combine import TensorProduct
@@ -13,7 +14,7 @@ from torch_butterfly.combine import TensorProduct
 
 class KOP2d(nn.Module):
 
-    def __init__(self, in_size, in_ch, out_ch, kernel_size, complex=True, nblocks=1):
+    def __init__(self, in_size, in_ch, out_ch, kernel_size, complex=True, nblocks=1, base=2):
         super().__init__()
         self.in_size = in_size
         self.in_ch = in_ch
@@ -21,6 +22,9 @@ class KOP2d(nn.Module):
         self.kernel_size = kernel_size
         self.complex = complex
         self.nblocks = nblocks
+        assert base in [2, 4]
+        self.base = base
+        butterfly_cls = Butterfly if base == 2 else ButterflyBase4
         if isinstance(self.in_size, int):
             self.in_size = (self.in_size, self.in_size)
         if isinstance(self.kernel_size, int):
@@ -31,21 +35,21 @@ class KOP2d(nn.Module):
                                              padding=padding, bias=False).weight)
 
         self.Kd = TensorProduct(
-            Butterfly(self.in_size[0], self.in_size[0], bias=False,
+            butterfly_cls(self.in_size[0], self.in_size[0], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks),
-            Butterfly(self.in_size[1], self.in_size[1], bias=False,
+            butterfly_cls(self.in_size[1], self.in_size[1], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks)
         )
         self.K1 = TensorProduct(
-            Butterfly(self.in_size[0], self.in_size[0], bias=False,
+            butterfly_cls(self.in_size[0], self.in_size[0], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks),
-            Butterfly(self.in_size[1], self.in_size[1], bias=False,
+            butterfly_cls(self.in_size[1], self.in_size[1], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks)
         )
         self.K2 = TensorProduct(
-            Butterfly(self.in_size[0], self.in_size[0], bias=False,
+            butterfly_cls(self.in_size[0], self.in_size[0], bias=False,
                 increasing_stride=True, complex=complex, init='ortho', nblocks=nblocks),
-            Butterfly(self.in_size[1], self.in_size[1], bias=False,
+            butterfly_cls(self.in_size[1], self.in_size[1], bias=False,
                 increasing_stride=True, complex=complex, init='ortho', nblocks=nblocks)
         )
         if complex:
@@ -59,10 +63,6 @@ class KOP2d(nn.Module):
         # (out_ch, in_ch, h, w)
         w_f = self.Kd(self.weight) * math.sqrt(self.in_size[0] * self.in_size[1])
         # prod = complex_mul(x_f.unsqueeze(1), w_f).sum(dim=2)
-        if self.complex:
-            prod = complex_matmul(x_f.permute(2, 3, 0, 1),
-                                  w_f.permute(2, 3, 1, 0)).permute(2, 3, 0, 1)
-        else:
-            prod = (x_f.permute(2, 3, 0, 1) @ w_f.permute(2, 3, 1, 0)).permute(2, 3, 0, 1)
+        prod = complex_matmul(x_f.permute(2, 3, 0, 1), w_f.permute(2, 3, 1, 0)).permute(2, 3, 0, 1)
         out = self.K2(prod)
         return out
