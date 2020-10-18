@@ -3,8 +3,6 @@ dataset:
   _target_: datamodules.CIFAR10
   data_dir: ${env:DATA_DIR,data}/cifar10
   seed: 2357  # Required, otherwise train and val sets may overlap
-  split_size: 1
-  split_seed: 2357
 train:
   task:
     _target_: tasks.MulticlassClassification
