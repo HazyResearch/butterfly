@@ -37,6 +37,7 @@ from . import complex_utils
 from . import diagonal
 from . import permutation
 from . import special
+from . import multiply_base4
 
 __all__ = [
     'Butterfly',
