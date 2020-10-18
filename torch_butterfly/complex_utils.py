@@ -123,7 +123,8 @@ class ComplexMatmul(torch.autograd.Function):
         return grad_X, grad_Y
 
 
-complex_matmul = ComplexMatmul.apply
+def complex_matmul(X, Y):
+    return X @ Y if not X.is_complex() else ComplexMatmul.apply(X, Y)
 
 
 # In Pytorch 1.6, torch.view_as_real and torch.view_as_complex conjugate their gradients.
