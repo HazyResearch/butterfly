@@ -29,17 +29,16 @@ class Butterfly(nn.Module):
                  increasing_stride=True, init='randn', nblocks=1):
         super().__init__()
         self.in_size = in_size
-        log_n = int(math.ceil(math.log2(in_size)))
-        self.log_n = log_n
-        size = self.in_size_extended = 1 << log_n  # Will zero-pad input if in_size is not a power of 2
+        self.log_n = log_n = int(math.ceil(math.log2(in_size)))
+        self.n = n = 1 << log_n
         self.out_size = out_size
-        self.nstacks = int(math.ceil(out_size / self.in_size_extended))
+        self.nstacks = int(math.ceil(out_size / self.n))
         self.complex = complex
         self.increasing_stride = increasing_stride
         assert nblocks >= 1
         self.nblocks = nblocks
         dtype = torch.get_default_dtype() if not self.complex else real_dtype_to_complex[torch.get_default_dtype()]
-        twiddle_shape = (self.nstacks, nblocks, log_n, size // 2, 2, 2)
+        twiddle_shape = (self.nstacks, nblocks, log_n, n // 2, 2, 2)
         assert init in ['randn', 'ortho', 'identity']
         self.init = init
         self.twiddle = nn.Parameter(torch.empty(twiddle_shape, dtype=dtype))
@@ -104,7 +103,7 @@ class Butterfly(nn.Module):
             conjugate: whether the butterfly matrix should be conjugated.
             subtwiddle: allow using only part of the parameters for smaller input.
                 Could be useful for weight sharing.
-                out_size is set to self.nstacks * self.in_size_extended in this case
+                out_size is set to self.nstacks * self.n in this case
         Return:
             output: (batch, *, out_size)
         """
@@ -172,17 +171,16 @@ class ButterflyUnitary(Butterfly):
     def __init__(self, in_size, out_size, bias=True, increasing_stride=True, nblocks=1):
         nn.Module.__init__(self)
         self.in_size = in_size
-        log_n = int(math.ceil(math.log2(in_size)))
-        self.log_n = log_n
-        size = self.in_size_extended = 1 << log_n  # Will zero-pad input if in_size is not a power of 2
+        self.log_n = log_n = int(math.ceil(math.log2(in_size)))
+        self.n = n = 1 << log_n  # Will zero-pad input if in_size is not a power of 2
         self.out_size = out_size
-        self.nstacks = int(math.ceil(out_size / self.in_size_extended))
+        self.nstacks = int(math.ceil(out_size / self.n))
         self.complex = True
         self.increasing_stride = increasing_stride
         assert nblocks >= 1
         self.nblocks = nblocks
         complex_dtype = real_dtype_to_complex[torch.get_default_dtype()]
-        twiddle_shape = (self.nstacks, nblocks, log_n, size // 2, 4)
+        twiddle_shape = (self.nstacks, nblocks, log_n, n // 2, 4)
         self.init = 'ortho'
         self.twiddle = nn.Parameter(torch.empty(twiddle_shape))
         if bias:
@@ -218,7 +216,7 @@ class ButterflyUnitary(Butterfly):
             conjugate: whether the butterfly matrix should be conjugated.
             subtwiddle: allow using only part of the parameters for smaller input.
                 Could be useful for weight sharing.
-                out_size is set to self.nstacks * self.in_size_extended in this case
+                out_size is set to self.nstacks * self.n in this case
         Return:
             output: (batch, *, out_size)
         """
@@ -279,18 +277,17 @@ class ButterflyBmm(Butterfly):
                  increasing_stride=True, init='randn', nblocks=1):
         nn.Module.__init__(self)
         self.in_size = in_size
-        log_n = int(math.ceil(math.log2(in_size)))
-        self.log_n = log_n
-        size = self.in_size_extended = 1 << log_n  # Will zero-pad input if in_size is not a power of 2
+        self.log_n = log_n = int(math.ceil(math.log2(in_size)))
+        self.n = n = 1 << log_n
         self.out_size = out_size
         self.matrix_batch = matrix_batch
-        self.nstacks = int(math.ceil(out_size / self.in_size_extended))
+        self.nstacks = int(math.ceil(out_size / self.n))
         self.complex = complex
         self.increasing_stride = increasing_stride
         assert nblocks >= 1
         self.nblocks = nblocks
         dtype = torch.get_default_dtype() if not self.complex else real_dtype_to_complex[torch.get_default_dtype()]
-        twiddle_shape = (self.matrix_batch * self.nstacks, nblocks, log_n, size // 2, 2, 2)
+        twiddle_shape = (self.matrix_batch * self.nstacks, nblocks, log_n, n // 2, 2, 2)
         assert init in ['randn', 'ortho', 'identity']
         self.init = init
         self.twiddle = nn.Parameter(torch.empty(twiddle_shape, dtype=dtype))

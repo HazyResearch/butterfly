@@ -55,13 +55,12 @@ class ButterflyBase4(Butterfly):
         output = self.pre_process(input)
         # If batch size is large (say more than 2n), it's probably faster to multiply out the
         # butterfly matrix, then use dense matrix multiplication.
-        if input.shape[0] < 2 * self.in_size_extended:
+        if input.shape[0] < 2 * self.n:
             output = butterfly_multiply_base4_torch(twiddle4, twiddle2, output,
                                                     self.increasing_stride)
         else:
-            eye = torch.eye(self.in_size_extended, dtype=input.dtype, device=input.device)
-            eye = eye.unsqueeze(1).expand(self.in_size_extended, self.nstacks,
-                                          self.in_size_extended)
+            eye = torch.eye(self.n, dtype=input.dtype, device=input.device)
+            eye = eye.unsqueeze(1).expand(self.n, self.nstacks, self.n)
             matrix_t = butterfly_multiply_base4_torch(twiddle4, twiddle2, eye,
                                                       self.increasing_stride)
             output = complex_matmul(output.transpose(0, 1),
