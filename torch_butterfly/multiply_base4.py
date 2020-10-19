@@ -6,7 +6,8 @@ from torch.nn import functional as F
 from torch_butterfly.complex_utils import complex_mul
 
 
-def butterfly_multiply_base4_torch(twiddle4, twiddle2, input, increasing_stride=True):
+def butterfly_multiply_base4_torch(twiddle4, twiddle2, input, increasing_stride=True,
+                                   output_size=None):
     batch_size, nstacks, input_size = input.shape
     nblocks = twiddle4.shape[1]
     log_n = twiddle4.shape[2] * 2 + twiddle2.shape[2]
@@ -17,6 +18,8 @@ def butterfly_multiply_base4_torch(twiddle4, twiddle2, input, increasing_stride=
         assert twiddle2.shape == (nstacks, nblocks, 1, n // 2, 2, 2)
     # Pad or trim input to size n
     input = F.pad(input, (0, n - input_size)) if input_size < n else input[:, :, :n]
+    output_size = n if output_size is None else output_size
+    assert output_size <= n
     output = input.contiguous()
     cur_increasing_stride = increasing_stride
     for block in range(nblocks):
@@ -37,7 +40,7 @@ def butterfly_multiply_base4_torch(twiddle4, twiddle2, input, increasing_stride=
             output_reshape = output.view(batch_size, nstacks, n // (2 * stride), 1, 2, stride)
             output = complex_mul(t, output_reshape).sum(dim=4)
         cur_increasing_stride = not cur_increasing_stride
-    return output.view(batch_size, nstacks, n)
+    return output.view(batch_size, nstacks, n)[:, :, :output_size]
 
 
 def twiddle_base2_to_base4(twiddle, increasing_stride=True):

@@ -12,18 +12,20 @@ static inline c10::complex<T> conj_wrapper(c10::complex<T> v) {
   return std::conj(v);
 }
 
+using namespace torch::indexing;
+
 torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor twiddle,
                                         const torch::Tensor input,
-                                        bool increasing_stride) {
+                                        bool increasing_stride,
+                                        int output_size) {
   const int batch_size = input.size(0);
   const int nstacks = input.size(1);
   const int nblocks = twiddle.size(1);
   const int log_n = twiddle.size(2);
   const int n = 1 << log_n;
   const int input_size = input.size(2);
-  auto output =
-    torch::empty({batch_size, nstacks, n},
-                  torch::dtype(input.dtype()).device(input.device()));
+  auto output = torch::empty({batch_size, nstacks, n},
+                             torch::dtype(input.dtype()).device(input.device()));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "butterfly_multiply_fw_cpu", [&] {
     const auto twiddle_a = twiddle.accessor<scalar_t, 6>();
     const auto input_a = input.accessor<scalar_t, 3>();
@@ -57,10 +59,11 @@ torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor twiddle,
       }
     }
   });
+  if (output_size < n) {
+    output = output.index({Slice(), Slice(), Slice(None, output_size)});
+  }
   return output;
 }
-
-using namespace torch::indexing;
 
 std::tuple<torch::Tensor, torch::Tensor>
   butterfly_multiply_bw_cpu(const torch::Tensor twiddle,
@@ -73,12 +76,11 @@ std::tuple<torch::Tensor, torch::Tensor>
   const int log_n = twiddle.size(2);
   const int n = 1 << log_n;
   const int input_size = input.size(2);
-  auto output =
-    torch::empty({nblocks, log_n, batch_size, nstacks, n},
-                  torch::dtype(input.dtype()).device(input.device()));
-  auto d_input =
-    torch::empty({batch_size, nstacks, std::max(input_size, n)},
-                   torch::dtype(input.dtype()).device(input.device()));
+  const int output_size = grad.size(2);
+  auto output = torch::empty({nblocks, log_n, batch_size, nstacks, n},
+                             torch::dtype(input.dtype()).device(input.device()));
+  auto d_input = torch::empty({batch_size, nstacks, std::max(input_size, n)},
+                              torch::dtype(input.dtype()).device(input.device()));
   auto d_twiddle = torch::zeros_like(twiddle);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "butterfly_multiply_bw_cpu", [&] {
     const auto twiddle_a = twiddle.accessor<scalar_t, 6>();
@@ -123,7 +125,6 @@ std::tuple<torch::Tensor, torch::Tensor>
     for (int64_t block = nblocks - 1; block >= 0; --block) {
       bool cur_increasing_stride = increasing_stride != bool(block % 2);
       for (int64_t idx = log_n - 1; idx >= 0; --idx) {
-        auto prev_grad_a = (block == nblocks - 1 && idx == log_n - 1) ? grad_a : d_input_a;
         if (block == 0 && idx == 0) {
           prev_input_a = input_a;
         } else {
@@ -139,7 +140,14 @@ std::tuple<torch::Tensor, torch::Tensor>
               const scalar_t twiddle_val[2][2] =
                 {{twiddle_a[s][block][idx][i][0][0], twiddle_a[s][block][idx][i][0][1]},
                  {twiddle_a[s][block][idx][i][1][0], twiddle_a[s][block][idx][i][1][1]}};
-              const scalar_t grad_val[2] = {prev_grad_a[b][s][pos], prev_grad_a[b][s][pos + stride]};
+              scalar_t grad_val[2];
+              if (block == nblocks - 1 && idx == log_n - 1) {
+                grad_val[0] = pos < output_size ? grad_a[b][s][pos] : 0;
+                grad_val[1] = pos + stride < output_size ? grad_a[b][s][pos + stride] : 0;
+              } else {
+                grad_val[0] = d_input_a[b][s][pos];
+                grad_val[1] = d_input_a[b][s][pos + stride];
+              }
               d_input_a[b][s][pos] = conj_wrapper(twiddle_val[0][0]) * grad_val[0] + conj_wrapper(twiddle_val[1][0]) * grad_val[1];
               d_input_a[b][s][pos + stride] = conj_wrapper(twiddle_val[0][1]) * grad_val[0] + conj_wrapper(twiddle_val[1][1]) * grad_val[1];
               scalar_t input_val[2];

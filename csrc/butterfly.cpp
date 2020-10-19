@@ -19,15 +19,17 @@ PyMODINIT_FUNC PyInit__butterfly(void) { return NULL; }
 
 torch::Tensor butterfly_multiply_fw(const torch::Tensor twiddle,
                                     const torch::Tensor input,
-                                    bool increasing_stride) {
+                                    bool increasing_stride,
+                                    c10::optional<int64_t> output_size) {
   /* Parameters:
          twiddle: (nstacks, nblocks, log n, n/2, 2, 2)
          input: (batch_size, nstacks, input_size). If input_size != n, input will be
              padded with zero or trimmed to size n.
          increasing_stride: whether the first block multiplies with increasing
              stride (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
+         output_size: if None, it is set to n.
      Returns:
-         output: (batch_size, nstacks, n)
+         output: (batch_size, nstacks, output_size)
   */
   CHECK_DEVICE(twiddle); CHECK_DEVICE(input); CHECK_SAME_DEVICE(twiddle, input);
   const auto nstacks = input.size(1);
@@ -37,14 +39,16 @@ torch::Tensor butterfly_multiply_fw(const torch::Tensor twiddle,
   TORCH_CHECK(1 << log_n == n, "butterfly_multiply_fw: n must be a power of 2");
   CHECK_DIM(twiddle, 6); CHECK_DIM(input, 3);
   CHECK_SHAPE(twiddle, nstacks, nblocks, log_n, n / 2, 2, 2);
+  const auto output_size_val = output_size.has_value() ? output_size.value() : n;
+  TORCH_CHECK(output_size_val <= n, "butterfly_multiply_fw: output_size must be <= n");
   if (input.device().is_cuda()) {
 #ifdef WITH_CUDA
-    return butterfly_multiply_fw_cuda(twiddle, input, increasing_stride);
+    return butterfly_multiply_fw_cuda(twiddle, input, increasing_stride, output_size_val);
 #else
     AT_ERROR("Not compiled with CUDA support");
 #endif
   } else {
-    return butterfly_multiply_fw_cpu(twiddle, input, increasing_stride);
+    return butterfly_multiply_fw_cpu(twiddle, input, increasing_stride, output_size_val);
   }
 }
 
@@ -58,12 +62,12 @@ std::tuple<torch::Tensor, torch::Tensor>
          twiddle: (nstacks, nblocks, log n, n/2, 2, 2)
          input: (batch_size, nstacks, input_size). If input_size != n, input will be
              padded with zero or trimmed to size n.
-         grad: (batch_size, nstacks, n)
+         grad: (batch_size, nstacks, output_size)
          increasing_stride: whether the first block multiplies with increasing
              stride (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
      Returns:
          d_twiddle: (nstacks, nblocks, log n, n/2, 2, 2)
-         d_input: (batch_size, nstacks, n)
+         d_input: (batch_size, nstacks, input_size)
   */
   CHECK_DEVICE(twiddle); CHECK_DEVICE(input); CHECK_DEVICE(grad);
   CHECK_SAME_DEVICE(twiddle, input); CHECK_SAME_DEVICE(input, grad);
@@ -72,10 +76,11 @@ std::tuple<torch::Tensor, torch::Tensor>
   const auto nblocks = twiddle.size(1);
   const auto log_n = twiddle.size(2);
   const auto n = 1 << log_n;
+  const auto output_size = grad.size(2);
   TORCH_CHECK(1 << log_n == n, "butterfly_multiply_bw: n must be a power of 2");
   CHECK_DIM(twiddle, 6); CHECK_DIM(input, 3); CHECK_DIM(grad, 3);
   CHECK_SHAPE(twiddle, nstacks, nblocks, log_n, n / 2, 2, 2);
-  CHECK_SHAPE(grad, batch_size, nstacks, n);
+  CHECK_SHAPE(grad, batch_size, nstacks, output_size);
   if (input.device().is_cuda()) {
 #ifdef WITH_CUDA
     return butterfly_multiply_bw_cuda(twiddle, input, grad, increasing_stride);
@@ -94,10 +99,11 @@ using torch::autograd::variable_list;
 class ButterflyMultiply : public torch::autograd::Function<ButterflyMultiply> {
 public:
   static torch::Tensor forward(AutogradContext *ctx, torch::Tensor twiddle,
-                               torch::Tensor input, bool increasing_stride) {
+                               torch::Tensor input, bool increasing_stride,
+                               c10::optional<int64_t> output_size) {
     ctx->saved_data["increasing_stride"] = increasing_stride;
     ctx->save_for_backward({twiddle, input});
-    return butterfly_multiply_fw(twiddle, input, increasing_stride);
+    return butterfly_multiply_fw(twiddle, input, increasing_stride, output_size);
   }
 
   static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
@@ -107,14 +113,15 @@ public:
     auto increasing_stride = ctx->saved_data["increasing_stride"].toBool();
     auto result = butterfly_multiply_bw(twiddle, input, grad, increasing_stride);
     auto d_twiddle = std::get<0>(result), d_input = std::get<1>(result);
-    return {d_twiddle, d_input, torch::Tensor()};
+    return {d_twiddle, d_input, torch::Tensor(), torch::Tensor()};
   }
 };
 
 torch::Tensor butterfly_multiply(torch::Tensor twiddle,
                                  torch::Tensor input,
-                                 bool increasing_stride) {
-  return ButterflyMultiply::apply(twiddle, input, increasing_stride);
+                                 bool increasing_stride,
+                                 c10::optional<int64_t> output_size) {
+  return ButterflyMultiply::apply(twiddle, input, increasing_stride, output_size);
 }
 
 TORCH_LIBRARY(torch_butterfly, m) {

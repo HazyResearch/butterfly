@@ -342,16 +342,19 @@ std::vector<int> butterfly_max5_plan(const int log_n, const int nblocks, const i
   return bit_milestones;
 }
 
+using namespace torch::indexing;
 
 torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
                                          const torch::Tensor input,
-                                         bool increasing_stride) {
+                                         bool increasing_stride,
+                                         int output_size) {
   int batch_size = input.size(0);
   const int nstacks = input.size(1);
   const int nblocks = twiddle.size(1);
   const int log_n = twiddle.size(2);
   const int n = 1 << log_n;
-  auto output = torch::empty({batch_size, nstacks, n}, torch::dtype(input.dtype()).device(input.device()));
+  auto output = torch::empty({batch_size, nstacks, n},
+                             torch::dtype(input.dtype()).device(input.device()));
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "butterfly_multiply_fw_cuda", [&] {
     constexpr int MAXSTEP_FW = maxstep<scalar_t>::MAXSTEP_FW;
@@ -359,11 +362,13 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
     const int niters = bit_milestones.size() - 1;
     const auto input_a = input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     auto output_a = output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
-    OutputWriter<scalar_t> output_writer(output_a);
     int twiddle_block_idx = 0;
     int twiddle_idx_start = 0;
     for (int iter = 0; iter < niters; iter++) {
       const InputReader<scalar_t> input_reader(iter == 0 ? input_a : output_a);
+      // Reduce size of output because we only want the first @output_size elements
+      OutputWriter<scalar_t> output_writer = iter == niters - 1 ?
+        OutputWriter<scalar_t>(output.index({Slice(), Slice(), Slice(None, output_size)})) : OutputWriter<scalar_t>(output_a);
       const bool increasing_stride_this_iter = bit_milestones[iter] <= bit_milestones[iter + 1];
       const int start_bit = increasing_stride_this_iter ? bit_milestones[iter] : bit_milestones[iter + 1];
       const int nsteps = abs(bit_milestones[iter + 1] - bit_milestones[iter]);
@@ -377,7 +382,7 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
       // https://pytorch.org/cppdocs/notes/tensor_indexing.html
       // twiddle[:, twiddle_block_idx, twiddle_idx_start:twiddle_idx_start + nsteps]
       const TwiddleReader<scalar_t> twiddle_reader(twiddle.index(
-          {torch::indexing::Slice(), twiddle_block_idx, torch::indexing::Slice(twiddle_idx_start, twiddle_idx_start + nsteps)}));
+          {Slice(), twiddle_block_idx, Slice(twiddle_idx_start, twiddle_idx_start + nsteps)}));
       // Template-metaprogramming hackery: we want nsteps as a constexpr so we can dispatch on it.
       // Which means we want templated lambdas. But templated lambda isn't available until C++20.
       // Generic lambdas (starting C++14) allows a kind of templated lambda, but only template on type (and not int).
@@ -402,6 +407,9 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
   TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_fw_cuda failed with error code ",
      cudaGetLastError());
+  if (output_size < n) {
+    output = output.index({Slice(), Slice(), Slice(None, output_size)});
+  }
   return output;
 }
 
@@ -521,8 +529,6 @@ __global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel
   d_twiddle_writer.save_max5<nsteps, increasing_stride>(s_d_twiddle, input_idx_start_bit, low_bits, high_bits);
 }
 
-using namespace torch::indexing;
-
 std::tuple<torch::Tensor, torch::Tensor>
   butterfly_multiply_bw_cuda(const torch::Tensor twiddle,
                              const torch::Tensor input,
@@ -534,8 +540,8 @@ std::tuple<torch::Tensor, torch::Tensor>
   const int log_n = twiddle.size(2);
   const int n = 1 << log_n;
   const int input_size = input.size(2);
-  auto d_input =
-      torch::empty({batch_size, nstacks, std::max(input_size, n)},
+  const int output_size = grad.size(2);
+  auto d_input = torch::empty({batch_size, nstacks, std::max(input_size, n)},
                    torch::dtype(input.dtype()).device(input.device()));
   auto d_twiddle = torch::zeros_like(twiddle);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -545,7 +551,6 @@ std::tuple<torch::Tensor, torch::Tensor>
     const int niters = bit_milestones.size() - 1;
     auto intermediate_storage = torch::empty({niters - 1, batch_size, nstacks, n},
                                               torch::dtype(input.dtype()).device(input.device()));
-    const auto grad_a = grad.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     // Forward pass
     int twiddle_block_idx = 0;
     int twiddle_idx_start = 0;
@@ -567,7 +572,7 @@ std::tuple<torch::Tensor, torch::Tensor>
       dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_FORWARD_MAX5[nsteps - 1] * block.y) * n_div_span, 1, nstacks);
       // twiddle[:, twiddle_block_idx, twiddle_idx_start:twiddle_idx_start + nsteps]
       const TwiddleReader<scalar_t> twiddle_reader(twiddle.index(
-          {torch::indexing::Slice(), twiddle_block_idx, torch::indexing::Slice(twiddle_idx_start, twiddle_idx_start + nsteps)}));
+          {Slice(), twiddle_block_idx, Slice(twiddle_idx_start, twiddle_idx_start + nsteps)}));
       auto launch = [increasing_stride_this_iter, &grid, &block, &stream, &twiddle_reader, &input_reader, &output_writer,
                      log_n, start_bit] (auto dummy) {
         constexpr int nsteps_val = decltype(dummy)::value;
@@ -584,6 +589,7 @@ std::tuple<torch::Tensor, torch::Tensor>
       }
     }
     // Backward pass
+    const auto grad_a = grad.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     auto d_input_a = d_input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
     twiddle_block_idx = nblocks - 1;
     twiddle_idx_start = log_n;

@@ -109,19 +109,21 @@ class Butterfly(nn.Module):
         """
         twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
         output = self.pre_process(input)
+        output_size = self.out_size if self.nstacks == 1 else None
         if subtwiddle:
             log_n = int(math.ceil(math.log2(input.size(-1))))
             n = 1 << log_n
             twiddle = (twiddle[:, :, :log_n, :n // 2] if self.increasing_stride
                        else twiddle[:, :, -log_n:, :n // 2])
+            output_size = None
         if conjugate and self.complex:
             twiddle = twiddle.conj()
         if not transpose:
-            output = butterfly_multiply(twiddle, output, self.increasing_stride)
+            output = butterfly_multiply(twiddle, output, self.increasing_stride, output_size)
         else:
             twiddle = twiddle.transpose(-1, -2).flip([1, 2])
             last_increasing_stride = self.increasing_stride != ((self.nblocks - 1) % 2 == 1)
-            output = butterfly_multiply(twiddle, output, not last_increasing_stride)
+            output = butterfly_multiply(twiddle, output, not last_increasing_stride, output_size)
         if not subtwiddle:
             return self.post_process(input, output)
         else:
@@ -140,8 +142,7 @@ class Butterfly(nn.Module):
             out_size = self.out_size
         batch = output.shape[0]
         output = output.view(batch, self.nstacks * output.size(-1))
-        out_size_extended = 1 << (int(math.ceil(math.log2(out_size))))
-        if out_size != out_size_extended:  # Take top rows
+        if out_size != output.shape[-1]:  # Take top rows
             output = output[:, :out_size]
         if self.bias is not None:
             bias = self.bias if not self.complex else view_as_complex(self.bias)
@@ -231,19 +232,21 @@ class ButterflyUnitary(Butterfly):
                                torch.stack([C, D], dim=-2)], dim=-3)
         twiddle = view_as_complex(twiddle)
         output = self.pre_process(input)
+        output_size = self.out_size if self.nstacks == 1 else None
         if subtwiddle:
             log_n = int(math.ceil(math.log2(input.size(-1))))
             n = 1 << log_n
             twiddle = (twiddle[:, :, :log_n, :n // 2] if self.increasing_stride
                        else twiddle[:, :, -log_n:, :n // 2])
+            output_size = None
         if conjugate and self.complex:
             twiddle = twiddle.conj()
         if not transpose:
-            output = butterfly_multiply(twiddle, output, self.increasing_stride)
+            output = butterfly_multiply(twiddle, output, self.increasing_stride, output_size)
         else:
             twiddle = twiddle.transpose(-1, -2).flip([1, 2])
             last_increasing_stride = self.increasing_stride != ((self.nblocks - 1) % 2 == 1)
-            output = butterfly_multiply(twiddle, output, not last_increasing_stride)
+            output = butterfly_multiply(twiddle, output, not last_increasing_stride, output_size)
         if not subtwiddle:
             return self.post_process(input, output)
         else:
@@ -331,8 +334,7 @@ class ButterflyBmm(Butterfly):
             out_size = self.out_size
         batch = output.shape[0]
         output = output.view(batch, self.matrix_batch, self.nstacks * output.size(-1))
-        out_size_extended = 1 << (int(math.ceil(math.log2(out_size))))
-        if out_size != out_size_extended:  # Take top rows
+        if out_size != output.shape[-1]:  # Take top rows
             output = output[:, :, :out_size]
         if self.bias is not None:
             bias = self.bias if not self.complex else view_as_complex(self.bias)
