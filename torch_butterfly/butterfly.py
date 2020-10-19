@@ -109,12 +109,10 @@ class Butterfly(nn.Module):
             output: (batch, *, out_size)
         """
         twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
-        if not subtwiddle:
-            output = self.pre_process(input)
-        else:
+        output = self.pre_process(input)
+        if subtwiddle:
             log_n = int(math.ceil(math.log2(input.size(-1))))
             n = 1 << log_n
-            output = self.pre_process(input, padded_size=n)
             twiddle = (twiddle[:, :, :log_n, :n // 2] if self.increasing_stride
                        else twiddle[:, :, -log_n:, :n // 2])
         if conjugate and self.complex:
@@ -130,16 +128,12 @@ class Butterfly(nn.Module):
         else:
             return self.post_process(input, output, out_size=output.size(-1))
 
-    def pre_process(self, input, padded_size=None):
-        if padded_size is None:
-            padded_size = self.in_size_extended
+    def pre_process(self, input):
         # Reshape to (N, in_size)
         input_size = input.size(-1)
         output = input.reshape(-1, input_size)
         batch = output.shape[0]
-        if input_size != padded_size:  # Zero-pad
-            output = F.pad(output, (0, padded_size - input_size))
-        output = output.unsqueeze(1).expand(batch, self.nstacks, padded_size)
+        output = output.unsqueeze(1).expand(batch, self.nstacks, input_size)
         return output
 
     def post_process(self, input, output, out_size=None):
@@ -238,12 +232,10 @@ class ButterflyUnitary(Butterfly):
         twiddle = torch.stack([torch.stack([A, B], dim=-2),
                                torch.stack([C, D], dim=-2)], dim=-3)
         twiddle = view_as_complex(twiddle)
-        if not subtwiddle:
-            output = self.pre_process(input)
-        else:
+        output = self.pre_process(input)
+        if subtwiddle:
             log_n = int(math.ceil(math.log2(input.size(-1))))
             n = 1 << log_n
-            output = self.pre_process(input, padded_size=n)
             twiddle = (twiddle[:, :, :log_n, :n // 2] if self.increasing_stride
                        else twiddle[:, :, -log_n:, :n // 2])
         if conjugate and self.complex:
@@ -327,18 +319,14 @@ class ButterflyBmm(Butterfly):
         """
         return super().forward(input, transpose, conjugate, subtwiddle=False)
 
-    def pre_process(self, input, padded_size=None):
-        if padded_size is None:
-            padded_size = self.in_size_extended
+    def pre_process(self, input):
         # Reshape to (N, matrix_batch, in_size)
         input_size = input.size(-1)
         assert input.size(-2) == self.matrix_batch
         output = input.reshape(-1, self.matrix_batch, input_size)
         batch = output.shape[0]
-        if input_size != padded_size:  # Zero-pad
-            output = F.pad(output, (0, padded_size - input_size))
-        output = output.unsqueeze(2).expand(batch, self.matrix_batch, self.nstacks, padded_size)
-        output = output.reshape(batch, self.matrix_batch * self.nstacks, padded_size)
+        output = output.unsqueeze(2).expand(batch, self.matrix_batch, self.nstacks, input_size)
+        output = output.reshape(batch, self.matrix_batch * self.nstacks, input_size)
         return output
 
     def post_process(self, input, output, out_size=None):

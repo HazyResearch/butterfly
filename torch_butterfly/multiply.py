@@ -2,6 +2,7 @@ import math
 from typing import Tuple
 
 import torch
+from torch.nn import functional as F
 
 from torch_butterfly.complex_utils import complex_mul
 
@@ -25,11 +26,13 @@ def butterfly_multiply(twiddle: torch.Tensor, input: torch.Tensor,
 
 
 def butterfly_multiply_torch(twiddle, input, increasing_stride=True):
-    batch_size, nstacks, n = input.shape
+    batch_size, nstacks, input_size = input.shape
     nblocks = twiddle.shape[1]
-    log_n = int(math.log2(n))
-    assert n == 1 << log_n, "size must be a power of 2"
+    log_n = twiddle.shape[2]
+    n = 1 << log_n
     assert twiddle.shape == (nstacks, nblocks, log_n, n // 2, 2, 2)
+    # Pad or trim input to size n
+    input = F.pad(input, (0, n - input_size)) if input_size < n else input[:, :, :n]
     output = input.contiguous()
     cur_increasing_stride = increasing_stride
     for block in range(nblocks):

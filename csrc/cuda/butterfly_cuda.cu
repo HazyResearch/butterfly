@@ -125,14 +125,14 @@ __device__ __forceinline__ void initalize_shared_mem(scalar_t mem[], int size) {
 
 template<typename scalar_t> struct InputReader {
   const CudaAcsr<scalar_t, 3> input_a;
-  const int batch_size;
+  const int batch_size, input_size;
 
   InputReader(const torch::Tensor input):
     input_a(input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>()),
-      batch_size(input.size(0)) {}
+      batch_size(input.size(0)), input_size(input.size(2)) {}
 
   InputReader(const CudaAcsr<scalar_t, 3> &input_a):
-    input_a(input_a), batch_size(input_a.size(0)) {}
+    input_a(input_a), batch_size(input_a.size(0)), input_size(input_a.size(2)) {}
 
   template<int items_per_thread, int mult_per_warp=1>
   __device__ __forceinline__ void load_max5(scalar_t input_val[mult_per_warp][items_per_thread],
@@ -143,7 +143,8 @@ template<typename scalar_t> struct InputReader {
       int i = mult * input_idx_stride + input_idx_start;
       #pragma unroll
       for (int item = 0; item < items_per_thread; item++){
-        input_val[mult][item] = batch_idx_start + item < batch_size ? input_a[batch_idx_start + item][s][i] : 0;
+        input_val[mult][item] = (batch_idx_start + item < batch_size && i < input_size) ?
+          input_a[batch_idx_start + item][s][i] : 0;
       }
     }
   }
@@ -152,14 +153,14 @@ template<typename scalar_t> struct InputReader {
 
 template<typename scalar_t> struct OutputWriter {
   CudaAcsr<scalar_t, 3> output_a;
-  const int batch_size;
+  const int batch_size, output_size;
 
   OutputWriter(torch::Tensor output):
     output_a(output.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>()),
-      batch_size(output.size(0)) {}
+      batch_size(output.size(0)), output_size(output.size(2)) {}
 
   OutputWriter(CudaAcsr<scalar_t, 3> &output_a):
-    output_a(output_a), batch_size(output_a.size(0)) {}
+    output_a(output_a), batch_size(output_a.size(0)), output_size(output_a.size(2)) {}
 
   template<int items_per_thread, int mult_per_warp=1>
   __device__ __forceinline__ void save_max5(scalar_t output_val[mult_per_warp][items_per_thread],
@@ -168,9 +169,11 @@ template<typename scalar_t> struct OutputWriter {
     #pragma unroll
     for (int mult = 0; mult < mult_per_warp; mult++) {
       int i = mult * input_idx_stride + input_idx_start;
-      #pragma unroll
-      for (int item = 0; (item < items_per_thread) && (batch_idx_start + item < batch_size); item++){
-        output_a[batch_idx_start + item][s][i] = output_val[mult][item];
+      if (i < output_size) {
+        #pragma unroll
+        for (int item = 0; (item < items_per_thread) && (batch_idx_start + item < batch_size); item++){
+          output_a[batch_idx_start + item][s][i] = output_val[mult][item];
+        }
       }
     }
   }
@@ -345,9 +348,9 @@ torch::Tensor butterfly_multiply_fw_cuda(const torch::Tensor twiddle,
                                          bool increasing_stride) {
   int batch_size = input.size(0);
   const int nstacks = input.size(1);
-  const int n = input.size(2);
-  const int log_n = int(log2((double) n));
   const int nblocks = twiddle.size(1);
+  const int log_n = twiddle.size(2);
+  const int n = 1 << log_n;
   auto output = torch::empty({batch_size, nstacks, n}, torch::dtype(input.dtype()).device(input.device()));
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "butterfly_multiply_fw_cuda", [&] {
@@ -518,6 +521,8 @@ __global__ void butterfly_multiply_untied_forward_backward_max5_fast_cuda_kernel
   d_twiddle_writer.save_max5<nsteps, increasing_stride>(s_d_twiddle, input_idx_start_bit, low_bits, high_bits);
 }
 
+using namespace torch::indexing;
+
 std::tuple<torch::Tensor, torch::Tensor>
   butterfly_multiply_bw_cuda(const torch::Tensor twiddle,
                              const torch::Tensor input,
@@ -525,11 +530,12 @@ std::tuple<torch::Tensor, torch::Tensor>
                              bool increasing_stride) {
   int batch_size = input.size(0);
   const int nstacks = input.size(1);
-  const int n = input.size(2);
-  const int log_n = int(log2((double) n));
   const int nblocks = twiddle.size(1);
+  const int log_n = twiddle.size(2);
+  const int n = 1 << log_n;
+  const int input_size = input.size(2);
   auto d_input =
-      torch::empty({batch_size, nstacks, n},
+      torch::empty({batch_size, nstacks, std::max(input_size, n)},
                    torch::dtype(input.dtype()).device(input.device()));
   auto d_twiddle = torch::zeros_like(twiddle);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -579,10 +585,12 @@ std::tuple<torch::Tensor, torch::Tensor>
     }
     // Backward pass
     auto d_input_a = d_input.packed_accessor32<scalar_t, 3, at::RestrictPtrTraits>();
-    OutputWriter<scalar_t> d_input_writer(d_input_a);
     twiddle_block_idx = nblocks - 1;
     twiddle_idx_start = log_n;
     for (int iter = niters - 1; iter >= 0; iter--) {
+      // Reduce size of d_input_a because we only want the first @input_size elements
+      OutputWriter<scalar_t> d_input_writer = iter == 0 ?
+        OutputWriter<scalar_t>(d_input.index({Slice(), Slice(), Slice(None, input_size)})) : OutputWriter<scalar_t>(d_input_a);
       const InputReader<scalar_t> input_reader(iter == 0 ? input : intermediate_storage[iter - 1]);
       const InputReader<scalar_t> grad_reader(iter == niters - 1 ? grad_a : d_input_a);
       const bool increasing_stride_this_iter = bit_milestones[iter] <= bit_milestones[iter + 1];
@@ -602,9 +610,9 @@ std::tuple<torch::Tensor, torch::Tensor>
       dim3 grid(div_up(batch_size, ITEMS_PER_THREAD_BACKWARD_MAX5[nsteps - 1] * block.y) * n_div_span, 1, nstacks);
       // twiddle[:, twiddle_block_idx, twiddle_idx_start:twiddle_idx_start + nsteps]
       const TwiddleReader<scalar_t> twiddle_reader(twiddle.index(
-          {torch::indexing::Slice(), twiddle_block_idx, torch::indexing::Slice(twiddle_idx_start, twiddle_idx_start + nsteps)}));
+          {Slice(), twiddle_block_idx, Slice(twiddle_idx_start, twiddle_idx_start + nsteps)}));
       TwiddleWriter<scalar_t> d_twiddle_writer(d_twiddle.index(
-          {torch::indexing::Slice(), twiddle_block_idx, torch::indexing::Slice(twiddle_idx_start, twiddle_idx_start + nsteps)}));
+          {Slice(), twiddle_block_idx, Slice(twiddle_idx_start, twiddle_idx_start + nsteps)}));
       auto launch = [increasing_stride_this_iter, &grid, &block, &stream, &twiddle_reader, &input_reader,
                      &grad_reader, &d_twiddle_writer, &d_input_writer, log_n, start_bit] (auto dummy) {
         constexpr int nsteps_val = decltype(dummy)::value;
@@ -621,5 +629,10 @@ std::tuple<torch::Tensor, torch::Tensor>
   TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "butterfly_multiply_bw_cuda failed with error code ",
      cudaGetLastError());
+  if (input_size < n) {
+    d_input = d_input.index({Slice(), Slice(), Slice(None, input_size)});
+  } else if (input_size > n) {
+    d_input.index({Slice(), Slice(), Slice(n, None)}).fill_(0.0);
+  }
   return std::make_tuple(d_twiddle, d_input);
 }

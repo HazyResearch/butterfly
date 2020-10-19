@@ -15,11 +15,12 @@ static inline c10::complex<T> conj_wrapper(c10::complex<T> v) {
 torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor twiddle,
                                         const torch::Tensor input,
                                         bool increasing_stride) {
-  const auto batch_size = input.size(0);
-  const auto nstacks = input.size(1);
-  const auto n = input.size(2);
-  const int log_n = int(log2((double)n));
+  const int batch_size = input.size(0);
+  const int nstacks = input.size(1);
   const int nblocks = twiddle.size(1);
+  const int log_n = twiddle.size(2);
+  const int n = 1 << log_n;
+  const int input_size = input.size(2);
   auto output =
     torch::empty({batch_size, nstacks, n},
                   torch::dtype(input.dtype()).device(input.device()));
@@ -30,7 +31,6 @@ torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor twiddle,
     for (int64_t block = 0; block < nblocks; ++block) {
       bool cur_increasing_stride = increasing_stride != bool(block % 2);
       for (int64_t idx = 0; idx < log_n; ++idx) {
-        auto prev_input_a = (block == 0 && idx == 0) ? input_a : output_a;
         int64_t log_stride = cur_increasing_stride ? idx : (log_n - 1 - idx);
         int64_t stride = 1 << log_stride;
         for (int64_t b = 0; b < batch_size; ++b) {
@@ -41,7 +41,14 @@ torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor twiddle,
               const scalar_t twiddle_val[2][2] =
                 {{twiddle_a[s][block][idx][i][0][0], twiddle_a[s][block][idx][i][0][1]},
                  {twiddle_a[s][block][idx][i][1][0], twiddle_a[s][block][idx][i][1][1]}};
-              const scalar_t input_val[2] = {prev_input_a[b][s][pos], prev_input_a[b][s][pos + stride]};
+              scalar_t input_val[2];
+              if (block == 0 && idx == 0) {
+                input_val[0] = pos < input_size ? input_a[b][s][pos] : 0;
+                input_val[1] = pos + stride < input_size ? input_a[b][s][pos + stride] : 0;
+              } else {
+                input_val[0] = output_a[b][s][pos];
+                input_val[1] = output_a[b][s][pos + stride];
+              }
               output_a[b][s][pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
               output_a[b][s][pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
             }
@@ -53,21 +60,24 @@ torch::Tensor butterfly_multiply_fw_cpu(const torch::Tensor twiddle,
   return output;
 }
 
+using namespace torch::indexing;
+
 std::tuple<torch::Tensor, torch::Tensor>
   butterfly_multiply_bw_cpu(const torch::Tensor twiddle,
                             const torch::Tensor input,
                             const torch::Tensor grad,
                             bool increasing_stride) {
-  const auto batch_size = input.size(0);
-  const auto nstacks = input.size(1);
-  const auto n = input.size(2);
-  const int log_n = int(log2((double)n));
+  const int batch_size = input.size(0);
+  const int nstacks = input.size(1);
   const int nblocks = twiddle.size(1);
+  const int log_n = twiddle.size(2);
+  const int n = 1 << log_n;
+  const int input_size = input.size(2);
   auto output =
     torch::empty({nblocks, log_n, batch_size, nstacks, n},
                   torch::dtype(input.dtype()).device(input.device()));
   auto d_input =
-      torch::empty({batch_size, nstacks, n},
+    torch::empty({batch_size, nstacks, std::max(input_size, n)},
                    torch::dtype(input.dtype()).device(input.device()));
   auto d_twiddle = torch::zeros_like(twiddle);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "butterfly_multiply_bw_cpu", [&] {
@@ -90,7 +100,14 @@ std::tuple<torch::Tensor, torch::Tensor>
               const scalar_t twiddle_val[2][2] =
                 {{twiddle_a[s][block][idx][i][0][0], twiddle_a[s][block][idx][i][0][1]},
                  {twiddle_a[s][block][idx][i][1][0], twiddle_a[s][block][idx][i][1][1]}};
-              const scalar_t input_val[2] = {prev_input_a[b][s][pos], prev_input_a[b][s][pos + stride]};
+              scalar_t input_val[2];
+              if (block == 0 && idx == 0) {
+                input_val[0] = pos < input_size ? input_a[b][s][pos] : 0;
+                input_val[1] = pos + stride < input_size ? input_a[b][s][pos + stride] : 0;
+              } else {
+                input_val[0] = prev_input_a[b][s][pos];
+                input_val[1] = prev_input_a[b][s][pos + stride];
+              }
               output_a[block][idx][b][s][pos] = twiddle_val[0][0] * input_val[0] + twiddle_val[0][1] * input_val[1];
               output_a[block][idx][b][s][pos + stride] = twiddle_val[1][0] * input_val[0] + twiddle_val[1][1] * input_val[1];
             }
@@ -125,7 +142,14 @@ std::tuple<torch::Tensor, torch::Tensor>
               const scalar_t grad_val[2] = {prev_grad_a[b][s][pos], prev_grad_a[b][s][pos + stride]};
               d_input_a[b][s][pos] = conj_wrapper(twiddle_val[0][0]) * grad_val[0] + conj_wrapper(twiddle_val[1][0]) * grad_val[1];
               d_input_a[b][s][pos + stride] = conj_wrapper(twiddle_val[0][1]) * grad_val[0] + conj_wrapper(twiddle_val[1][1]) * grad_val[1];
-              const scalar_t input_val[2] = {prev_input_a[b][s][pos], prev_input_a[b][s][pos + stride]};
+              scalar_t input_val[2];
+              if (block == 0 && idx == 0) {
+                input_val[0] = pos < input_size ? input_a[b][s][pos] : 0;
+                input_val[1] = pos + stride < input_size ? input_a[b][s][pos + stride] : 0;
+              } else {
+                input_val[0] = prev_input_a[b][s][pos];
+                input_val[1] = prev_input_a[b][s][pos + stride];
+              }
               d_twiddle_a[s][block][idx][i][0][0] += grad_val[0] * conj_wrapper(input_val[0]);
               d_twiddle_a[s][block][idx][i][0][1] += grad_val[0] * conj_wrapper(input_val[1]);
               d_twiddle_a[s][block][idx][i][1][0] += grad_val[1] * conj_wrapper(input_val[0]);
@@ -136,5 +160,10 @@ std::tuple<torch::Tensor, torch::Tensor>
       }
     }
   });
+  if (input_size < n) {
+    d_input = d_input.index({Slice(), Slice(), Slice(None, input_size)});
+  } else if (input_size > n) {
+    d_input.index({Slice(), Slice(), Slice(n, None)}).fill_(0.0);
+  }
   return std::make_tuple(d_twiddle, d_input);
 }

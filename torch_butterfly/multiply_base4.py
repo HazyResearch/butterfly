@@ -1,19 +1,22 @@
 import math
 
 import torch
+from torch.nn import functional as F
 
 from torch_butterfly.complex_utils import complex_mul
 
 
 def butterfly_multiply_base4_torch(twiddle4, twiddle2, input, increasing_stride=True):
-    batch_size, nstacks, n = input.shape
+    batch_size, nstacks, input_size = input.shape
     nblocks = twiddle4.shape[1]
-    log_n = int(math.log2(n))
-    assert n == 1 << log_n, "size must be a power of 2"
+    log_n = twiddle4.shape[2] * 2 + twiddle2.shape[2]
+    n = 1 << log_n
     if log_n // 2 > 0:
         assert twiddle4.shape == (nstacks, nblocks, log_n // 2, n // 4, 4, 4)
     if log_n % 2 == 1:
         assert twiddle2.shape == (nstacks, nblocks, 1, n // 2, 2, 2)
+    # Pad or trim input to size n
+    input = F.pad(input, (0, n - input_size)) if input_size < n else input[:, :, :n]
     output = input.contiguous()
     cur_increasing_stride = increasing_stride
     for block in range(nblocks):

@@ -22,7 +22,8 @@ torch::Tensor butterfly_multiply_fw(const torch::Tensor twiddle,
                                     bool increasing_stride) {
   /* Parameters:
          twiddle: (nstacks, nblocks, log n, n/2, 2, 2)
-         input: (batch_size, nstacks, n)
+         input: (batch_size, nstacks, input_size). If input_size != n, input will be
+             padded with zero or trimmed to size n.
          increasing_stride: whether the first block multiplies with increasing
              stride (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
      Returns:
@@ -30,9 +31,9 @@ torch::Tensor butterfly_multiply_fw(const torch::Tensor twiddle,
   */
   CHECK_DEVICE(twiddle); CHECK_DEVICE(input); CHECK_SAME_DEVICE(twiddle, input);
   const auto nstacks = input.size(1);
-  const auto n = input.size(2);
-  const int log_n = int(log2((double) n));
   const auto nblocks = twiddle.size(1);
+  const auto log_n = twiddle.size(2);
+  const auto n = 1 << log_n;
   TORCH_CHECK(1 << log_n == n, "butterfly_multiply_fw: n must be a power of 2");
   CHECK_DIM(twiddle, 6); CHECK_DIM(input, 3);
   CHECK_SHAPE(twiddle, nstacks, nblocks, log_n, n / 2, 2, 2);
@@ -55,7 +56,8 @@ std::tuple<torch::Tensor, torch::Tensor>
                         bool increasing_stride) {
   /* Parameters:
          twiddle: (nstacks, nblocks, log n, n/2, 2, 2)
-         input: (batch_size, nstacks, n)
+         input: (batch_size, nstacks, input_size). If input_size != n, input will be
+             padded with zero or trimmed to size n.
          grad: (batch_size, nstacks, n)
          increasing_stride: whether the first block multiplies with increasing
              stride (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
@@ -67,9 +69,9 @@ std::tuple<torch::Tensor, torch::Tensor>
   CHECK_SAME_DEVICE(twiddle, input); CHECK_SAME_DEVICE(input, grad);
   const auto batch_size = input.size(0);
   const auto nstacks = input.size(1);
-  const auto n = input.size(2);
-  const int log_n = int(log2((double) n));
   const auto nblocks = twiddle.size(1);
+  const auto log_n = twiddle.size(2);
+  const auto n = 1 << log_n;
   TORCH_CHECK(1 << log_n == n, "butterfly_multiply_bw: n must be a power of 2");
   CHECK_DIM(twiddle, 6); CHECK_DIM(input, 3); CHECK_DIM(grad, 3);
   CHECK_SHAPE(twiddle, nstacks, nblocks, log_n, n / 2, 2, 2);
