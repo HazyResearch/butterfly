@@ -29,39 +29,50 @@ class KOP2d(nn.Module):
             self.in_size = (self.in_size, self.in_size)
         if isinstance(self.kernel_size, int):
             self.kernel_size = (self.kernel_size, self.kernel_size)
-        padding = ((self.kernel_size[0] - 1) // 2, (self.kernel_size[1] - 1) // 2)
+        self.padding = (self.kernel_size[0] - 1) // 2, (self.kernel_size[1] - 1) // 2
         # Just to use nn.Conv2d's initialization
         self.weight = nn.Parameter(nn.Conv2d(self.in_ch, self.out_ch, self.kernel_size,
-                                             padding=padding, bias=False).weight)
+                                             padding=self.padding, bias=False).weight)
 
         self.Kd = TensorProduct(
-            butterfly_cls(self.in_size[0], self.in_size[0], bias=False,
+            butterfly_cls(self.in_size[-1], self.in_size[-1], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks),
-            butterfly_cls(self.in_size[1], self.in_size[1], bias=False,
+            butterfly_cls(self.in_size[-2], self.in_size[-2], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks)
         )
         self.K1 = TensorProduct(
-            butterfly_cls(self.in_size[0], self.in_size[0], bias=False,
+            butterfly_cls(self.in_size[-1], self.in_size[-1], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks),
-            butterfly_cls(self.in_size[1], self.in_size[1], bias=False,
+            butterfly_cls(self.in_size[-2], self.in_size[-2], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks)
         )
         self.K2 = TensorProduct(
-            butterfly_cls(self.in_size[0], self.in_size[0], bias=False,
+            butterfly_cls(self.in_size[-1], self.in_size[-1], bias=False,
                 increasing_stride=True, complex=complex, init='ortho', nblocks=nblocks),
-            butterfly_cls(self.in_size[1], self.in_size[1], bias=False,
+            butterfly_cls(self.in_size[-1], self.in_size[-2], bias=False,
                 increasing_stride=True, complex=complex, init='ortho', nblocks=nblocks)
         )
+        with torch.no_grad():
+            self.Kd.map1 *= math.sqrt(self.in_size[-1])
+            self.Kd.map2 *= math.sqrt(self.in_size[-2])
+
         if complex:
             self.Kd = nn.Sequential(Real2Complex(), self.Kd)
             self.K1 = nn.Sequential(Real2Complex(), self.K1)
             self.K2 = nn.Sequential(self.K2, Complex2Real())
 
     def forward(self, x):
+        w = F.pad(self.weight.flip([-1]),
+                    (0, self.in_size[-1] - self.kernel_size[-1])).roll(-self.padding[-1], dims=-1)
+        w = F.pad(w.flip([-2]),
+                  (0, 0, 0, self.in_size[-2] - self.kernel_size[-2])).roll(-self.padding[-2],
+                                                                           dims=-2)
         # (batch, in_ch, h, w)
         x_f = self.K1(x)
         # (out_ch, in_ch, h, w)
-        w_f = self.Kd(self.weight) * math.sqrt(self.in_size[0] * self.in_size[1])
+        # w_f = self.Kd(self.weight) * math.sqrt(self.in_size[0] * self.in_size[1])
+        # w_f = self.Kd(self.weight)
+        w_f = self.Kd(w)
         # prod = complex_mul(x_f.unsqueeze(1), w_f).sum(dim=2)
         prod = complex_matmul(x_f.permute(2, 3, 0, 1), w_f.permute(2, 3, 1, 0)).permute(2, 3, 0, 1)
         out = self.K2(prod)
