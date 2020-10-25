@@ -6,7 +6,6 @@ import torch.nn.functional as F
 
 import torch_butterfly
 from torch_butterfly import Butterfly
-from torch_butterfly import ButterflyBase4
 from torch_butterfly.complex_utils import Real2Complex, Complex2Real
 from torch_butterfly.complex_utils import complex_mul, complex_matmul
 from torch_butterfly.combine import TensorProduct
@@ -24,7 +23,6 @@ class KOP2d(nn.Module):
         self.nblocks = nblocks
         assert base in [2, 4]
         self.base = base
-        butterfly_cls = Butterfly if base == 2 else ButterflyBase4
         if isinstance(self.in_size, int):
             self.in_size = (self.in_size, self.in_size)
         if isinstance(self.kernel_size, int):
@@ -35,26 +33,31 @@ class KOP2d(nn.Module):
                                              padding=self.padding, bias=False).weight)
 
         self.Kd = TensorProduct(
-            butterfly_cls(self.in_size[-1], self.in_size[-1], bias=False,
+            Butterfly(self.in_size[-1], self.in_size[-1], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks),
-            butterfly_cls(self.in_size[-2], self.in_size[-2], bias=False,
+            Butterfly(self.in_size[-2], self.in_size[-2], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks)
         )
         self.K1 = TensorProduct(
-            butterfly_cls(self.in_size[-1], self.in_size[-1], bias=False,
+            Butterfly(self.in_size[-1], self.in_size[-1], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks),
-            butterfly_cls(self.in_size[-2], self.in_size[-2], bias=False,
+            Butterfly(self.in_size[-2], self.in_size[-2], bias=False,
                 increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks)
         )
         self.K2 = TensorProduct(
-            butterfly_cls(self.in_size[-1], self.in_size[-1], bias=False,
+            Butterfly(self.in_size[-1], self.in_size[-1], bias=False,
                 increasing_stride=True, complex=complex, init='ortho', nblocks=nblocks),
-            butterfly_cls(self.in_size[-1], self.in_size[-2], bias=False,
+            Butterfly(self.in_size[-1], self.in_size[-2], bias=False,
                 increasing_stride=True, complex=complex, init='ortho', nblocks=nblocks)
         )
         with torch.no_grad():
             self.Kd.map1 *= math.sqrt(self.in_size[-1])
             self.Kd.map2 *= math.sqrt(self.in_size[-2])
+
+        if base == 4:
+            self.Kd.map1, self.Kd.map2 = self.Kd.map1.to_base4(), self.Kd.map2.to_base4()
+            self.K1.map1, self.K1.map2 = self.K1.map1.to_base4(), self.K1.map2.to_base4()
+            self.K2.map1, self.K2.map2 = self.K2.map1.to_base4(), self.K2.map2.to_base4()
 
         if complex:
             self.Kd = nn.Sequential(Real2Complex(), self.Kd)
