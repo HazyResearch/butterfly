@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 import torch_butterfly
 from torch_butterfly import Butterfly
-from torch_butterfly.butterfly_base4 import ButterflyBase4
+from torch_butterfly import ButterflyBase4
 from torch_butterfly.complex_utils import Real2Complex, Complex2Real
 from torch_butterfly.complex_utils import complex_mul, complex_matmul
 from torch_butterfly.combine import TensorProduct

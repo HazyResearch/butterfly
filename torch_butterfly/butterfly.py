@@ -1,4 +1,6 @@
 import math
+import numbers
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -149,6 +151,16 @@ class Butterfly(nn.Module):
             output = output + bias[:out_size]
         return output.view(*input.size()[:-1], out_size)
 
+    def __imul__(self, scale):
+        """In-place multiply the whole butterfly matrix by some scale factor, by multiplying the
+        twiddle.
+        Scale must be nonnegative
+        """
+        assert isinstance(scale, numbers.Number)
+        assert scale >= 0
+        self.twiddle *= scale ** (1.0 / self.twiddle.shape[1] / self.twiddle.shape[2])
+        return self
+
     def extra_repr(self):
         s = 'in_size={}, out_size={}, bias={}, complex={}, increasing_stride={}, init={}, nblocks={}'.format(
             self.in_size, self.out_size, self.bias is not None, self.complex, self.increasing_stride, self.init, self.nblocks,)
@@ -251,6 +263,8 @@ class ButterflyUnitary(Butterfly):
             return self.post_process(input, output)
         else:
             return self.post_process(input, output, out_size=output.size(-1))
+
+    __imul__ = None
 
     def extra_repr(self):
         s = 'in_size={}, out_size={}, bias={}, increasing_stride={}, nblocks={}'.format(

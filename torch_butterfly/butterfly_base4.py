@@ -1,4 +1,6 @@
 import math
+import numbers
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -56,7 +58,7 @@ class ButterflyBase4(Butterfly):
         output_size = self.out_size if self.nstacks == 1 else None
         # If batch size is large (say more than 2n), it's probably faster to multiply out the
         # butterfly matrix, then use dense matrix multiplication.
-        if input.shape[0] < 2 * self.n:
+        if output.shape[0] < 2 * self.n:
             output = butterfly_multiply_base4_torch(twiddle4, twiddle2, output,
                                                     self.increasing_stride, output_size)
         else:
@@ -67,3 +69,15 @@ class ButterflyBase4(Butterfly):
             output = complex_matmul(output.transpose(0, 1),
                                     matrix_t.transpose(0, 1)).transpose(0, 1)
         return self.post_process(input, output)
+
+    def __imul__(self, scale):
+        """In-place multiply the whole butterfly matrix by some scale factor, by multiplying the
+        twiddle.
+        Scale must be nonnegative
+        """
+        assert isinstance(scale, numbers.Number)
+        assert scale >= 0
+        scale_per_entry = scale ** (1.0 / self.nblocks / self.log_n)
+        self.twiddle4 *= scale_per_entry ** 2
+        self.twiddle2 *= scale_per_entry
+        return self
