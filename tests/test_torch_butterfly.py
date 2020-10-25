@@ -129,6 +129,25 @@ class ButterflyTest(unittest.TestCase):
                                                                self.rtol, self.atol),
                                                 (output.shape, device, (in_size, out_size), complex, init, nblocks))
 
+    def test_butterfly_to_base4(self):
+        batch_size = 10
+        for device in ['cpu'] + ([] if not torch.cuda.is_available() else ['cuda']):
+            for in_size, out_size in [(7, 15), (15, 7)]:
+                for complex in [False, True]:
+                    for increasing_stride in [True, False]:
+                        for init in ['randn', 'ortho', 'identity']:
+                            for nblocks in [1, 2, 3]:
+                                b = torch_butterfly.Butterfly(in_size, out_size, True, complex,
+                                                              increasing_stride, init, nblocks=nblocks).to(device)
+                                dtype = torch.float32 if not complex else torch.complex64
+                                input = torch.randn(batch_size, in_size, dtype=dtype, device=device)
+                                output = b(input)
+                                b4 = b.to_base4()
+                                output_base4 = b4(input)
+                                self.assertTrue(torch.allclose(output, output_base4,
+                                                               self.rtol, self.atol),
+                                                (output.shape, device, (in_size, out_size), complex, init, nblocks))
+
     def test_butterfly_unitary(self):
         # Test shape
         batch_size = 10

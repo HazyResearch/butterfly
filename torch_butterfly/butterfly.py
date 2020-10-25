@@ -5,9 +5,11 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+import torch_butterfly
 from torch_butterfly.multiply import butterfly_multiply
 from torch_butterfly.multiply import butterfly_multiply_torch
 from torch_butterfly.complex_utils import real_dtype_to_complex, view_as_real, view_as_complex
+from torch_butterfly.multiply_base4 import twiddle_base2_to_base4
 
 
 class Butterfly(nn.Module):
@@ -161,6 +163,19 @@ class Butterfly(nn.Module):
         self.twiddle *= scale ** (1.0 / self.twiddle.shape[1] / self.twiddle.shape[2])
         return self
 
+    def to_base4(self):
+        new = torch_butterfly.ButterflyBase4(self.in_size, self.out_size, self.bias is not None,
+                                             self.complex, self.increasing_stride, self.init,
+                                             self.nblocks).to(self.twiddle.device)
+        twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
+        twiddle4, twiddle2 = twiddle_base2_to_base4(twiddle, self.increasing_stride)
+        with torch.no_grad():
+            new.twiddle4.copy_(twiddle4 if not new.complex else view_as_real(twiddle4))
+            new.twiddle2.copy_(twiddle2 if not new.complex else view_as_real(twiddle2))
+            if new.bias is not None:
+                new.bias.copy_(self.bias)
+        return new
+
     def extra_repr(self):
         s = 'in_size={}, out_size={}, bias={}, complex={}, increasing_stride={}, init={}, nblocks={}'.format(
             self.in_size, self.out_size, self.bias is not None, self.complex, self.increasing_stride, self.init, self.nblocks,)
@@ -265,6 +280,7 @@ class ButterflyUnitary(Butterfly):
             return self.post_process(input, output, out_size=output.size(-1))
 
     __imul__ = None
+    to_base4 = None
 
     def extra_repr(self):
         s = 'in_size={}, out_size={}, bias={}, increasing_stride={}, nblocks={}'.format(
@@ -354,6 +370,8 @@ class ButterflyBmm(Butterfly):
             bias = self.bias if not self.complex else view_as_complex(self.bias)
             output = output + bias[:, :out_size]
         return output.view(*input.size()[:-2], self.matrix_batch, self.out_size)
+
+    to_base4 = None
 
     def extra_repr(self):
         s = 'in_size={}, out_size={}, matrix_batch={}, bias={}, complex={}, increasing_stride={}, init={}, nblocks={}'.format(
