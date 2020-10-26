@@ -24,8 +24,10 @@ class Butterfly(nn.Module):
         complex: whether complex or real
         increasing_stride: whether the first butterfly block will multiply with increasing stride
             (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
-        init: 'randn', 'ortho', or 'identity'. Whether the weight matrix should be initialized to
-            from randn twiddle, or to be randomly orthogonal/unitary, or to be the identity matrix.
+        init: 'randn', 'ortho', 'identity', 'fft_no_br', or 'ifft_no_br'. Whether the weight matrix
+            should be initialized to from randn twiddle, or to be randomly orthogonal/unitary, or
+            to be the identity matrix, or the normalized FFT/iFFT twiddle (without the bit-reversal
+            permutation).
         nblocks: number of B or B^T blocks. The B and B^T will alternate.
     """
 
@@ -43,7 +45,7 @@ class Butterfly(nn.Module):
         self.nblocks = nblocks
         dtype = torch.get_default_dtype() if not self.complex else real_dtype_to_complex[torch.get_default_dtype()]
         twiddle_shape = (self.nstacks, nblocks, log_n, n // 2, 2, 2)
-        assert init in ['randn', 'ortho', 'identity']
+        assert init in ['randn', 'ortho', 'identity', 'fft_no_br', 'ifft_no_br']
         self.init = init
         self.twiddle = nn.Parameter(torch.empty(twiddle_shape, dtype=dtype))
         if bias:
@@ -91,10 +93,25 @@ class Butterfly(nn.Module):
                     twiddle.copy_(torch.stack((torch.stack((A, B), dim=-1),
                                                torch.stack((C, D), dim=-1)), dim=-2))
         elif self.init == 'identity':
-            twiddle_new = torch.eye(2, dtype=twiddle.dtype).reshape(1, 1, 1, 1, 2, 2)
-            twiddle_new = twiddle_new.expand(*twiddle.shape).contiguous()
+            twiddle_eye = torch.eye(2, dtype=twiddle.dtype).reshape(1, 1, 1, 1, 2, 2)
+            twiddle_eye = twiddle_eye.expand(*twiddle.shape).contiguous()
             with torch.no_grad():
-                twiddle.copy_(twiddle_new)
+                twiddle.copy_(twiddle_eye)
+        elif self.init in ['fft_no_br', 'ifft_no_br']:
+            assert self.complex, 'fft_no_br/ifft_no_br init requires Butterfly to be complex'
+            # Putting this before the FFT copy, otherwise there's a warning about
+            # view_as_complex.
+            if self.nblocks > 1:
+                twiddle_eye = torch.eye(2, dtype=twiddle.dtype).reshape(1, 1, 1, 1, 2, 2)
+                twiddle_eye = twiddle_eye.expand(*twiddle[:, 1:].shape).contiguous()
+                with torch.no_grad():
+                    twiddle[:, 1:] = twiddle_eye
+            special_fn = (torch_butterfly.special.fft if self.init == 'fft_no_br'
+                          else torch_butterfly.special.ifft)
+            b_fft = special_fn(self.n, normalized=True, br_first=self.increasing_stride,
+                               with_br_perm=False)
+            with torch.no_grad():
+                twiddle[:, 0] = torch.view_as_complex(b_fft.twiddle)
         if self.bias is not None:
             bound = 1 / math.sqrt(self.in_size)
             nn.init.uniform_(self.bias, -bound, bound)

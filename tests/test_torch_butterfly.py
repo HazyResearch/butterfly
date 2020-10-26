@@ -8,7 +8,10 @@ from torch import nn
 from torch.nn import functional as F
 
 import torch_butterfly
-from torch_butterfly.complex_utils import view_as_complex
+from torch_butterfly import Butterfly
+from torch_butterfly.complex_utils import view_as_complex, complex_matmul
+from torch_butterfly.combine import TensorProduct
+from torch_butterfly.complex_utils import real2complex
 
 
 class ButterflyTest(unittest.TestCase):
@@ -25,8 +28,8 @@ class ButterflyTest(unittest.TestCase):
                     for increasing_stride in [True, False]:
                         for init in ['randn', 'ortho', 'identity']:
                             for nblocks in [1, 2, 3]:
-                                b = torch_butterfly.Butterfly(in_size, out_size, True, complex,
-                                                              increasing_stride, init, nblocks=nblocks).to(device)
+                                b = Butterfly(in_size, out_size, True, complex, increasing_stride,
+                                              init, nblocks=nblocks).to(device)
                                 dtype = torch.float32 if not complex else torch.complex64
                                 input = torch.randn(batch_size, in_size, dtype=dtype, device=device)
                                 output = b(input)
@@ -39,6 +42,66 @@ class ButterflyTest(unittest.TestCase):
                                     twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
                                     self.assertTrue(np.allclose(twiddle_norm, 1),
                                                     (twiddle_norm, device, (in_size, out_size), complex, init))
+
+    def test_fft_init(self):
+        batch_size = 10
+        n = 16
+        input = torch.randn(batch_size, n, dtype=torch.complex64)
+        br = torch_butterfly.permutation.bitreversal_permutation(n, pytorch_format=True)
+        for increasing_stride in [True, False]:
+            for nblocks in [1, 2, 3]:
+                out_torch = torch.view_as_complex(torch.fft(torch.view_as_real(input),
+                                                            signal_ndim=1, normalized=True))
+                b = Butterfly(n, n, False, complex=True, increasing_stride=increasing_stride,
+                              init='fft_no_br', nblocks=nblocks)
+                out = b(input[..., br]) if increasing_stride else b(input)[..., br]
+                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+                out_torch = torch.view_as_complex(torch.ifft(torch.view_as_real(input),
+                                                             signal_ndim=1, normalized=True))
+                b = Butterfly(n, n, False, complex=True, increasing_stride=increasing_stride,
+                              init='ifft_no_br', nblocks=nblocks)
+                out = b(input[..., br]) if increasing_stride else b(input)[..., br]
+                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+
+    def test_fft2d_init(self):
+        batch_size = 10
+        in_channels = 3
+        out_channels = 4
+        n1, n2 = 16, 32
+        input = torch.randn(batch_size, in_channels, n2, n1)
+        for kernel_size1 in [1, 3, 5, 7]:
+            for kernel_size2 in [1, 3, 5, 7]:
+                padding1 = (kernel_size1 - 1) // 2
+                padding2 = (kernel_size2 - 1) // 2
+                conv = nn.Conv2d(in_channels, out_channels, (kernel_size2, kernel_size1),
+                                padding=(padding2, padding1), padding_mode='circular',
+                                bias=False)
+                out_torch = conv(input)
+                weight = conv.weight
+                w = F.pad(weight.flip(dims=(-1,)), (0, n1 - kernel_size1)).roll(
+                    -padding1, dims=-1)
+                w = F.pad(w.flip(dims=(-2,)), (0, 0, 0, n2 - kernel_size2)).roll(
+                    -padding2, dims=-2)
+                increasing_strides = [False, False, True]
+                inits = ['fft_no_br', 'fft_no_br', 'ifft_no_br']
+                for nblocks in [1, 2, 3]:
+                    Kd, K1, K2 = [
+                        TensorProduct(
+                            Butterfly(n1, n1, bias=False, complex=complex,
+                                increasing_stride=incstride, init=i, nblocks=nblocks),
+                            Butterfly(n2, n2, bias=False, complex=complex,
+                                increasing_stride=incstride, init=i, nblocks=nblocks)
+                        )
+                        for incstride, i in zip(increasing_strides, inits)
+                    ]
+                    with torch.no_grad():
+                        Kd.map1 *= math.sqrt(n1)
+                        Kd.map2 *= math.sqrt(n2)
+                    out = K2(
+                        complex_matmul(K1(real2complex(input)).permute(2, 3, 0, 1),
+                                       Kd(real2complex(w)).permute(2, 3, 1, 0)).permute(2, 3, 0, 1)
+                    ).real
+                    self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_autograd(self):
         """Check if autograd works (especially for complex), by trying to match a 4x4 matrix.
@@ -53,11 +116,11 @@ class ButterflyTest(unittest.TestCase):
             if complex:
                 model = nn.Sequential(
                     torch_butterfly.complex_utils.Real2Complex(),
-                    torch_butterfly.Butterfly(size, size, bias=False, complex=complex),
+                    Butterfly(size, size, bias=False, complex=complex),
                     torch_butterfly.complex_utils.Complex2Real(),
                 )
             else:
-                model = torch_butterfly.Butterfly(size, size, bias=False, complex=complex)
+                model = Butterfly(size, size, bias=False, complex=complex)
             with torch.no_grad():
                 inital_loss = F.mse_loss(model(x), y)
             optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
@@ -76,8 +139,7 @@ class ButterflyTest(unittest.TestCase):
         for complex in [False, True]:
             for increasing_stride in [True, False]:
                 for nblocks in [1, 2, 3]:
-                    b = torch_butterfly.Butterfly(n, n, False, complex,
-                                                  increasing_stride, nblocks=nblocks)
+                    b = Butterfly(n, n, False, complex, increasing_stride, nblocks=nblocks)
                     dtype = torch.float32 if not complex else torch.complex64
                     input = torch.eye(n, dtype=dtype)
                     matrix = b(input).t()
@@ -100,8 +162,7 @@ class ButterflyTest(unittest.TestCase):
         for complex in [False, True]:
             for increasing_stride in [True, False]:
                 for nblocks in [1, 2, 3]:
-                    b = torch_butterfly.Butterfly(n, n, True, complex,
-                                                  increasing_stride, nblocks=nblocks)
+                    b = Butterfly(n, n, True, complex, increasing_stride, nblocks=nblocks)
                     dtype = torch.float32 if not complex else torch.complex64
                     input = torch.randn(batch_size, input_size, dtype=dtype)
                     output = b(input, subtwiddle=True)
@@ -117,8 +178,8 @@ class ButterflyTest(unittest.TestCase):
                     for init in ['randn', 'ortho', 'identity']:
                         for nblocks in [1, 2, 3]:
                             for scale in [0.13, 2.75]:
-                                b = torch_butterfly.Butterfly(in_size, out_size, False, complex,
-                                                              increasing_stride, init, nblocks=nblocks).to(device)
+                                b = Butterfly(in_size, out_size, False, complex, increasing_stride,
+                                              init, nblocks=nblocks).to(device)
                                 dtype = torch.float32 if not complex else torch.complex64
                                 input = torch.randn(batch_size, in_size, dtype=dtype, device=device)
                                 output = b(input)
@@ -137,8 +198,8 @@ class ButterflyTest(unittest.TestCase):
                     for increasing_stride in [True, False]:
                         for init in ['randn', 'ortho', 'identity']:
                             for nblocks in [1, 2, 3]:
-                                b = torch_butterfly.Butterfly(in_size, out_size, True, complex,
-                                                              increasing_stride, init, nblocks=nblocks).to(device)
+                                b = Butterfly(in_size, out_size, True, complex, increasing_stride,
+                                              init, nblocks=nblocks).to(device)
                                 dtype = torch.float32 if not complex else torch.complex64
                                 input = torch.randn(batch_size, in_size, dtype=dtype, device=device)
                                 output = b(input)
@@ -192,7 +253,8 @@ class ButterflyTest(unittest.TestCase):
                             # Check that the result is the same as looping over butterflies
                             output_loop = []
                             for i in range(matrix_batch):
-                                b = torch_butterfly.Butterfly(in_size, out_size, True, complex, increasing_stride, nblocks=nblocks).to(device)
+                                b = Butterfly(in_size, out_size, True, complex, increasing_stride,
+                                              nblocks=nblocks).to(device)
                                 with torch.no_grad():
                                     b.twiddle.copy_(b_bmm.twiddle[i * b_bmm.nstacks:(i + 1) * b_bmm.nstacks])
                                     b.bias.copy_(b_bmm.bias[i])
@@ -210,9 +272,9 @@ class ButterflyTest(unittest.TestCase):
         dtype = torch.complex64
         input = torch.randn(batch_size, in_channels, n2, n1, dtype=dtype)
         # Generate out_channels x in_channels butterfly matrices and loop over them
-        b1s = [torch_butterfly.Butterfly(n1, n1, bias=False, complex=True)
+        b1s = [Butterfly(n1, n1, bias=False, complex=True)
                for _ in range(out_channels * in_channels)]
-        b2s = [torch_butterfly.Butterfly(n2, n2, bias=False, complex=True)
+        b2s = [Butterfly(n2, n2, bias=False, complex=True)
                for _ in range(out_channels * in_channels)]
         b_tp = [torch_butterfly.combine.TensorProduct(b1, b2) for b1, b2 in zip(b1s, b2s)]
         outputs = []
