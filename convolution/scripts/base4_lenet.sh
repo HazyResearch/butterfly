@@ -8,3 +8,21 @@ for complex in True False; do
         wait
     done
 done
+
+for base in 4 2; do
+    for nblocks in 6 5 4 3 2 1; do
+        python train.py wandb.group=base4-lenet model._target_=models.ButterfLeNet +model.nblocks=$nblocks +model.complex=True +model.base=$base +model.init=fft train.optimizer.lr=0.01 '+train.lr_scheduler={_target_:lr_schedulers.LeNetScheduler,nepochs:100}' train.optimizer.weight_decay=1e-4 runner.ntrials=3 runner.gpu_per_trial=0.3 &
+        sleep 10s
+    done
+done
+wait
+
+for complex in True False; do
+    for base in 4 2; do
+        for nblocks in 6 5 4 3 2 1; do
+            python train.py wandb.group=base4-lenet model._target_=models.ButterfLeNet +model.nblocks=$nblocks +model.complex=$complex +model.base=$base +model.init=ortho train.optimizer.lr=0.01 '+train.lr_scheduler={_target_:lr_schedulers.LeNetScheduler,nepochs:100}' train.optimizer.weight_decay=1e-4 runner.ntrials=3 runner.gpu_per_trial=0.3 &
+            sleep 10s
+        done
+    done
+    wait
+done
