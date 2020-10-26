@@ -13,13 +13,18 @@ from torch_butterfly.combine import TensorProduct
 
 class KOP2d(nn.Module):
 
-    def __init__(self, in_size, in_ch, out_ch, kernel_size, complex=True, nblocks=1, base=2):
+    def __init__(self, in_size, in_ch, out_ch, kernel_size, complex=True, init='ortho', nblocks=1,
+                 base=2):
         super().__init__()
         self.in_size = in_size
         self.in_ch = in_ch
         self.out_ch = out_ch
         self.kernel_size = kernel_size
         self.complex = complex
+        assert init in ['ortho', 'fft']
+        if init == 'fft':
+            assert self.complex, 'fft init requires complex=True'
+        self.init = init
         self.nblocks = nblocks
         assert base in [2, 4]
         self.base = base
@@ -32,24 +37,17 @@ class KOP2d(nn.Module):
         self.weight = nn.Parameter(nn.Conv2d(self.in_ch, self.out_ch, self.kernel_size,
                                              padding=self.padding, bias=False).weight)
 
-        self.Kd = TensorProduct(
-            Butterfly(self.in_size[-1], self.in_size[-1], bias=False,
-                increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks),
-            Butterfly(self.in_size[-2], self.in_size[-2], bias=False,
-                increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks)
-        )
-        self.K1 = TensorProduct(
-            Butterfly(self.in_size[-1], self.in_size[-1], bias=False,
-                increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks),
-            Butterfly(self.in_size[-2], self.in_size[-2], bias=False,
-                increasing_stride=False, complex=complex, init='ortho', nblocks=nblocks)
-        )
-        self.K2 = TensorProduct(
-            Butterfly(self.in_size[-1], self.in_size[-1], bias=False,
-                increasing_stride=True, complex=complex, init='ortho', nblocks=nblocks),
-            Butterfly(self.in_size[-1], self.in_size[-2], bias=False,
-                increasing_stride=True, complex=complex, init='ortho', nblocks=nblocks)
-        )
+        increasing_strides = [False, False, True]
+        inits = ['ortho'] * 3 if self.init == 'ortho' else ['fft_no_br', 'fft_no_br', 'ifft_no_br']
+        self.Kd, self.K1, self.K2 = [
+            TensorProduct(
+                Butterfly(self.in_size[-1], self.in_size[-1], bias=False, complex=complex,
+                    increasing_stride=incstride, init=i, nblocks=nblocks),
+                Butterfly(self.in_size[-2], self.in_size[-2], bias=False, complex=complex,
+                    increasing_stride=incstride, init=i, nblocks=nblocks)
+            )
+            for incstride, i in zip(increasing_strides, inits)
+        ]
         with torch.no_grad():
             self.Kd.map1 *= math.sqrt(self.in_size[-1])
             self.Kd.map2 *= math.sqrt(self.in_size[-2])
