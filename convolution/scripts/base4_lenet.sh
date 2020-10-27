@@ -9,20 +9,17 @@ for complex in True False; do
     done
 done
 
-for base in 4 2; do
-    for nblocks in 6 5 4 3 2 1; do
-        python train.py wandb.group=base4-lenet model._target_=models.ButterfLeNet +model.nblocks=$nblocks +model.complex=True +model.base=$base +model.init=fft train.optimizer.lr=0.01 '+train.lr_scheduler={_target_:lr_schedulers.LeNetScheduler,nepochs:100}' train.optimizer.weight_decay=1e-4 runner.ntrials=3 runner.gpu_per_trial=0.3 &
-        sleep 10s
-    done
-done
-wait
+python train.py wandb.group=base4-lenet model._target_=models.ButterfLeNet '+model.nblocks=[_grid,1,2,3,4,5,6]' +model.complex=True '+model.base=[_grid,2,4]' +model.init=fft train.optimizer.lr=0.01 '+train.lr_scheduler={_target_:lr_schedulers.LeNetScheduler,nepochs:100}' train.optimizer.weight_decay=1e-4 runner.ntrials=3 runner.gpu_per_trial=0.3
 
-for complex in True False; do
-    for base in 4 2; do
-        for nblocks in 6 5 4 3 2 1; do
-            python train.py wandb.group=base4-lenet model._target_=models.ButterfLeNet +model.nblocks=$nblocks +model.complex=$complex +model.base=$base +model.init=ortho train.optimizer.lr=0.01 '+train.lr_scheduler={_target_:lr_schedulers.LeNetScheduler,nepochs:100}' train.optimizer.weight_decay=1e-4 runner.ntrials=3 runner.gpu_per_trial=0.3 &
-            sleep 10s
-        done
-    done
-    wait
-done
+python train.py wandb.group=base4-lenet model._target_=models.ButterfLeNet '+model.nblocks=[_grid,1,2,3,4,5,6]' '+model.complex=[_grid,True,False]' '+model.base=[_grid,2,4]' +model.init=ortho train.optimizer.lr=0.01 '+train.lr_scheduler={_target_:lr_schedulers.LeNetScheduler,nepochs:100}' train.optimizer.weight_decay=1e-4 runner.ntrials=3 runner.gpu_per_trial=0.3
+
+
+# See if zero-padding the filter weight makes a difference
+python train.py wandb.group=base4-lenet model._target_=models.ButterfLeNet '+model.nblocks=[_grid,1,2,3,4,5,6]' +model.complex=True '+model.base=[_grid,2,4]' +model.init=fft +model.zero_pad=False train.optimizer.lr=0.01 '+train.lr_scheduler={_target_:lr_schedulers.LeNetScheduler,nepochs:100}' train.optimizer.weight_decay=1e-4 runner.ntrials=3 runner.gpu_per_trial=0.3
+
+python train.py wandb.group=base4-lenet model._target_=models.ButterfLeNet '+model.nblocks=[_grid,1,2,3,4,5,6]' '+model.complex=[_grid,True,False]' '+model.base=[_grid,2,4]' +model.init=ortho +model.zero_pad=False train.optimizer.lr=0.01 '+train.lr_scheduler={_target_:lr_schedulers.LeNetScheduler,nepochs:100}' train.optimizer.weight_decay=1e-4 runner.ntrials=3 runner.gpu_per_trial=0.3
+
+# Train for 200 epochs instead of 100
+python train.py wandb.group=base4-lenet model._target_=models.ButterfLeNet '+model.nblocks=[_grid,1,2,3,4,5,6]' +model.complex=True '+model.base=[_grid,2,4]' +model.init=fft train.epochs=200 train.optimizer.lr=0.01 '+train.lr_scheduler={_target_:lr_schedulers.LeNetScheduler,nepochs:200}' train.optimizer.weight_decay=1e-4 runner.ntrials=3 runner.gpu_per_trial=0.3
+
+python train.py wandb.group=base4-lenet model._target_=models.ButterfLeNet '+model.nblocks=[_grid,1,2,3,4,5,6]' '+model.complex=[_grid,True,False]' '+model.base=[_grid,2,4]' +model.init=ortho train.epochs=200 train.optimizer.lr=0.01 '+train.lr_scheduler={_target_:lr_schedulers.LeNetScheduler,nepochs:200}' train.optimizer.weight_decay=1e-4 runner.ntrials=3 runner.gpu_per_trial=0.3
