@@ -14,7 +14,7 @@ from torch_butterfly.combine import TensorProduct
 class KOP2d(nn.Module):
 
     def __init__(self, in_size, in_ch, out_ch, kernel_size, complex=True, init='ortho', nblocks=1,
-                 base=2):
+                 base=2, zero_pad=True):
         super().__init__()
         self.in_size = in_size
         self.in_ch = in_ch
@@ -28,6 +28,7 @@ class KOP2d(nn.Module):
         self.nblocks = nblocks
         assert base in [2, 4]
         self.base = base
+        self.zero_pad = zero_pad
         if isinstance(self.in_size, int):
             self.in_size = (self.in_size, self.in_size)
         if isinstance(self.kernel_size, int):
@@ -63,11 +64,15 @@ class KOP2d(nn.Module):
             self.K2 = nn.Sequential(self.K2, Complex2Real())
 
     def forward(self, x):
-        w = F.pad(self.weight.flip([-1]),
-                    (0, self.in_size[-1] - self.kernel_size[-1])).roll(-self.padding[-1], dims=-1)
-        w = F.pad(w.flip([-2]),
-                  (0, 0, 0, self.in_size[-2] - self.kernel_size[-2])).roll(-self.padding[-2],
-                                                                           dims=-2)
+        if self.zero_pad:
+            w = F.pad(self.weight.flip([-1]),
+                        (0, self.in_size[-1] - self.kernel_size[-1])).roll(-self.padding[-1],
+                                                                           dims=-1)
+            w = F.pad(w.flip([-2]),
+                    (0, 0, 0, self.in_size[-2] - self.kernel_size[-2])).roll(-self.padding[-2],
+                                                                            dims=-2)
+        else:
+            w = self.weight
         # (batch, in_ch, h, w)
         x_f = self.K1(x)
         # (out_ch, in_ch, h, w)
