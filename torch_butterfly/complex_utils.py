@@ -25,15 +25,6 @@ if use_cupy:
                                 cp.dtype('complex64'): np.float32,
                                 cp.dtype('complex128'): np.float64}
 
-def torch2np(X):
-    """Convert a torch tensor to a numpy array, sharing the same memory.
-    """
-    return X.detach().numpy()
-
-
-def np2torch(X):
-    return torch.from_numpy(X)
-
 
 def torch2cp(tensor):
     # Need contiguous, or else it will error
@@ -61,7 +52,7 @@ class ComplexMatmul(torch.autograd.Function):
         #                                           X.real @ Y.imag + X.imag @ Y.real], dim=-1))
         # return complex_matmul_torch(X, Y)
         if not X.is_cuda:
-            return np2torch(torch2np(X) @ torch2np(Y))
+            return X @ Y
         else:
             return (cp2torch(torch2cp(X) @ torch2cp(Y))
                     if use_cupy else complex_matmul_torch(X, Y))
@@ -79,7 +70,7 @@ class ComplexMatmul(torch.autograd.Function):
             # ).sum_to_size(*X.shape)
             # grad_X = complex_matmul_torch(grad, Y_t.conj()).sum_to_size(*X.shape)
             if not Y.is_cuda:
-                grad_X = np2torch(torch2np(grad) @ torch2np(Y_t.conj())).sum_to_size(*X.shape)
+                grad_X = (grad @ Y_t.conj()).sum_to_size(*X.shape)
             else:
                 grad_X = (cp2torch(torch2cp(grad) @ torch2cp(Y_t.conj())) if use_cupy
                           else complex_matmul_torch(grad, Y_t.conj())).sum_to_size(*X.shape)
@@ -92,7 +83,7 @@ class ComplexMatmul(torch.autograd.Function):
             # ).sum_to_size(*Y.shape)
             # grad_Y = complex_matmul_torch(X_t.conj(), grad).sum_to_size(*Y.shape)
             if not X.is_cuda:
-                grad_Y = np2torch(torch2np(X_t.conj()) @ torch2np(grad)).sum_to_size(*Y.shape)
+                grad_Y = (X_t.conj() @ grad).sum_to_size(*Y.shape)
             else:
                 grad_Y = (cp2torch(torch2cp(X_t.conj()) @ torch2cp(grad)) if use_cupy
                           else complex_matmul_torch(X_t.conj(), grad)).sum_to_size(*Y.shape)
@@ -118,7 +109,7 @@ class Complex2Real(nn.Module):
         return input.real
 
 
-# Pytorch 1.7.0 doesn't have indexing_backward for complex so we have to write the backward
+# Pytorch 1.7 doesn't have indexing_backward for complex so we have to write the backward
 # pass explicitly
 class IndexLastDim(torch.autograd.Function):
 
@@ -136,3 +127,11 @@ class IndexLastDim(torch.autograd.Function):
 
 
 index_last_dim = IndexLastDim.apply
+
+
+# Pytorch 1.7 doesn't support complex reshape backward for non-contiguous tensors (fixed in nightly)
+def complex_reshape(x, *shape):
+    if not x.is_complex():
+        return x.reshape(*shape)
+    else:
+        return torch.view_as_complex(torch.view_as_real(x).reshape(*shape, 2))

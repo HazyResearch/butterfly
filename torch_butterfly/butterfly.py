@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torch_butterfly
 from torch_butterfly.multiply import butterfly_multiply
 from torch_butterfly.multiply import butterfly_multiply_torch
-from torch_butterfly.complex_utils import real_dtype_to_complex
+from torch_butterfly.complex_utils import real_dtype_to_complex, complex_reshape
 from torch_butterfly.multiply_base4 import twiddle_base2_to_base4
 
 
@@ -144,10 +144,7 @@ class Butterfly(nn.Module):
     def pre_process(self, input):
         # Reshape to (N, in_size)
         input_size = input.size(-1)
-        # Pytorch 1.7 doesn't support reshape backward for complex
-        # output = input.reshape(-1, input_size)
-        output = (input.reshape(-1, input_size) if not input.is_complex()
-                  else torch.view_as_complex(torch.view_as_real(input).reshape(-1, input_size, 2)))
+        output = complex_reshape(input, -1, input_size)
         batch = output.shape[0]
         output = output.unsqueeze(1).expand(batch, self.nstacks, input_size)
         return output
@@ -254,7 +251,7 @@ class ButterflyUnitary(Butterfly):
         """
         phi, alpha, psi, chi = torch.unbind(self.twiddle, -1)
         c, s = torch.cos(phi), torch.sin(phi)
-        # Pytorch 1.7.0 doesn't support complex exp backward so we have to use cos/sin
+        # Pytorch 1.7 doesn't support complex exp backward so we have to use cos/sin
         A = torch.stack((c * torch.cos(alpha + psi), c * torch.sin(alpha + psi)), dim=-1)
         B = torch.stack((s * torch.cos(alpha + chi), s * torch.sin(alpha + chi)), dim=-1)
         C = torch.stack((-s * torch.cos(alpha - chi), -s * torch.sin(alpha - chi)), dim=-1)
@@ -350,10 +347,7 @@ class ButterflyBmm(Butterfly):
         # Reshape to (N, matrix_batch, in_size)
         input_size = input.size(-1)
         assert input.size(-2) == self.matrix_batch
-        # Pytorch 1.7 doesn't support reshape backward for complex
-        # output = input.reshape(-1, self.matrix_batch, input_size)
-        output = (input.reshape(-1, self.matrix_batch, input_size) if not input.is_complex()
-                  else torch.view_as_complex(torch.view_as_real(input).reshape(-1, self.matrix_batch, input_size, 2)))
+        output = complex_reshape(input, -1, self.matrix_batch, input_size)
         batch = output.shape[0]
         output = output.unsqueeze(2).expand(batch, self.matrix_batch, self.nstacks, input_size)
         output = output.reshape(batch, self.matrix_batch * self.nstacks, input_size)
