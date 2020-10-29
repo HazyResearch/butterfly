@@ -8,7 +8,6 @@ from torch import nn
 from torch.nn import functional as F
 
 import torch_butterfly
-from torch_butterfly.complex_utils import view_as_complex
 
 
 class ButterflyBase4Test(unittest.TestCase):

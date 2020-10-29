@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torch_butterfly
 from torch_butterfly.multiply import butterfly_multiply
 from torch_butterfly.multiply import butterfly_multiply_torch
-from torch_butterfly.complex_utils import real_dtype_to_complex, view_as_real, view_as_complex
+from torch_butterfly.complex_utils import real_dtype_to_complex
 from torch_butterfly.multiply_base4 import twiddle_base2_to_base4
 
 
@@ -52,19 +52,12 @@ class Butterfly(nn.Module):
             self.bias = nn.Parameter(torch.empty(out_size, dtype=dtype))
         else:
             self.register_parameter('bias', None)
-        # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
-        # This is used in optimizers such as SGD.
-        # So we have to store the parameters as real.
-        if self.complex:
-            self.twiddle = nn.Parameter(view_as_real(self.twiddle))
-            if self.bias is not None:
-                self.bias = nn.Parameter(view_as_real(self.bias))
         self.twiddle._is_structured = True  # Flag to avoid weight decay
         self.reset_parameters()
 
     def reset_parameters(self):
         """Initialize bias the same way as torch.nn.Linear."""
-        twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
+        twiddle = self.twiddle
         if self.init == 'randn':
             # complex randn already has the correct scaling of stddev=1.0
             scaling = 1.0 / math.sqrt(2)
@@ -99,19 +92,17 @@ class Butterfly(nn.Module):
                 twiddle.copy_(twiddle_eye)
         elif self.init in ['fft_no_br', 'ifft_no_br']:
             assert self.complex, 'fft_no_br/ifft_no_br init requires Butterfly to be complex'
-            # Putting this before the FFT copy, otherwise there's a warning about
-            # view_as_complex.
-            if self.nblocks > 1:
-                twiddle_eye = torch.eye(2, dtype=twiddle.dtype).reshape(1, 1, 1, 1, 2, 2)
-                twiddle_eye = twiddle_eye.expand(*twiddle[:, 1:].shape).contiguous()
-                with torch.no_grad():
-                    twiddle[:, 1:] = twiddle_eye
             special_fn = (torch_butterfly.special.fft if self.init == 'fft_no_br'
                           else torch_butterfly.special.ifft)
             b_fft = special_fn(self.n, normalized=True, br_first=self.increasing_stride,
                                with_br_perm=False)
             with torch.no_grad():
-                twiddle[:, 0] = torch.view_as_complex(b_fft.twiddle)
+                twiddle[:, 0] = b_fft.twiddle
+            if self.nblocks > 1:
+                twiddle_eye = torch.eye(2, dtype=twiddle.dtype).reshape(1, 1, 1, 1, 2, 2)
+                twiddle_eye = twiddle_eye.expand(*twiddle[:, 1:].shape).contiguous()
+                with torch.no_grad():
+                    twiddle[:, 1:] = twiddle_eye
         if self.bias is not None:
             bound = 1 / math.sqrt(self.in_size)
             nn.init.uniform_(self.bias, -bound, bound)
@@ -128,7 +119,7 @@ class Butterfly(nn.Module):
         Return:
             output: (batch, *, out_size)
         """
-        twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
+        twiddle = self.twiddle
         output = self.pre_process(input)
         output_size = self.out_size if self.nstacks == 1 else None
         if subtwiddle:
@@ -169,8 +160,7 @@ class Butterfly(nn.Module):
         if out_size != output.shape[-1]:  # Take top rows
             output = output[:, :out_size]
         if self.bias is not None:
-            bias = self.bias if not self.complex else view_as_complex(self.bias)
-            output = output + bias[:out_size]
+            output = output + self.bias[:out_size]
         return output.view(*input.size()[:-1], out_size)
 
     def __imul__(self, scale):
@@ -187,11 +177,10 @@ class Butterfly(nn.Module):
         new = torch_butterfly.ButterflyBase4(self.in_size, self.out_size, self.bias is not None,
                                              self.complex, self.increasing_stride, self.init,
                                              self.nblocks).to(self.twiddle.device)
-        twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
-        twiddle4, twiddle2 = twiddle_base2_to_base4(twiddle, self.increasing_stride)
         with torch.no_grad():
-            new.twiddle4.copy_(twiddle4 if not new.complex else view_as_real(twiddle4))
-            new.twiddle2.copy_(twiddle2 if not new.complex else view_as_real(twiddle2))
+            twiddle4, twiddle2 = twiddle_base2_to_base4(self.twiddle, self.increasing_stride)
+            new.twiddle4.copy_(twiddle4)
+            new.twiddle2.copy_(twiddle2)
             if new.bias is not None:
                 new.bias.copy_(self.bias)
         return new
@@ -235,11 +224,6 @@ class ButterflyUnitary(Butterfly):
             self.bias = nn.Parameter(torch.empty(out_size, dtype=complex_dtype))
         else:
             self.register_parameter('bias', None)
-        # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
-        # This is used in optimizers such as SGD.
-        # So we have to store the parameters as real.
-        if self.bias is not None:
-            self.bias = nn.Parameter(view_as_real(self.bias))
         self.twiddle._is_structured = True  # Flag to avoid weight decay
         self.reset_parameters()
 
@@ -270,14 +254,14 @@ class ButterflyUnitary(Butterfly):
         """
         phi, alpha, psi, chi = torch.unbind(self.twiddle, -1)
         c, s = torch.cos(phi), torch.sin(phi)
-        # Pytorch 1.6.0 doesn't support complex exp on GPU so we have to use cos/sin
+        # Pytorch 1.7.0 doesn't support complex exp backward so we have to use cos/sin
         A = torch.stack((c * torch.cos(alpha + psi), c * torch.sin(alpha + psi)), dim=-1)
         B = torch.stack((s * torch.cos(alpha + chi), s * torch.sin(alpha + chi)), dim=-1)
         C = torch.stack((-s * torch.cos(alpha - chi), -s * torch.sin(alpha - chi)), dim=-1)
         D = torch.stack((c * torch.cos(alpha - psi), c * torch.sin(alpha - psi)), dim=-1)
         twiddle = torch.stack([torch.stack([A, B], dim=-2),
                                torch.stack([C, D], dim=-2)], dim=-3)
-        twiddle = view_as_complex(twiddle)
+        twiddle = torch.view_as_complex(twiddle)
         output = self.pre_process(input)
         output_size = self.out_size if self.nstacks == 1 else None
         if subtwiddle:
@@ -348,13 +332,6 @@ class ButterflyBmm(Butterfly):
             self.bias = nn.Parameter(torch.empty(self.matrix_batch, out_size, dtype=dtype))
         else:
             self.register_parameter('bias', None)
-        # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
-        # This is used in optimizers such as SGD.
-        # So we have to store the parameters as real.
-        if self.complex:
-            self.twiddle = nn.Parameter(view_as_real(self.twiddle))
-            if self.bias is not None:
-                self.bias = nn.Parameter(view_as_real(self.bias))
         self.twiddle._is_structured = True  # Flag to avoid weight decay
         self.reset_parameters()
 
@@ -390,8 +367,7 @@ class ButterflyBmm(Butterfly):
         if out_size != output.shape[-1]:  # Take top rows
             output = output[:, :, :out_size]
         if self.bias is not None:
-            bias = self.bias if not self.complex else view_as_complex(self.bias)
-            output = output + bias[:, :out_size]
+            output = output + self.bias[:, :out_size]
         return output.view(*input.size()[:-2], self.matrix_batch, self.out_size)
 
     to_base4 = None

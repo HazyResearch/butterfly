@@ -10,7 +10,6 @@ from torch_butterfly.butterfly import Butterfly, ButterflyUnitary
 from torch_butterfly.permutation import FixedPermutation, bitreversal_permutation, invert
 from torch_butterfly.permutation import wavelet_permutation
 from torch_butterfly.diagonal import Diagonal
-from torch_butterfly.complex_utils import view_as_real, view_as_complex
 from torch_butterfly.complex_utils import real2complex, Real2Complex, Complex2Real
 from torch_butterfly.complex_utils import index_last_dim
 from torch_butterfly.combine import diagonal_butterfly, TensorProduct, butterfly_product
@@ -44,7 +43,7 @@ def fft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
         twiddle /= math.sqrt(2)
     b = Butterfly(n, n, bias=False, complex=True, increasing_stride=br_first)
     with torch.no_grad():
-        view_as_complex(b.twiddle).copy_(twiddle)
+        b.twiddle.copy_(twiddle)
     if with_br_perm:
         br_perm = FixedPermutation(bitreversal_permutation(n, pytorch_format=True))
         return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
@@ -119,7 +118,7 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
         twiddle /= 2
     b = Butterfly(n, n, bias=False, complex=True, increasing_stride=br_first)
     with torch.no_grad():
-        view_as_complex(b.twiddle).copy_(twiddle)
+        b.twiddle.copy_(twiddle)
     if with_br_perm:
         br_perm = FixedPermutation(bitreversal_permutation(n, pytorch_format=True))
         return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
@@ -430,8 +429,6 @@ class DiagonalMultiplySum(nn.Module):
         super().__init__()
         self.diagonal = nn.Parameter(diagonal_init.detach().clone())
         self.complex = self.diagonal.is_complex()
-        if self.complex:
-            self.diagonal = nn.Parameter(view_as_real(self.diagonal))
 
     def forward(self, input):
         """
@@ -440,8 +437,7 @@ class DiagonalMultiplySum(nn.Module):
         Return:
             output: (batch, out_channels, size)
         """
-        diagonal = self.diagonal if not self.complex else view_as_complex(self.diagonal)
-        return (input.unsqueeze(1) * diagonal).sum(dim=2)
+        return (input.unsqueeze(1) * self.diagonal).sum(dim=2)
 
 
 def conv1d_circular_multichannel(n, weight) -> nn.Module:
@@ -485,8 +481,7 @@ def conv1d_circular_multichannel(n, weight) -> nn.Module:
     # col_f = col_f[..., br_perm]
     col_f = index_last_dim(col_f, br_perm)
     # We just want (input_f.unsqueeze(1) * col_f).sum(dim=2).
-    # This can be written as matrix multiply but Pytorch 1.6 doesn't yet support complex matrix
-    # multiply.
+    # This can be written as a complex matrix multiply as well.
 
     if not complex:
         return nn.Sequential(Real2Complex(), b_fft, DiagonalMultiplySum(col_f), b_ifft,
@@ -675,8 +670,7 @@ def conv2d_circular_multichannel(n1: int, n2: int, weight: torch.Tensor,
     if flatten:
         col_f = col_f.reshape(*col_f.shape[:-2], col_f.shape[-2] * col_f.shape[-1])
     # We just want (input_f.unsqueeze(1) * col_f).sum(dim=2).
-    # This can be written as matrix multiply but Pytorch 1.6 doesn't yet support complex matrix
-    # multiply.
+    # This can be written as a complex matrix multiply as well.
     if not complex:
         if not flatten:
             return nn.Sequential(Real2Complex(), b_fft, DiagonalMultiplySum(col_f), b_ifft,

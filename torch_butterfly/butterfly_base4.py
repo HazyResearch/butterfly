@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch_butterfly import Butterfly
 from torch_butterfly.multiply_base4 import butterfly_multiply_base4_torch
 from torch_butterfly.multiply_base4 import twiddle_base2_to_base4
-from torch_butterfly.complex_utils import real_dtype_to_complex, view_as_real, view_as_complex
+from torch_butterfly.complex_utils import real_dtype_to_complex
 from torch_butterfly.complex_utils import complex_matmul
 
 
@@ -31,17 +31,11 @@ class ButterflyBase4(Butterfly):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        twiddle = self.twiddle if not self.complex else view_as_complex(self.twiddle)
-        twiddle4, twiddle2 = twiddle_base2_to_base4(twiddle, self.increasing_stride)
+        with torch.no_grad():
+            twiddle4, twiddle2 = twiddle_base2_to_base4(self.twiddle, self.increasing_stride)
+        del self.twiddle
         self.twiddle4 = nn.Parameter(twiddle4)
         self.twiddle2 = nn.Parameter(twiddle2)
-        del self.twiddle
-        # Pytorch 1.6 doesn't support torch.Tensor.add_(other, alpha) yet.
-        # This is used in optimizers such as SGD.
-        # So we have to store the parameters as real.
-        if self.complex:
-            self.twiddle4 = nn.Parameter(view_as_real(self.twiddle4))
-            self.twiddle2 = nn.Parameter(view_as_real(self.twiddle2))
         self.twiddle4._is_structured = True  # Flag to avoid weight decay
         self.twiddle2._is_structured = True  # Flag to avoid weight decay
 
@@ -52,11 +46,9 @@ class ButterflyBase4(Butterfly):
         Return:
             output: (batch, *, out_size)
         """
-        twiddle4 = self.twiddle4 if not self.complex else view_as_complex(self.twiddle4)
-        twiddle2 = self.twiddle2 if not self.complex else view_as_complex(self.twiddle2)
         output = self.pre_process(input)
         output_size = self.out_size if self.nstacks == 1 else None
-        output = butterfly_multiply_base4_torch(twiddle4, twiddle2, output,
+        output = butterfly_multiply_base4_torch(self.twiddle4, self.twiddle2, output,
                                                 self.increasing_stride, output_size)
         return self.post_process(input, output)
 

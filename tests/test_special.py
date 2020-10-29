@@ -13,7 +13,6 @@ import torch.fft
 import pywt  # To test wavelet
 
 import torch_butterfly
-from torch_butterfly.complex_utils import view_as_real, view_as_complex
 
 
 class ButterflySpecialTest(unittest.TestCase):

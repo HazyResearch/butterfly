@@ -8,7 +8,7 @@ import torch
 from torch import nn
 
 from torch_butterfly import Butterfly
-from torch_butterfly.complex_utils import index_last_dim, view_as_complex, real2complex
+from torch_butterfly.complex_utils import index_last_dim, real2complex
 
 
 def bitreversal_permutation(n, pytorch_format=False):
@@ -344,7 +344,7 @@ def perm2butterfly_slow(v: Union[np.ndarray, torch.Tensor],
                              for i, r in enumerate(R_perms)]).flip([0])
     b = Butterfly(n, n, bias=False, complex=complex, increasing_stride=False, nblocks=2)
     with torch.no_grad():
-        b_twiddle = b.twiddle if not complex else view_as_complex(b.twiddle)
+        b_twiddle = b.twiddle
         twiddle = torch.stack([R_twiddle, L_twiddle]).unsqueeze(0)
         b_twiddle.copy_(twiddle if not complex else real2complex(twiddle))
     return b
@@ -430,7 +430,7 @@ def perm2butterfly(v: Union[np.ndarray, torch.Tensor],
         twiddle_left_factors.append(left_factor)
     b = Butterfly(n, n, bias=False, complex=complex, increasing_stride=False, nblocks=2)
     with torch.no_grad():
-        b_twiddle = b.twiddle if not complex else view_as_complex(b.twiddle)
+        b_twiddle = b.twiddle
         twiddle = torch.stack([torch.stack(twiddle_right_factors),
                                torch.stack(twiddle_left_factors).flip([0])]).unsqueeze(0)
         b_twiddle.copy_(twiddle if not complex else real2complex(twiddle))

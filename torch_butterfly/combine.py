@@ -6,7 +6,6 @@ from torch.nn import functional as F
 
 from torch_butterfly import Butterfly
 from torch_butterfly.permutation import FixedPermutation, bitreversal_permutation
-from torch_butterfly.complex_utils import view_as_real, view_as_complex
 
 
 def diagonal_butterfly(butterfly: Butterfly,
@@ -26,8 +25,7 @@ def diagonal_butterfly(butterfly: Butterfly,
     """
     assert butterfly.nstacks == 1
     assert butterfly.bias is None
-    twiddle = (butterfly.twiddle.clone() if not butterfly.complex else
-               view_as_complex(butterfly.twiddle).clone())
+    twiddle = butterfly.twiddle.clone()
     n = 1 << twiddle.shape[2]
     if diagonal.shape[-1] < n:
         diagonal = F.pad(diagonal, (0, n - diagonal.shape[-1]), value=1)
@@ -51,7 +49,7 @@ def diagonal_butterfly(butterfly: Butterfly,
             twiddle[:, -1, -1, :, 1, :] *= diagonal[1::2].unsqueeze(-1)
     out_butterfly = butterfly if inplace else copy.deepcopy(butterfly)
     with torch.no_grad():
-        out_butterfly.twiddle.copy_(twiddle if not butterfly.complex else view_as_real(twiddle))
+        out_butterfly.twiddle.copy_(twiddle)
     return out_butterfly
 
 
@@ -76,7 +74,6 @@ def butterfly_product(butterfly1: Butterfly, butterfly2: Butterfly) -> Butterfly
     b.in_size = butterfly1.in_size
     b.out_size = butterfly2.out_size
     with torch.no_grad():
-        # Don't need view_as_complex here since all the twiddles are stored in real.
         b.twiddle.copy_(torch.cat((butterfly1.twiddle, butterfly2.twiddle), dim=1))
     return b
 
@@ -121,8 +118,8 @@ def butterfly_kronecker(butterfly1: Butterfly, butterfly2: Butterfly) -> Butterf
     log_n2 = butterfly2.twiddle.shape[2]
     log_n = log_n1 + log_n2
     n = 1 << log_n
-    twiddle1 = butterfly1.twiddle if not complex else view_as_complex(butterfly1.twiddle)
-    twiddle2 = butterfly2.twiddle if not complex else view_as_complex(butterfly2.twiddle)
+    twiddle1 = butterfly1.twiddle
+    twiddle2 = butterfly2.twiddle
     twiddle1 = twiddle1.detach().repeat(1, 1, 1, 1 << log_n2, 1, 1)
     twiddle2 = twiddle2.detach().repeat_interleave(1 << log_n1, dim=3)
     twiddle = (torch.cat((twiddle1, twiddle2), dim=2) if increasing_stride else
@@ -132,8 +129,7 @@ def butterfly_kronecker(butterfly1: Butterfly, butterfly2: Butterfly) -> Butterf
     b.in_size = butterfly1.in_size * butterfly2.in_size
     b.out_size = butterfly1.out_size * butterfly2.out_size
     with torch.no_grad():
-        b_twiddle = b.twiddle if not complex else view_as_complex(b.twiddle)
-        b_twiddle.copy_(twiddle)
+        b.twiddle.copy_(twiddle)
     return b
 
 

@@ -48,8 +48,8 @@ def cp2torch(tensor):
 
 def complex_matmul_torch(X, Y):
     # return X.real @ Y.real - X.imag @ Y.imag + 1j * (X.real @ Y.imag + X.imag @ Y.real)
-    return view_as_complex(torch.stack([X.real @ Y.real - X.imag @ Y.imag,
-                                        X.real @ Y.imag + X.imag @ Y.real], dim=-1))
+    return torch.view_as_complex(torch.stack([X.real @ Y.real - X.imag @ Y.imag,
+                                              X.real @ Y.imag + X.imag @ Y.real], dim=-1))
 
 
 class ComplexMatmul(torch.autograd.Function):
@@ -57,8 +57,8 @@ class ComplexMatmul(torch.autograd.Function):
     @staticmethod
     def forward(ctx, X, Y):
         ctx.save_for_backward(X, Y)
-        # return view_as_complex(torch.stack([X.real @ Y.real - X.imag @ Y.imag,
-        #                                     X.real @ Y.imag + X.imag @ Y.real], dim=-1))
+        # return torch.view_as_complex(torch.stack([X.real @ Y.real - X.imag @ Y.imag,
+        #                                           X.real @ Y.imag + X.imag @ Y.real], dim=-1))
         # return complex_matmul_torch(X, Y)
         if not X.is_cuda:
             return np2torch(torch2np(X) @ torch2np(Y))
@@ -73,7 +73,7 @@ class ComplexMatmul(torch.autograd.Function):
         if ctx.needs_input_grad[0]:
             Y_t = Y.transpose(-1, -2)
             # grad_X = (grad @ Y_t.conj()).sum_to_size(*X.shape)
-            # grad_X = view_as_complex(
+            # grad_X = torch.view_as_complex(
             #     torch.stack([grad.real @ Y_t.real + grad.imag @ Y_t.imag,
             #                  -grad.real @ Y_t.imag + grad.imag @ Y_t.real], dim=-1)
             # ).sum_to_size(*X.shape)
@@ -86,7 +86,7 @@ class ComplexMatmul(torch.autograd.Function):
         if ctx.needs_input_grad[1]:
             X_t = X.transpose(-1, -2)
             # grad_Y = (X_t.conj() @ grad).sum_to_size(*Y.shape)
-            # grad_Y = view_as_complex(
+            # grad_Y = torch.view_as_complex(
             #     torch.stack([X_t.real @ grad.real + X_t.imag @ grad.imag,
             #                  X_t.real @ grad.imag - X_t.imag @ grad.real], dim=-1)
             # ).sum_to_size(*Y.shape)
@@ -101,42 +101,6 @@ class ComplexMatmul(torch.autograd.Function):
 
 def complex_matmul(X, Y):
     return X @ Y if not X.is_complex() else ComplexMatmul.apply(X, Y)
-
-
-# In Pytorch 1.6, torch.view_as_real and torch.view_as_complex conjugate their gradients.
-# This follows Jax's convention. However, we currently follow Tensorflow's convention, where
-# the gradient should be as if everything is done with real numbers.
-# See the discussion here: https://github.com/pytorch/pytorch/issues/41857
-# As a result, we redefine these functions with the gradient following Tensorflow's convention.
-# For now, DO NOT use torch.view_as_real and torch.view_as_complex directly.
-# Only use view_as_real and view_as_complex defined in this file.
-
-class ViewAsReal(torch.autograd.Function):
-
-    @staticmethod
-    def forward(ctx, X):
-        return torch.view_as_real(X)
-
-    @staticmethod
-    def backward(ctx, grad):
-        return torch.view_as_complex(grad)
-
-
-view_as_real = ViewAsReal.apply
-
-
-class ViewAsComplex(torch.autograd.Function):
-
-    @staticmethod
-    def forward(ctx, X):
-        return torch.view_as_complex(X)
-
-    @staticmethod
-    def backward(ctx, grad):
-        return torch.view_as_real(grad)
-
-
-view_as_complex = ViewAsComplex.apply
 
 
 def real2complex(X):

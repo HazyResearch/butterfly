@@ -6,10 +6,11 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
+import torch.fft
 
 import torch_butterfly
 from torch_butterfly import Butterfly
-from torch_butterfly.complex_utils import view_as_complex, complex_matmul
+from torch_butterfly.complex_utils import complex_matmul
 from torch_butterfly.combine import TensorProduct
 from torch_butterfly.complex_utils import real2complex
 
@@ -36,7 +37,7 @@ class ButterflyTest(unittest.TestCase):
                                 self.assertTrue(output.shape == (batch_size, out_size),
                                                 (output.shape, device, (in_size, out_size), complex, init, nblocks))
                                 if init == 'ortho':
-                                    twiddle = b.twiddle if not b.complex else view_as_complex(b.twiddle)
+                                    twiddle = b.twiddle
                                     twiddle_np = twiddle.detach().to('cpu').numpy()
                                     twiddle_np = twiddle_np.reshape(-1, 2, 2)
                                     twiddle_norm = np.linalg.norm(twiddle_np, ord=2, axis=(1, 2))
@@ -50,18 +51,17 @@ class ButterflyTest(unittest.TestCase):
         br = torch_butterfly.permutation.bitreversal_permutation(n, pytorch_format=True)
         for increasing_stride in [True, False]:
             for nblocks in [1, 2, 3]:
-                out_torch = torch.view_as_complex(torch.fft(torch.view_as_real(input),
-                                                            signal_ndim=1, normalized=True))
-                b = Butterfly(n, n, False, complex=True, increasing_stride=increasing_stride,
-                              init='fft_no_br', nblocks=nblocks)
-                out = b(input[..., br]) if increasing_stride else b(input)[..., br]
-                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
-                out_torch = torch.view_as_complex(torch.ifft(torch.view_as_real(input),
-                                                             signal_ndim=1, normalized=True))
-                b = Butterfly(n, n, False, complex=True, increasing_stride=increasing_stride,
-                              init='ifft_no_br', nblocks=nblocks)
-                out = b(input[..., br]) if increasing_stride else b(input)[..., br]
-                self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+                with torch.no_grad():
+                    out_torch = torch.fft.fft(input, norm='ortho')
+                    b = Butterfly(n, n, False, complex=True, increasing_stride=increasing_stride,
+                                init='fft_no_br', nblocks=nblocks)
+                    out = b(input[..., br]) if increasing_stride else b(input)[..., br]
+                    self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
+                    out_torch = torch.fft.ifft(input, norm='ortho')
+                    b = Butterfly(n, n, False, complex=True, increasing_stride=increasing_stride,
+                                init='ifft_no_br', nblocks=nblocks)
+                    out = b(input[..., br]) if increasing_stride else b(input)[..., br]
+                    self.assertTrue(torch.allclose(out, out_torch, self.rtol, self.atol))
 
     def test_fft2d_init(self):
         batch_size = 10

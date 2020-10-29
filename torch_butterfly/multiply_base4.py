@@ -3,8 +3,6 @@ import math
 import torch
 from torch.nn import functional as F
 
-from torch_butterfly.complex_utils import complex_mul
-
 
 def butterfly_multiply_base4_torch(twiddle4, twiddle2, input, increasing_stride=True,
                                    output_size=None):
@@ -30,7 +28,7 @@ def butterfly_multiply_base4_torch(twiddle4, twiddle2, input, increasing_stride=
             t = twiddle4[:, block, idx].view(
                 nstacks, n // (4 * stride), stride, 4, 4).permute(0, 1, 3, 4, 2)
             output_reshape = output.view(batch_size, nstacks, n // (4 * stride), 1, 4, stride)
-            output = complex_mul(t, output_reshape).sum(dim=4)
+            output = (t * output_reshape).sum(dim=4)
         if log_n % 2 == 1:
             log2_stride = log_n - 1 if cur_increasing_stride else 0
             stride = 1 << log2_stride
@@ -38,7 +36,7 @@ def butterfly_multiply_base4_torch(twiddle4, twiddle2, input, increasing_stride=
             t = twiddle2[:, block, 0].view(
                 nstacks, n // (2 * stride), stride, 2, 2).permute(0, 1, 3, 4, 2)
             output_reshape = output.view(batch_size, nstacks, n // (2 * stride), 1, 2, stride)
-            output = complex_mul(t, output_reshape).sum(dim=4)
+            output = (t * output_reshape).sum(dim=4)
         cur_increasing_stride = not cur_increasing_stride
     return output.view(batch_size, nstacks, n)[:, :, :output_size]
 
@@ -64,10 +62,9 @@ def twiddle_base2_to_base4(twiddle, increasing_stride=True):
             odd = twiddle[:, block, 2 * idx + 1].view(
                 nstacks, n // (4 * stride), 2, stride, 2, 2).transpose(-3, -4)
             if cur_increasing_stride:
-                prod = complex_mul(odd.transpose(-2, -3).unsqueeze(-1),
-                                   even.transpose(-2, -3).unsqueeze(-4))
+                prod = odd.transpose(-2, -3).unsqueeze(-1) * even.transpose(-2, -3).unsqueeze(-4)
             else:
-                prod = complex_mul(odd.unsqueeze(-2), even.permute(0, 1, 2, 4, 5, 3).unsqueeze(-3))
+                prod = odd.unsqueeze(-2) * even.permute(0, 1, 2, 4, 5, 3).unsqueeze(-3)
             prod = prod.reshape(nstacks, n // 4, 4, 4)
             twiddle4[:, block, idx].copy_(prod)
         cur_increasing_stride = not cur_increasing_stride
