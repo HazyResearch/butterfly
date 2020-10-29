@@ -1,3 +1,4 @@
+import math
 import numpy as np
 
 import torch
@@ -135,3 +136,38 @@ def complex_reshape(x, *shape):
         return x.reshape(*shape)
     else:
         return torch.view_as_complex(torch.view_as_real(x).reshape(*shape, 2))
+
+
+class ComplexLinear(nn.Module):
+
+    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = nn.Parameter(torch.empty(out_features, in_features, dtype=torch.complex64))
+        if bias:
+            self.bias = nn.Parameter(torch.empty(out_features, dtype=torch.complex64))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        # Uniform random doesn't account for complex so the variance is larger by factor of sqrt(2)
+        with torch.no_grad():
+            weight /= math.sqrt(2)
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        output = complex_reshape(input, -1, input.size(-1))
+        output = complex_matmul(output, self.weight.t())
+        output = output.reshape(*input.shape[:-1], output.shape[-1])
+        return output if self.bias is None else output + self.bias
+
+    def extra_repr(self) -> str:
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, self.bias is not None
+        )

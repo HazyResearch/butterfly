@@ -70,7 +70,7 @@ class KOP2d(nn.Module):
                                                                            dims=-1)
             w = F.pad(w.flip([-2]),
                     (0, 0, 0, self.in_size[-2] - self.kernel_size[-2])).roll(-self.padding[-2],
-                                                                            dims=-2)
+                                                                             dims=-2)
         else:
             w = self.weight
         # (batch, in_ch, h, w)
