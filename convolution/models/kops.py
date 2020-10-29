@@ -35,8 +35,10 @@ class KOP2d(nn.Module):
             self.kernel_size = (self.kernel_size, self.kernel_size)
         self.padding = (self.kernel_size[0] - 1) // 2, (self.kernel_size[1] - 1) // 2
         # Just to use nn.Conv2d's initialization
-        self.weight = nn.Parameter(nn.Conv2d(self.in_ch, self.out_ch, self.kernel_size,
-                                             padding=self.padding, bias=False).weight)
+        self.weight = nn.Parameter(
+            nn.Conv2d(self.in_ch, self.out_ch, self.kernel_size, padding=self.padding,
+                      bias=False).weight.flip([-1, -2])
+        )
 
         increasing_strides = [False, False, True]
         inits = ['ortho'] * 3 if self.init == 'ortho' else ['fft_no_br', 'fft_no_br', 'ifft_no_br']
@@ -65,12 +67,12 @@ class KOP2d(nn.Module):
 
     def forward(self, x):
         if self.zero_pad:
-            w = F.pad(self.weight.flip([-1]),
-                        (0, self.in_size[-1] - self.kernel_size[-1])).roll(-self.padding[-1],
-                                                                           dims=-1)
-            w = F.pad(w.flip([-2]),
-                    (0, 0, 0, self.in_size[-2] - self.kernel_size[-2])).roll(-self.padding[-2],
-                                                                             dims=-2)
+            w = F.pad(self.weight,
+                      (0, self.in_size[-1] - self.kernel_size[-1])).roll(-self.padding[-1],
+                                                                         dims=-1)
+            w = F.pad(w,
+                      (0, 0, 0, self.in_size[-2] - self.kernel_size[-2])).roll(-self.padding[-2],
+                                                                               dims=-2)
         else:
             w = self.weight
         # (batch, in_ch, h, w)
