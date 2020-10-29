@@ -95,8 +95,20 @@ def complex_matmul(X, Y):
     return X @ Y if not X.is_complex() else ComplexMatmul.apply(X, Y)
 
 
-def real2complex(X):
-    return X.to(real_dtype_to_complex[X.dtype])
+# Implement backward pass of real2complex explicitly to avoid annoying (but harmless) warning
+# "Casting complex values to real discards the imaginary part", as of Pytorch 1.7
+class Real2ComplexFn(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, X):
+        return X.to(real_dtype_to_complex[X.dtype])
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad.real
+
+
+real2complex = Real2ComplexFn.apply
 
 
 # nn.Module form just to support convenient use of nn.Sequential
