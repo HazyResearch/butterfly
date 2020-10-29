@@ -1,5 +1,5 @@
-pytorch>=1.6
-pytorch-lightning>=1.0.0
+pytorch>=1.7
+pytorch-lightning>=1.0.3
 pytorch-lightning-bolts>=0.2.5
 hydra-core>=1.0.0
 # Only necessary for distributed training:

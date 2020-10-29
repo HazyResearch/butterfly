@@ -32,13 +32,13 @@ RUN curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest
     && conda clean -ya
 
 # Pytorch, scipy
-RUN conda install -y -c pytorch cudatoolkit=10.1 pytorch=1.6.0 torchvision \
+RUN conda install -y -c pytorch cudatoolkit=10.1 pytorch=1.7.0 torchvision \
     && conda install -y scipy \
     && conda clean -ya
 
 # Other libraries
 # wanbd>=0.10.0 tries to read from ~/.config, and that causes permission error on dawn
-RUN pip install pytorch-lightning==1.0.2 pytorch-lightning-bolts==0.2.5 ray[tune]==1.0.0 hydra-core==1.0.3 wandb==0.9.7 munch scikit-learn \
+RUN pip install pytorch-lightning==1.0.3 pytorch-lightning-bolts==0.2.5 ray[tune]==1.0.0 hydra-core==1.0.3 wandb==0.9.7 munch scikit-learn \
     && rm -rf /home/user/.cache/pip
 RUN pip install -U https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-1.1.0.dev0-cp38-cp38-manylinux1_x86_64.whl \
     && rm -rf /home/user/.cache/pip
