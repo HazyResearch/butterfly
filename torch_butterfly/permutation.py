@@ -342,11 +342,9 @@ def perm2butterfly_slow(v: Union[np.ndarray, torch.Tensor],
     # Stored in increasing_stride=False twiddle format so we need to flip the order
     R_twiddle = torch.stack([matrix_to_butterfly_factor(r, log_k=i+1, pytorch_format=True)
                              for i, r in enumerate(R_perms)]).flip([0])
-    b = Butterfly(n, n, bias=False, complex=complex, increasing_stride=False, nblocks=2)
-    with torch.no_grad():
-        b_twiddle = b.twiddle
-        twiddle = torch.stack([R_twiddle, L_twiddle]).unsqueeze(0)
-        b_twiddle.copy_(twiddle if not complex else real2complex(twiddle))
+    twiddle = torch.stack([R_twiddle, L_twiddle]).unsqueeze(0)
+    b = Butterfly(n, n, bias=False, complex=complex, increasing_stride=False,
+                  init=twiddle if not complex else real2complex(twiddle), nblocks=2)
     return b
 
 
@@ -428,10 +426,8 @@ def perm2butterfly(v: Union[np.ndarray, torch.Tensor],
         right_factor, left_factor, v = outer_twiddle_factors(v)
         twiddle_right_factors.append(right_factor)
         twiddle_left_factors.append(left_factor)
-    b = Butterfly(n, n, bias=False, complex=complex, increasing_stride=False, nblocks=2)
-    with torch.no_grad():
-        b_twiddle = b.twiddle
-        twiddle = torch.stack([torch.stack(twiddle_right_factors),
-                               torch.stack(twiddle_left_factors).flip([0])]).unsqueeze(0)
-        b_twiddle.copy_(twiddle if not complex else real2complex(twiddle))
+    twiddle = torch.stack([torch.stack(twiddle_right_factors),
+                           torch.stack(twiddle_left_factors).flip([0])]).unsqueeze(0)
+    b = Butterfly(n, n, bias=False, complex=complex, increasing_stride=False,
+                  init=twiddle if not complex else real2complex(twiddle), nblocks=2)
     return b

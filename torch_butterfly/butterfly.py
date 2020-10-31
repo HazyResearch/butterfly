@@ -24,10 +24,10 @@ class Butterfly(nn.Module):
         complex: whether complex or real
         increasing_stride: whether the first butterfly block will multiply with increasing stride
             (e.g. 1, 2, ..., n/2) or decreasing stride (e.g., n/2, n/4, ..., 1).
-        init: 'randn', 'ortho', 'identity', 'fft_no_br', or 'ifft_no_br'. Whether the weight matrix
-            should be initialized to from randn twiddle, or to be randomly orthogonal/unitary, or
-            to be the identity matrix, or the normalized FFT/iFFT twiddle (without the bit-reversal
-            permutation).
+        init: a torch.Tensor, or 'randn', 'ortho', 'identity', 'fft_no_br', or 'ifft_no_br'.
+            Whether the weight matrix should be initialized to from randn twiddle, or to be
+            randomly orthogonal/unitary, or to be the identity matrix, or the normalized FFT/iFFT
+            twiddle (without the bit-reversal permutation).
         nblocks: number of B or B^T blocks. The B and B^T will alternate.
     """
 
@@ -45,9 +45,15 @@ class Butterfly(nn.Module):
         self.nblocks = nblocks
         dtype = torch.get_default_dtype() if not self.complex else real_dtype_to_complex[torch.get_default_dtype()]
         twiddle_shape = (self.nstacks, nblocks, log_n, n // 2, 2, 2)
-        assert init in ['randn', 'ortho', 'identity', 'fft_no_br', 'ifft_no_br']
-        self.init = init
-        self.twiddle = nn.Parameter(torch.empty(twiddle_shape, dtype=dtype))
+        if isinstance(init, torch.Tensor):
+            self.init = None
+            assert init.shape == twiddle_shape
+            assert init.dtype == dtype
+            self.twiddle = nn.Parameter(init.clone())
+        else:
+            assert init in ['empty', 'randn', 'ortho', 'identity', 'fft_no_br', 'ifft_no_br']
+            self.init = init
+            self.twiddle = nn.Parameter(torch.empty(twiddle_shape, dtype=dtype))
         if bias:
             self.bias = nn.Parameter(torch.empty(out_size, dtype=dtype))
         else:
@@ -57,8 +63,13 @@ class Butterfly(nn.Module):
 
     def reset_parameters(self):
         """Initialize bias the same way as torch.nn.Linear."""
+        if self.bias is not None:
+            bound = 1 / math.sqrt(self.in_size)
+            nn.init.uniform_(self.bias, -bound, bound)
         twiddle = self.twiddle
-        if self.init == 'randn':
+        if self.init is None or self.init == 'empty':
+            return
+        elif self.init == 'randn':
             # complex randn already has the correct scaling of stddev=1.0
             scaling = 1.0 / math.sqrt(2)
             with torch.no_grad():
@@ -103,9 +114,6 @@ class Butterfly(nn.Module):
                 twiddle_eye = twiddle_eye.expand(*twiddle[:, 1:].shape).contiguous()
                 with torch.no_grad():
                     twiddle[:, 1:] = twiddle_eye
-        if self.bias is not None:
-            bound = 1 / math.sqrt(self.in_size)
-            nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input, transpose=False, conjugate=False, subtwiddle=False):
         """
@@ -171,14 +179,14 @@ class Butterfly(nn.Module):
         return self
 
     def to_base4(self):
-        new = torch_butterfly.ButterflyBase4(self.in_size, self.out_size, self.bias is not None,
-                                             self.complex, self.increasing_stride, self.init,
-                                             self.nblocks).to(self.twiddle.device)
         with torch.no_grad():
             twiddle4, twiddle2 = twiddle_base2_to_base4(self.twiddle, self.increasing_stride)
-            new.twiddle4.copy_(twiddle4)
-            new.twiddle2.copy_(twiddle2)
-            if new.bias is not None:
+        new = torch_butterfly.ButterflyBase4(self.in_size, self.out_size, self.bias is not None,
+                                             self.complex, self.increasing_stride,
+                                             init=(twiddle4, twiddle2),
+                                             nblocks=self.nblocks).to(self.twiddle.device)
+        if new.bias is not None:
+            with torch.no_grad():
                 new.bias.copy_(self.bias)
         return new
 
@@ -322,9 +330,15 @@ class ButterflyBmm(Butterfly):
         self.nblocks = nblocks
         dtype = torch.get_default_dtype() if not self.complex else real_dtype_to_complex[torch.get_default_dtype()]
         twiddle_shape = (self.matrix_batch * self.nstacks, nblocks, log_n, n // 2, 2, 2)
-        assert init in ['randn', 'ortho', 'identity']
-        self.init = init
-        self.twiddle = nn.Parameter(torch.empty(twiddle_shape, dtype=dtype))
+        if isinstance(init, torch.Tensor):
+            self.init = None
+            assert init.shape == twiddle_shape
+            assert init.dtype == dtype
+            self.twiddle = nn.Parameter(init.clone())
+        else:
+            assert init in ['randn', 'ortho', 'identity', 'fft_no_br', 'ifft_no_br']
+            self.init = init
+            self.twiddle = nn.Parameter(torch.empty(twiddle_shape, dtype=dtype))
         if bias:
             self.bias = nn.Parameter(torch.empty(self.matrix_batch, out_size, dtype=dtype))
         else:

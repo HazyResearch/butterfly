@@ -41,9 +41,7 @@ def fft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
     # Divide the whole transform by sqrt(n) by dividing each factor by n^(1/2 log_n) = sqrt(2)
     if normalized:
         twiddle /= math.sqrt(2)
-    b = Butterfly(n, n, bias=False, complex=True, increasing_stride=br_first)
-    with torch.no_grad():
-        b.twiddle.copy_(twiddle)
+    b = Butterfly(n, n, bias=False, complex=True, increasing_stride=br_first, init=twiddle)
     if with_br_perm:
         br_perm = FixedPermutation(bitreversal_permutation(n, pytorch_format=True))
         return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
@@ -116,9 +114,7 @@ def ifft(n, normalized=False, br_first=True, with_br_perm=True) -> nn.Module:
         twiddle /= math.sqrt(2)
     else:
         twiddle /= 2
-    b = Butterfly(n, n, bias=False, complex=True, increasing_stride=br_first)
-    with torch.no_grad():
-        b.twiddle.copy_(twiddle)
+    b = Butterfly(n, n, bias=False, complex=True, increasing_stride=br_first, init=twiddle)
     if with_br_perm:
         br_perm = FixedPermutation(bitreversal_permutation(n, pytorch_format=True))
         return nn.Sequential(br_perm, b) if br_first else nn.Sequential(b, br_perm)
@@ -357,13 +353,11 @@ def hadamard(n, normalized=False, increasing_stride=True) -> Butterfly:
     log_n = int(math.ceil(math.log2(n)))
     assert n == 1 << log_n, 'n must be a power of 2'
     twiddle = torch.tensor([[1, 1], [1, -1]], dtype=torch.float)
+    # Divide the whole transform by sqrt(n) by dividing each factor by n^(1/2 log_n) = sqrt(2)
     if normalized:
         twiddle /= math.sqrt(2)
     twiddle = twiddle.reshape(1, 1, 1, 1, 2, 2).expand((1, 1, log_n, n // 2, 2, 2))
-    # Divide the whole transform by sqrt(n) by dividing each factor by n^(1/2 log_n) = sqrt(2)
-    b = Butterfly(n, n, bias=False, increasing_stride=increasing_stride)
-    with torch.no_grad():
-        b.twiddle.copy_(twiddle)
+    b = Butterfly(n, n, bias=False, increasing_stride=increasing_stride, init=twiddle)
     return b
 
 
@@ -803,9 +797,7 @@ def wavelet_haar(n, with_perm=True) -> nn.Module:
         twiddle_factor = torch.cat((factor, identity.expand(num_identity, 2, 2)))
         factors.append(twiddle_factor.repeat(n // size, 1, 1))
     twiddle = torch.stack(factors, dim=0).unsqueeze(0).unsqueeze(0)
-    b = Butterfly(n, n, bias=False, increasing_stride=True)
-    with torch.no_grad():
-        b.twiddle.copy_(twiddle)
+    b = Butterfly(n, n, bias=False, increasing_stride=True, init=twiddle)
     if with_perm:
         perm = FixedPermutation(wavelet_permutation(n, pytorch_format=True))
         return nn.Sequential(b, perm)

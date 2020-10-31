@@ -30,9 +30,16 @@ class ButterflyBase4(Butterfly):
     """
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        with torch.no_grad():
-            twiddle4, twiddle2 = twiddle_base2_to_base4(self.twiddle, self.increasing_stride)
+        init = kwargs.get('init', None)
+        if (isinstance(init, tuple) and len(init) == 2 and isinstance(init[0], torch.Tensor)
+            and isinstance(init[1], torch.Tensor)):
+            twiddle4, twiddle2 = init[0].clone(), init[1].clone()
+            kwargs['init'] = 'empty'
+            super().__init__(*args, **kwargs)
+        else:
+            super().__init__(*args, **kwargs)
+            with torch.no_grad():
+                twiddle4, twiddle2 = twiddle_base2_to_base4(self.twiddle, self.increasing_stride)
         del self.twiddle
         self.twiddle4 = nn.Parameter(twiddle4)
         self.twiddle2 = nn.Parameter(twiddle2)

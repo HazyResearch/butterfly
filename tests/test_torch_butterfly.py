@@ -254,9 +254,10 @@ class ButterflyTest(unittest.TestCase):
                             output_loop = []
                             for i in range(matrix_batch):
                                 b = Butterfly(in_size, out_size, True, complex, increasing_stride,
+                                              init=b_bmm.twiddle[i * b_bmm.nstacks:(i + 1)
+                                                                 * b_bmm.nstacks],
                                               nblocks=nblocks).to(device)
                                 with torch.no_grad():
-                                    b.twiddle.copy_(b_bmm.twiddle[i * b_bmm.nstacks:(i + 1) * b_bmm.nstacks])
                                     b.bias.copy_(b_bmm.bias[i])
                                 output_loop.append(b(input[:, i]))
                             with torch.no_grad():
@@ -290,13 +291,11 @@ class ButterflyTest(unittest.TestCase):
         assert out.shape == (batch_size, out_channels, in_channels, n2, n1)
         # Use ButterflyBmm instead
         b1_bmm = torch_butterfly.ButterflyBmm(n1, n1, matrix_batch=out_channels * in_channels,
-                                              bias=False, complex=True)
-        with torch.no_grad():
-            b1_bmm.twiddle.copy_(torch.cat([b1.twiddle for b1 in b1s]))
+                                              bias=False, complex=True,
+                                              init=torch.cat([b1.twiddle for b1 in b1s]))
         b2_bmm = torch_butterfly.ButterflyBmm(n2, n2, matrix_batch=out_channels * in_channels,
-                                              bias=False, complex=True)
-        with torch.no_grad():
-            b2_bmm.twiddle.copy_(torch.cat([b2.twiddle for b2 in b2s]))
+                                              bias=False, complex=True,
+                                              init=torch.cat([b2.twiddle for b2 in b2s]))
         input_reshaped = input.transpose(1, 2).reshape(batch_size, n2, 1, in_channels, n1)
         input_expanded = input_reshaped.expand(batch_size, n2, out_channels, in_channels, n1)
         out_bmm = b1_bmm(input_expanded.reshape(batch_size, n2, out_channels * in_channels, n1))
