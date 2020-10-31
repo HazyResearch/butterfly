@@ -178,6 +178,17 @@ class Butterfly(nn.Module):
         self.twiddle *= scale ** (1.0 / self.twiddle.shape[1] / self.twiddle.shape[2])
         return self
 
+    def diagonal_multiply_(self, diagonal, diag_first):
+        """ Combine a Butterfly and a diagonal into another Butterfly.
+        Only support nstacks==1 for now.
+        Parameters:
+            diagonal: size (in_size,) if diag_first, else (out_size,). Should be of type complex
+                if butterfly.complex == True.
+            diag_first: If True, the map is input -> diagonal -> butterfly.
+                If False, the map is input -> butterfly -> diagonal.
+        """
+        return torch_butterfly.combine.diagonal_butterfly(self, diagonal, diag_first, inplace=True)
+
     def to_base4(self):
         with torch.no_grad():
             twiddle4, twiddle2 = twiddle_base2_to_base4(self.twiddle, self.increasing_stride)
