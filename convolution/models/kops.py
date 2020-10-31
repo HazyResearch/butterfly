@@ -55,7 +55,7 @@ class KOP2d(nn.Module):
         with torch.no_grad():
             self.Kd.map1 *= math.sqrt(self.in_size[-1])
             self.Kd.map2 *= math.sqrt(self.in_size[-2])
-        if self.zero_pad:
+        if self.zero_pad and self.complex:
             # Instead of zero-padding and calling weight.roll(-self.padding[-1], dims=-1) and
             # weight.roll(-self.padding[-2], dims=-2), we multiply self.Kd by complex exponential
             # instead, using the Shift theorem.
