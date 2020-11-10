@@ -14,7 +14,6 @@ import models
 import datamodules
 import tasks
 from pl_runner import pl_train
-from utils import to_scalar, dictconfig_to_munch
 from tee import StdoutTee, StderrTee
 
 
