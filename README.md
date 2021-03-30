@@ -3,7 +3,7 @@ Using Butterfly Factorizations](https://arxiv.org/abs/1903.05895) and [Kaleidosc
 
 ## Requirements
 python>=3.6  
-pytorch>=1.7  
+pytorch>=1.8  
 numpy  
 scipy
 
