@@ -11,8 +11,7 @@ scipy
 
 2020-08-03: The new interface to butterfly C++/CUDA code is in `csrc` and
 `torch_butterfly`.
-It is tested in `tests/test_torch_butterfly.py` (which also shows example
-usage).
+It is tested in `tests/test_butterfly.py` (which also shows example usage).
 
 To install:
 ```
