@@ -7,17 +7,28 @@ pytorch>=1.8
 numpy  
 scipy
 
-## Usage
-
-2020-08-03: The new interface to butterfly C++/CUDA code is in `csrc` and
-`torch_butterfly`.
-It is tested in `tests/test_butterfly.py` (which also shows example usage).
+# Installing the fast CUDA implementation of butterfly multiply:
 
 To install:
 ```
 python setup.py install
 ```
 That is, use the `setup.py` file in this root directory.
+
+An example of creating a conda environment and then installing the CUDA
+butterfly multiply (h/t Nir Ailon):
+```
+conda create --name butterfly python=3.8 scipy pytorch=1.8.1 cudatoolkit=11.0 -c pytorch
+conda activate butterfly
+python setup.py install
+```
+
+# Usage
+
+2020-08-03: The new interface to butterfly C++/CUDA code is in `csrc` and
+`torch_butterfly`.
+It is tested in `tests/test_butterfly.py` (which also shows example usage).
+
 
 The file `torch_butterfly/special.py` shows how to construct butterfly matrices
 that performs FFT, inverse FFT, circulant matrix multiplication,
