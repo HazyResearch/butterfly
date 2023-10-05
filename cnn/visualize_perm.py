@@ -15,7 +15,8 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 # Add to $PYTHONPATH in addition to sys.path so that ray workers can see
 os.environ['PYTHONPATH'] = project_root + ":" + os.environ.get('PYTHONPATH', '')
-import dataset_utils
+# import dataset_utils
+import pdataset_utils as dataset_utils
 import model_utils
 
 # perm_path = 'sinkhorn.samples_40.epochs_400'
@@ -47,19 +48,19 @@ if __name__ == '__main__':
     # model = model.permute
 
 
-    n_images = 2
+    n_images = 8
     original_dataset = {'name': 'PPCIFAR10', 'batch': n_images, 'transform': 'original'}
     permuted_dataset = {'name': 'PPCIFAR10', 'batch': n_images, 'transform': 'permute'}
     normalize_dataset = {'name': 'PPCIFAR10', 'batch': n_images, 'transform': 'normalize'}
     training_dataset = {'name': 'PPCIFAR10', 'batch': n_images}
     torch.manual_seed(0)
-    orig_train_loader, orig_test_loader = dataset_utils.get_dataset(original_dataset)
+    orig_train_loader, _, orig_test_loader = dataset_utils.get_dataset(original_dataset)
     torch.manual_seed(0)
-    perm_train_loader, perm_test_loader = dataset_utils.get_dataset(permuted_dataset)
+    perm_train_loader, _, perm_test_loader = dataset_utils.get_dataset(permuted_dataset)
     torch.manual_seed(0)
-    norm_train_loader, norm_test_loader = dataset_utils.get_dataset(normalize_dataset)
+    norm_train_loader, _, norm_test_loader = dataset_utils.get_dataset(normalize_dataset)
     torch.manual_seed(0)
-    train_train_loader, train_test_loader = dataset_utils.get_dataset(training_dataset)
+    train_train_loader, _, train_test_loader = dataset_utils.get_dataset(training_dataset)
 
     def imshow(img, name):
         npimg = img.numpy()

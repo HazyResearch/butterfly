@@ -76,13 +76,22 @@ class TrainableModel(Trainable):
     def _train_iteration(self): #TODO report train loss and acc
         self.model.train()
         # with torch.autograd.set_detect_anomaly(True):
+        train_loss = 0.0
+        correct = 0
         for data, target in self.train_loader:
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = F.cross_entropy(output, target)
             loss.backward()
+
+            train_loss += loss.item() * data.size(0)
+            pred = output.argmax(dim=1, keepdim=True)
+            correct += (pred == target.data.view_as(pred)).long().cpu().sum()
             self.optimizer.step()
+        train_loss = train_loss / len(self.train_loader.dataset)
+        train_accuracy = correct.item() / len(self.train_loader.dataset)
+        return {"train_loss": train_loss, "train_accuracy": train_accuracy}
 
     def _test(self):
         self.model.eval()
@@ -121,10 +130,11 @@ class TrainableModel(Trainable):
             # self.optimizer = self.ams_optimizer
             # for group in self.optimizer.param_groups:
             #     group['amsgrad'] = True
-        self._train_iteration()
-        metrics = self._test()
+        train_metrics = self._train_iteration()
+        test_metrics = self._test()
+        test_metrics.update(train_metrics)
         self.scheduler.step()
-        return metrics
+        return test_metrics
 
     def _save(self, checkpoint_dir):
         checkpoint_path = os.path.join(checkpoint_dir, "model_optimizer.pth")
@@ -174,9 +184,19 @@ def default_config():
     nmaxepochs = 200  # Maximum number of epochs
     use_hyperband = False
     lr = {'grid': [0.025, 0.05, 0.1, 0.2]}
-    lr_decay = {'factor': 0.2, 'period': None, 'milestones': [int(30 * nmaxepochs / 100), int(60 * nmaxepochs / 100), int(80 * nmaxepochs / 100)]}
+    # lr_decay = {'factor': 0.2, 'period': None, 'milestones': [int(30 * nmaxepochs / 100), int(60 * nmaxepochs / 100), int(80 * nmaxepochs / 100)]}
+    lr_decay = {'factor': 0.2, 'period': None, 'milestones': [int(50 * nmaxepochs / 100),
+                                                              int(55 * nmaxepochs / 100),
+                                                              int(60 * nmaxepochs / 100),
+                                                              int(65 * nmaxepochs / 100),
+                                                              int(70 * nmaxepochs / 100),
+                                                              int(75 * nmaxepochs / 100),
+                                                              int(80 * nmaxepochs / 100),
+                                                              int(85 * nmaxepochs / 100),
+                                                              int(90 * nmaxepochs / 100),
+                                                              int(95 * nmaxepochs / 100)]}
     # lr_decay = True  # Whether to use learning rate decay
-    lr_decay_period = 25  # Period of learning rate decay
+    # lr_decay_period = 25  # Period of learning rate decay
     weight_decay = False  # Whether to use weight decay
     ntrials = 20  # Number of trials for hyperparameter tuning
     batch = 128
@@ -194,7 +214,7 @@ def adam():
     lr = {'min': 1e-4, 'max': 1e-2, 'grid': None}
     # lr_decay = False  # Whether to use learning rate decay
     lr_decay = None # {'factor': 0.2, 'period': 25, 'milestones': [int(30 * nmaxepochs / 100), int(60 * nmaxepochs / 100), int(80 * nmaxepochs / 100)]}}
-    lr_decay_period = 25  # Period of learning rate decay
+    # lr_decay_period = 25  # Period of learning rate decay
     weight_decay = False  # Whether to use weight decay
     grace_period = 100
 
@@ -207,7 +227,7 @@ def sgd():
     lr_decay = {'factor': 0.2, 'period': 25, 'milestones': None}
     # lr_decay = True  # Whether to use learning rate decay
     # lr_decay_period = 25  # Period of learning rate decay
-    weight_decay = True  # Whether to use weight decay
+    weight_decay = False  # Whether to use weight decay
     nmaxepochs = 100
 
 
@@ -262,9 +282,9 @@ def run(model, args, result_dir, nmaxepochs, use_hyperband, grace_period):
     if use_hyperband:
         if grace_period == -1: grace_period = nmaxepochs
         ahb = AsyncHyperBandScheduler(reward_attr='mean_accuracy', max_t=nmaxepochs, grace_period=grace_period)
-        trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True)
+        trials = ray.tune.run(experiment, scheduler=ahb, raise_on_failed_trial=False, queue_trials=True, with_server=True)
     else:
-        trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True)
+        trials = ray.tune.run(experiment, raise_on_failed_trial=False, queue_trials=True, with_server=True)
     trials = [trial for trial in trials if trial.last_result is not None]
     accuracy = [trial.last_result.get('mean_accuracy', float('-inf')) for trial in trials]
     nparameters = trials[0].last_result['nparameters']

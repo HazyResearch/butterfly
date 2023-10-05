@@ -49,7 +49,8 @@ class TrainableModel(Trainable):
             # don't restore args, so that you can change temp etc when plugging into end model
             # TODO: implement an update_args() method for the models
             # self.model.permute = model_utils.get_model(checkpoint['model']['args'])
-            self.model.permute.load_state_dict(checkpoint['model']['state'])
+            self.model.permute.load_state_dict(checkpoint['model']['state']) # new version (e.g. best butterfly perm)
+            # self.model.permute.load_state_dict(checkpoint) # old version (e.g. best sinkhorn perm)
         self.model.to(self.device)
         self.nparameters = sum(param.nelement() for param in self.model.parameters())
 
@@ -344,7 +345,7 @@ def cifar10_experiment(dataset, model, args, optimizer, nmaxepochs, lr_decay, lr
     config={
         'optimizer': optimizer,
         # 'lr': sample_from(lambda spec: math.exp(random.uniform(math.log(2e-5), math.log(1e-2)) if optimizer == 'Adam'
-        'lr': 2e-4 if optimizer == 'Adam' else math.exp(random.uniform(math.log(0.025), math.log(0.2))),
+        'lr': 2e-4 if optimizer == 'Adam' else sample_from(lambda spec: math.exp(random.uniform(math.log(0.025), math.log(0.2)))),
         'plr': sample_from(lambda spec: math.exp(random.uniform(math.log(plr_min), math.log(plr_max)))),
         # 'lr_decay_factor': sample_from(lambda spec: random.choice([0.1, 0.2])) if lr_decay else 1.0,
         'lr_decay_factor': 0.2 if lr_decay else 1.0,

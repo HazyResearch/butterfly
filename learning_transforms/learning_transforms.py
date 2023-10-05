@@ -32,7 +32,7 @@ from training import PytorchTrainable, TrainableMatrixFactorization
 from target_matrix import named_target_matrix
 
 
-N_LBFGS_STEPS = 20
+N_LBFGS_STEPS = 50
 N_TRIALS_TO_POLISH = 16
 
 
@@ -84,8 +84,10 @@ class TrainableBP(TrainableMatrixFactorization):
             # param_type = 'regular' if complex else 'perm'
             param_type = config['param']
             self.model = nn.Sequential(
-                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=False),
-                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
+                # Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=False),
+                # Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
+                Butterfly(in_size=size, out_size=size, increasing_stride=False, **config['bfargs']),
+                Butterfly(in_size=size, out_size=size, increasing_stride=True, **config['bfargs']),
             )
         elif config['model'][0] == 'T' and (config['model'][1:]).isdigit():
             depth = int(config['model'][1:])
@@ -113,13 +115,14 @@ class TrainableBP(TrainableMatrixFactorization):
             param_type = config['param']
             self.model = nn.Sequential(
                 *[
-                Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
+                    # Butterfly(in_size=size, out_size=size, bias=False, complex=complex, param=param_type, increasing_stride=True)
+                    Butterfly(in_size=size, out_size=size, increasing_stride=True, **config['bfargs'])
                     for _ in range(depth)
                 ]
             )
         elif config['model'] == 'butterfly':
             # e = int(config['model'][4:])
-            self.model = Butterfly(in_size=size, out_size=size, complex=complex, **config['bfargs'])
+            self.model = Butterfly(in_size=size, out_size=size, **config['bfargs'])
         # elif config['model'][0:3] == 'ODO':
         #     if (config['model'][3:]).isdigit():
         #         width = int(config['model'][3:])
@@ -199,11 +202,12 @@ def default_config():
     complex = False  # Whether to use complex factorization or real factorization
     fixed_order = True  # Whether the order of the factors are fixed
     param = 'regular' # How to constrain the parameters
+    b = {}
     lr_min = 1e-4
     lr_max = 1e-2
     ntrials = 20  # Number of trials for hyperparameter tuning
     nsteps = 400  # Number of steps per epoch
-    nepochsvalid = 10  # Frequency of validation (polishing), in terms of epochs
+    nepochsvalid = 5  # Frequency of validation (polishing), in terms of epochs
     nmaxepochs = 200  # Maximum number of epochs
     result_dir = project_root + '/learning_transforms/results_new'  # Directory to store results
     cuda = torch.cuda.is_available()  # Whether to use GPU
@@ -235,7 +239,7 @@ def transform_experiment(model, target, size, complex, param, lr_min, lr_max, nt
     commit_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip().decode('utf-8')
     experiment = RayExperiment(
         # name=f'{commit_id}_{target}_factorization_{model}_{complex}_{size}_{param}',
-        name=f'{size}_{target}_{model}_{b_args}_c{complex}_{commit_id}',
+        name=f'{size}_{target}_{model}_{b_args}_c{complex}_{commit_id}_{param}',
         run=TrainableBP,
         local_dir=result_dir,
         num_samples=ntrials,
@@ -290,7 +294,7 @@ def run(model, target, size, result_dir, nmaxepochs, nthreads, cuda, b):
     with checkpoint_path.open('wb') as f:
         pickle.dump(trials, f)
 
-    ex.add_artifact(str(checkpoint_path))
+        ex.add_artifact(str(checkpoint_path))
     if not min(losses + polished_losses) == -sorted_polished_trials[0].last_result['polished_negative_loss']:
         print("BEST LOSS", min(losses + polished_losses), "BEST POLISHED", -sorted_polished_trials[0].last_result['polished_negative_loss'])
     return size, target, model, b, nparameters, niterations, -sorted_polished_trials[0].last_result['polished_negative_loss']

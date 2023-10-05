@@ -216,6 +216,8 @@ class TensorPermutation(nn.Module):
             self.perm_type = ButterflyPermutation
         elif method == 'identity':
             self.perm_type = IdentityPermutation
+        elif method == 'sinkhorn':
+            self.perm_type = SinkhornPermutation
         else:
             assert False, f"Permutation method {method} not supported."
 
@@ -573,6 +575,85 @@ class ButterflyPermutation(Permutation):
         # return sample_twiddle
 
 
+class SinkhornPermutation(Permutation):
+    def __init__(self, size, stochastic=False, temp=1.0, samples=1):
+        super().__init__()
+        self.size = size
+        self.stochastic = stochastic
+        self.samples = samples
+        if self.stochastic:
+            self.mean_temp = 1.0
+            self.sample_temp = temp
+            self.generate_fn = self.sample_soft_perm # add this attr for efficiency (avoid casing in every call to generate())
+        else:
+            self.mean_temp = temp
+            self.generate_fn = self.mean_perm
+            # no sample_temp; soft perm shouldn't be called in the non-stochastic case
+        self.hard_temp = 0.02
+        self.hard_iters = int(1./self.hard_temp)
+
+        # set sinkhorn iterations based on temperature
+        self.sinkhorn_iters = 20 + int(1./temp)
+        self.log_alpha = nn.Parameter(perm.add_gumbel_noise(torch.zeros(size, size)))
+        # nn.init.kaiming_uniform_(self.log_alpha)
+        self.log_alpha.is_perm_param = True
+        # TODO: test effect of random initialization
+
+    def generate_perm(self):
+        """ Generate (a batch of) permutations for training """
+        # TODO add the extra dimension even with mean for consistency
+        # return self.generate_fn(self)
+        return self.generate_fn()
+
+    def mean_perm(self):
+        """
+        Treat log_alpha as a soft permutation itself
+        Note that if l is viewed as a distribution over hard permutations, then
+          - sinkhorn(l, tau=1.0) is the mean of this distribution
+          - sinkhorn(l, tau->0) is the max likelihood of this distribution
+        """
+        return sinkhorn(self.log_alpha, temp=self.mean_temp, n_iters=self.sinkhorn_iters)
+
+    def mle_perm(self):
+        # TODO needs refactor
+        return sinkhorn(self.log_alpha, temp=self.hard_temp, n_iters=self.hard_iters)
+
+    def sample_perm(self, sample_shape=()):
+        if self.stochastic:
+            return self.sample_soft_perm()
+        else:
+            return self.sample_hard_perm()
+
+    def sample_soft_perm(self, sample_shape=()):
+        # TODO design: in case we want to sample differently for each elem of batch
+        # sample_shape = (self.samples, 1, 1)
+        sample_shape = (self.samples,)
+        log_alpha_noise = perm.add_gumbel_noise(self.log_alpha, sample_shape)
+        soft_perms = sinkhorn(log_alpha_noise, self.sample_temp, n_iters=self.sinkhorn_iters)
+        return soft_perms
+
+    def sample_hard_perm(self, sample_shape=()):
+        sample_shape = (self.samples,)
+        log_alpha_noise = perm.add_gumbel_noise(self.log_alpha, sample_shape)
+        soft_perms = sinkhorn(log_alpha_noise, self.hard_temp, n_iters=self.hard_iters)
+
+
+def sinkhorn(log_alpha, temp=1.0, n_iters=20):
+    """
+    Performs incomplete Sinkhorn normalization
+
+    log_alpha: a tensor with shape ending in (n, n)
+    n_iters: number of sinkhorn iterations (in practice, as little as 20
+    iterations are needed to achieve decent convergence for N~100)
+
+    Returns:
+    A 3D tensor of close-to-doubly-stochastic matrices over the last two dimensions
+    """
+    log_alpha = log_alpha / temp
+    for _ in range(n_iters):
+        log_alpha = log_alpha - torch.logsumexp(log_alpha, dim=-2, keepdim=True)
+        log_alpha = log_alpha - torch.logsumexp(log_alpha, dim=-1, keepdim=True)
+    return torch.exp(log_alpha)
 
 def PResNet18(pretrained=False, **kwargs):
     model = PResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
